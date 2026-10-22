@@ -59,13 +59,11 @@ Supabase's built-in email sender allows only a few sign-in emails per hour. That
 
 ---
 
-## Optional: natural voice for interview questions
-The app can read each interview question aloud. By default it uses Google's natural voice when that's set up, and the device's built-in voice otherwise. Kyle can switch voices or turn the voice off in Settings.
-1. In Google Cloud Console, create a project and link a billing account. Chirp 3 HD voices include 1 million free characters a month, far more than interview questions use. Set a budget alert (Billing > Budgets & alerts) of $1.
-2. Enable the **Cloud Text-to-Speech API** for the project.
-3. **APIs & Services > Credentials > Create credentials > API key.** Restrict the key to the Cloud Text-to-Speech API. Don't add a website restriction, since Supabase calls it from a server.
-4. In Supabase, add the secret `GOOGLE_TTS_API_KEY` with that key.
-5. Deploy the `speak` function from [`supabase/functions/speak/index.ts`](supabase/functions/speak/index.ts) the same way as the other two.
+## Natural voice for interview questions
+The app can read each interview question aloud. By default it uses a natural voice from Groq (Orpheus), with the same `GROQ_API_KEY` used for transcription, so no new account is needed. It costs about $22 per million characters, which works out to a dollar or two a semester. If the natural voice can't be reached, the app falls back to the device's built-in voice. Kyle can switch voices or turn the voice off in Settings.
+1. Deploy the `speak` function from [`supabase/functions/speak/index.ts`](supabase/functions/speak/index.ts) the same way as the other two, with "Verify JWT" off.
+2. If Groq asks you to accept terms for the Orpheus model, accept them once in the Groq console playground.
+3. Optional: to use Google Cloud Text-to-Speech instead, set the secrets `TTS_PROVIDER=google` and `GOOGLE_TTS_API_KEY`.
 
 ## Privacy settings to turn on
 - **Groq:** in the Groq console, open **Settings** > **Data Controls** and turn on **Zero Data Retention**, so recordings sent for transcription aren't kept.

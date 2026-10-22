@@ -1,7 +1,8 @@
 // Supabase Edge Function: speak
-// Turns an interview question into natural speech with Google Cloud Text-to-Speech (Chirp 3 HD voices).
-// Secrets required (Edge Functions > Secrets): GOOGLE_TTS_API_KEY
-// Google's free tier covers 1 million Chirp 3 HD characters a month; interview questions use a tiny fraction of that.
+// Turns an interview question into natural speech.
+// Default: Groq (Orpheus voices), using the GROQ_API_KEY secret already set for transcription.
+//   Orpheus accepts about 200 characters per request, so longer questions are split and returned as several clips.
+// Optional: set TTS_PROVIDER=google and GOOGLE_TTS_API_KEY to use Google Cloud Text-to-Speech (Chirp 3 HD) instead.
 // The function checks the caller's sign-in itself, so it works whether or not "Verify JWT" is on.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -34,17 +35,67 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({error: 'Use POST'}, 405);
   if (!(await signedInUser(req))) return json({error: 'Not signed in', code: 'session_expired'}, 401);
 
-  const key = (Deno.env.get('GOOGLE_TTS_API_KEY') || '').trim();
-  if (!key) return json({error: 'GOOGLE_TTS_API_KEY is not set in Edge Function secrets', code: 'tts_not_configured'}, 500);
-
   let body: {text?: unknown; voice?: unknown};
   try { body = await req.json(); } catch { return json({error: 'Invalid request body'}, 400); }
-  const text = String(body.text ?? '').trim();
+  const text = String(body.text ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return json({error: 'Missing text'}, 400);
   if (text.length > 1200) return json({error: 'Text too long'}, 413);
   const asked = String(body.voice ?? '');
-  const voice = /^en-US-Chirp3-HD-[A-Za-z]+$/.test(asked) ? asked : (Deno.env.get('GOOGLE_TTS_VOICE') || 'en-US-Chirp3-HD-Leda');
 
+  if ((Deno.env.get('TTS_PROVIDER') || '').toLowerCase() === 'google') return google(text, asked);
+  return groq(text, asked);
+});
+
+const GROQ_VOICES = new Set(['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy']);
+// split at sentence, then comma, then word boundaries so each piece stays under the model's limit
+function pieces(text: string, max = 190): string[] {
+  const out: string[] = [];
+  const push = (t: string) => { t = t.trim(); if (t) out.push(t); };
+  for (const sentence of text.split(/(?<=[.?!])\s+/)) {
+    if (sentence.length <= max) { push(sentence); continue; }
+    let cur = '';
+    for (const part of sentence.split(/(?<=[,;:])\s+|\s+/)) {
+      if (cur && (cur + ' ' + part).length > max) { push(cur); cur = part; } else cur = cur ? cur + ' ' + part : part;
+    }
+    push(cur);
+  }
+  // join short neighbours back together to keep the number of requests low
+  const merged: string[] = [];
+  for (const p of out) { const last = merged[merged.length - 1]; if (last && (last + ' ' + p).length <= max) merged[merged.length - 1] = last + ' ' + p; else merged.push(p); }
+  return merged;
+}
+function toBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+async function groq(text: string, asked: string) {
+  const key = (Deno.env.get('GROQ_API_KEY') || '').trim();
+  if (!key) return json({error: 'GROQ_API_KEY is not set in Edge Function secrets', code: 'tts_not_configured'}, 500);
+  const voice = GROQ_VOICES.has(asked) ? asked : (Deno.env.get('GROQ_TTS_VOICE') || 'hannah');
+  const model = Deno.env.get('GROQ_TTS_MODEL') || 'canopylabs/orpheus-v1-english';
+  const audios: string[] = [];
+  for (const input of pieces(text)) {
+    const res = await fetch('https://api.groq.com/openai/v1/audio/speech', {
+      method: 'POST',
+      headers: {Authorization: `Bearer ${key}`, 'Content-Type': 'application/json'},
+      body: JSON.stringify({model, input, voice, response_format: 'wav'}),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      console.error('Groq TTS error', res.status, data);
+      const msg = String((data && data.error && data.error.message) || 'Text-to-speech failed');
+      const code = res.status === 429 ? 'rate_limited' : /terms/i.test(msg) ? 'tts_terms' : 'tts_error';
+      return json({error: msg, code}, res.status === 429 ? 429 : 502);
+    }
+    audios.push(toBase64(await res.arrayBuffer()));
+  }
+  return json({audios, type: 'audio/wav', voice});
+}
+async function google(text: string, asked: string) {
+  const key = (Deno.env.get('GOOGLE_TTS_API_KEY') || '').trim();
+  if (!key) return json({error: 'GOOGLE_TTS_API_KEY is not set in Edge Function secrets', code: 'tts_not_configured'}, 500);
+  const voice = /^en-US-Chirp3-HD-[A-Za-z]+$/.test(asked) ? asked : (Deno.env.get('GOOGLE_TTS_VOICE') || 'en-US-Chirp3-HD-Leda');
   const res = await fetch('https://texttospeech.googleapis.com/v1/text:synthesize', {
     method: 'POST',
     headers: {'X-Goog-Api-Key': key, 'Content-Type': 'application/json'},
@@ -55,5 +106,5 @@ Deno.serve(async (req) => {
     console.error('Google TTS error', res.status, data);
     return json({error: (data && data.error && data.error.message) || 'Text-to-speech failed', code: res.status === 429 ? 'rate_limited' : 'tts_error'}, res.status === 429 ? 429 : 502);
   }
-  return json({audio: data.audioContent, voice});
-});
+  return json({audios: [data.audioContent], type: 'audio/mpeg', voice});
+}

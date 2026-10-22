@@ -873,13 +873,14 @@ const DICTATION_TIP = IS_MOBILE
   : /Windows/.test(UA) ? "Press Windows + H to start voice typing, then talk. Windows types as you speak."
   : "Use your device's dictation (the microphone on your keyboard) and start talking.";
 const NATURAL_VOICES = [
-  {id: 'en-US-Chirp3-HD-Leda', label: 'Leda (female)'},
-  {id: 'en-US-Chirp3-HD-Aoede', label: 'Aoede (female)'},
-  {id: 'en-US-Chirp3-HD-Kore', label: 'Kore (female)'},
-  {id: 'en-US-Chirp3-HD-Charon', label: 'Charon (male)'},
-  {id: 'en-US-Chirp3-HD-Puck', label: 'Puck (male)'},
-  {id: 'en-US-Chirp3-HD-Orus', label: 'Orus (male)'},
+  {id: 'hannah', label: 'Hannah (female)'},
+  {id: 'diana', label: 'Diana (female)'},
+  {id: 'autumn', label: 'Autumn (female)'},
+  {id: 'troy', label: 'Troy (male)'},
+  {id: 'austin', label: 'Austin (male)'},
+  {id: 'daniel', label: 'Daniel (male)'},
 ];
+const naturalVoiceName = () => { const v = lsGet('abg-voice-name'); return byId(NATURAL_VOICES, v) ? v : NATURAL_VOICES[0].id; };
 /* a tenth of a second of silence, used to unlock audio on phones */
 const SILENT_WAV = (() => { try { const n = 800, b = new Uint8Array(44 + n), v = new DataView(b.buffer); const w = (o, t) => { for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i); };
   w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true); b.fill(128, 44);
@@ -920,8 +921,15 @@ const VOICE = (() => {
   const canNatural = () => !!(audio && window.__platform && window.__platform.speech);
   const cache = new Map();
   let seq = 0, naturalState = 'unknown';
-  const settings = () => ({engine: lsGet('abg-voice-engine') === 'device' ? 'device' : 'natural', name: lsGet('abg-voice-name') || NATURAL_VOICES[0].id});
-  function stop(){ seq++; stopDevice(); if (audio) { try { audio.pause(); } catch (e) {} } }
+  const settings = () => ({engine: lsGet('abg-voice-engine') === 'device' ? 'device' : 'natural', name: naturalVoiceName()});
+  function stop(){ seq++; stopDevice(); if (audio) { audio.onended = null; try { audio.pause(); } catch (e) {} } }
+  /* plays the clips one after another; resolves once the first one starts */
+  function playClips(urls, my){
+    let i = 1;
+    audio.onended = () => { if (my !== seq || i >= urls.length) { audio.onended = null; return; } audio.src = urls[i++]; const p = audio.play(); if (p && p.catch) p.catch(() => {}); };
+    audio.src = urls[0];
+    return audio.play();
+  }
   /* returns which voice was used: 'natural', 'device', 'blocked' (the browser wants a tap first) or 'none' */
   async function say(text){
     if (!text) return 'none';
@@ -930,16 +938,15 @@ const VOICE = (() => {
     if (pref.engine === 'natural' && canNatural() && naturalState !== 'off') {
       try {
         const k = pref.name + '|' + text;
-        let url = cache.get(k);
-        if (!url) {
-          url = await window.__platform.speech.synth(text, pref.name);
-          cache.set(k, url);
-          if (cache.size > 40) { const old = cache.keys().next().value; try { URL.revokeObjectURL(cache.get(old)); } catch (e) {} cache.delete(old); }
+        let urls = cache.get(k);
+        if (!urls) {
+          urls = await window.__platform.speech.synth(text, pref.name);
+          cache.set(k, urls);
+          if (cache.size > 40) { const old = cache.keys().next().value; (cache.get(old) || []).forEach(u => { try { URL.revokeObjectURL(u); } catch (e) {} }); cache.delete(old); }
         }
         if (my !== seq) return 'none';
         naturalState = 'ok';
-        audio.src = url;
-        await audio.play();
+        await playClips(urls, my);
         return 'natural';
       } catch (e) {
         if (my !== seq) return 'none';
@@ -3021,14 +3028,14 @@ function SettingsView(){
   const [voiceOn, setVoiceOn] = useState(() => lsGet('abg-voice') !== 'off');
   const setVoice = on => { setVoiceOn(on); lsSet('abg-voice', on ? 'on' : 'off'); if (!on) VOICE.stop(); };
   const [engine, setEngine] = useState(() => lsGet('abg-voice-engine') === 'device' ? 'device' : 'natural');
-  const [vname, setVname] = useState(() => lsGet('abg-voice-name') || NATURAL_VOICES[0].id);
+  const [vname, setVname] = useState(naturalVoiceName);
   const [sampleNote, setSampleNote] = useState('');
   const chooseEngine = e => { setEngine(e); lsSet('abg-voice-engine', e); setSampleNote(''); };
   const chooseName = n => { setVname(n); lsSet('abg-voice-name', n); setSampleNote(''); };
   async function sample(){
     setSampleNote('');
     const used = await VOICE.say("Hi Kyle. Can you walk me through how you first met this student, and what stood out to you?");
-    if (engine === 'natural' && used === 'device') setSampleNote(VOICE.naturalState() === 'off' ? "Google's natural voice isn't set up yet, so this device's voice was used." : "Google's natural voice couldn't be reached just now, so this device's voice was used.");
+    if (engine === 'natural' && used === 'device') setSampleNote(VOICE.naturalState() === 'off' ? "The natural voice isn't set up yet, so this device's voice was used." : "The natural voice couldn't be reached just now, so this device's voice was used.");
     else if (used === 'blocked') setSampleNote('Tap the button again to hear it.');
   }
   return html`<div className="view settings">
@@ -3040,7 +3047,7 @@ function SettingsView(){
       ${VOICE.supported ? html`<label className="check voice-setting"><input id="set-voice" type="checkbox" checked=${voiceOn} onChange=${e => setVoice(e.target.checked)} /> <span><strong>Read interview questions aloud</strong><br /><span className="small muted">A voice asks each question as it appears, so the interview feels like a conversation. Only the question is read, and the voice stops when you press Record. These settings are saved on this device.</span></span></label>
         ${voiceOn ? html`<div className="field"><span className="field-label">Voice</span>
           <div className="pick-list">
-            <label className=${'pick' + (engine === 'natural' ? ' on' : '')}><input type="radio" name="set-engine" checked=${engine === 'natural'} onChange=${() => chooseEngine('natural')} /><span><strong>Natural voice</strong> (Google)<br /><span className="small muted">Sounds like a real person. Needs a moment to load each question. Questions are sent to Google to be spoken; nothing else is.</span></span></label>
+            <label className=${'pick' + (engine === 'natural' ? ' on' : '')}><input type="radio" name="set-engine" checked=${engine === 'natural'} onChange=${() => chooseEngine('natural')} /><span><strong>Natural voice</strong> (Groq)<br /><span className="small muted">Sounds like a real person. Takes a moment to load each question. Only the question text is sent to Groq to be spoken.</span></span></label>
             <label className=${'pick' + (engine === 'device' ? ' on' : '')}><input type="radio" name="set-engine" checked=${engine === 'device'} onChange=${() => chooseEngine('device')} /><span><strong>This device's voice</strong><br /><span className="small muted">Instant and works offline. Sounds more robotic on some devices.</span></span></label>
           </div></div>
           ${engine === 'natural' ? html`<${Field} label="Natural voice"><select id="set-voice-name" className="select" value=${vname} onChange=${e => chooseName(e.target.value)}>${NATURAL_VOICES.map(v => html`<option key=${v.id} value=${v.id}>${v.label}</option>`)}</select><//>` : null}
@@ -3057,7 +3064,7 @@ function SettingsView(){
         <li>Recordings are sent to Groq to be transcribed. Story text is sent to Anthropic's Claude API to choose interview questions, write impact stories, find evidence, answer searches, and draft audience versions, </li>
         <li>AI summaries and drafts are never approved automatically. Only approved stories appear in external exports and reports.</li>
         <li>Original transcripts are never overwritten. Corrections are saved alongside them.</li>
-        <li>Interview questions can be read aloud. With the natural voice, only the question text is sent to Google Cloud Text-to-Speech; with this device's voice, nothing is sent anywhere. Turn it on or off under Interview voice, or with the Voice button on each question.</li>
+        <li>Interview questions can be read aloud. With the natural voice, only the question text is sent to Groq to be spoken; with this device's voice, nothing is sent anywhere. Turn it on or off under Interview voice, or with the Voice button on each question.</li>
       </ul>
     </section>
     <section className="card">

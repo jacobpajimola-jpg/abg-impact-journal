@@ -204,12 +204,16 @@ export const downloads = Object.freeze({
 /* natural voice: the speak function returns MP3 audio for a short piece of text */
 export function makeSpeech(sb, url, anonKey){
   return Object.freeze({
+    /* returns one or more audio clip URLs to play in order */
     async synth(text, voice, signal){
       const r = await callFunction(sb, url, anonKey, 'speak', {text, voice}, signal);
-      if (!r.audio) throw {code: 'tts_error', message: 'No audio returned'};
-      const bin = atob(r.audio); const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      return URL.createObjectURL(new Blob([bytes], {type: 'audio/mpeg'}));
+      const list = Array.isArray(r.audios) ? r.audios : (r.audio ? [r.audio] : []);
+      if (!list.length) throw {code: 'tts_error', message: 'No audio returned'};
+      return list.map(b64 => {
+        const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return URL.createObjectURL(new Blob([bytes], {type: r.type || 'audio/wav'}));
+      });
     },
   });
 }
