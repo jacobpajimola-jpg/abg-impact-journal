@@ -1,7 +1,8 @@
 // Supabase Edge Function: ai
 // Calls the Claude API on the server so the API key never reaches the browser.
 // Secrets required (Edge Functions > Secrets): ANTHROPIC_API_KEY
-// Optional: ANTHROPIC_MODEL (default claude-sonnet-5-5), ANTHROPIC_MODEL_FAST (default claude-haiku-5-5)
+// Optional: ANTHROPIC_MODEL (default claude-sonnet-5-5), ANTHROPIC_MODEL_FAST (default claude-haiku-5-5),
+//   ANTHROPIC_WORKSPACE_ID (needed only when the API key isn't scoped to a workspace)
 // The function checks the caller's sign-in itself, so it works whether or not "Verify JWT" is on.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -53,16 +54,22 @@ Deno.serve(async (req) => {
   const system = 'You support Arts Bridging the Gap, a Los Angeles youth arts nonprofit, in documenting its impact accurately. Never invent facts, numbers, names or quotes.' +
     (body.json ? ' Your reply will be parsed by a program: reply with only the JSON value requested, with no Markdown fences or commentary.' : '');
 
+  const headers: Record<string, string> = {'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json'};
+  const workspace = (Deno.env.get('ANTHROPIC_WORKSPACE_ID') || '').trim();
+  if (workspace) headers['anthropic-workspace-id'] = workspace;
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
+    headers,
     body: JSON.stringify({model, max_tokens: quick ? 800 : 6000, system, messages}),
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const status = res.status === 429 || res.status === 529 ? 429 : 502;
     console.error('Claude API error', res.status, data);
-    return json({error: (data && data.error && data.error.message) || 'Claude API error', code: status === 429 ? 'rate_limited' : 'upstream_error'}, status);
+    const msg = String((data && data.error && data.error.message) || 'Claude API error');
+    // key, workspace, billing or model problems: something in setup needs fixing, not a connection issue
+    const setup = res.status === 401 || res.status === 403 || res.status === 404 || (res.status === 400 && /api key|workspace|credit|billing|model/i.test(msg));
+    return json({error: msg, code: status === 429 ? 'rate_limited' : setup ? 'config_error' : 'upstream_error'}, status);
   }
   const text = (data.content || []).filter((b: {type: string}) => b.type === 'text').map((b: {text: string}) => b.text).join('');
   return json({text, truncated: data.stop_reason === 'max_tokens', refused: data.stop_reason === 'refusal'});

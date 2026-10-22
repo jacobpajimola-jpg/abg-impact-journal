@@ -255,6 +255,7 @@ function aiErrorMessage(e){
     case 'not_granted': return "Claude isn't allowed for this app yet. Allow it when asked, or save the entry now and analyze it later.";
     case 'sampling_disabled': case 'not_declared': case 'capability_disabled': case 'capability_removed': return "Claude isn't available for this account. You can still save the entry and analyze it later.";
     case 'rate_limited': return "Claude is busy or you've reached a usage limit. Wait a few minutes, then try again.";
+    case 'config_error': return "Claude rejected the app's API key or settings, so this isn't a connection problem. Check the Claude API key and workspace in Supabase (Edge Functions, then Secrets), then try again. Your words are safe.";
     case 'session_expired': return "Your Claude session expired. Sign in again, then try again.";
     case 'prompt_too_large': return "This entry is too long to analyze in one go. Split it into two entries.";
     case 'invalid_json': return "Claude's answer came back in an unexpected shape. Try again.";
