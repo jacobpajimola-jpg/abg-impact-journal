@@ -159,13 +159,30 @@ async function callFunction(sb, url, anonKey, name, body, signal){
   }
   return payload || {};
 }
+/* models sometimes put raw line breaks or tabs inside JSON strings; escape them so the JSON parses */
+function repairJson(s){
+  let out = '', inStr = false, esc = false;
+  for (const ch of s) {
+    if (inStr) {
+      if (esc) { esc = false; out += ch; continue; }
+      if (ch === '\\') { esc = true; out += ch; continue; }
+      if (ch === '"') { inStr = false; out += ch; continue; }
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') { out += '\\r'; continue; }
+      if (ch === '\t') { out += '\\t'; continue; }
+      out += ch;
+    } else { if (ch === '"') inStr = true; out += ch; }
+  }
+  return out.replace(/,\s*([}\]])/g, '$1');
+}
 function parseJsonLoose(text){
   const t = String(text || '').trim();
   try { return JSON.parse(t); } catch (e) {}
+  try { return JSON.parse(repairJson(t)); } catch (e) {}
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) { try { return JSON.parse(fence[1]); } catch (e) {} }
+  if (fence) { try { return JSON.parse(fence[1]); } catch (e) {} try { return JSON.parse(repairJson(fence[1])); } catch (e) {} }
   const a = t.search(/[[{]/), b = Math.max(t.lastIndexOf('}'), t.lastIndexOf(']'));
-  if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) {} }
+  if (a >= 0 && b > a) { const mid = t.slice(a, b + 1); try { return JSON.parse(mid); } catch (e) {} try { return JSON.parse(repairJson(mid)); } catch (e) {} }
   throw {code: 'invalid_json', message: 'The reply was not valid JSON', text: t};
 }
 export function makeSample(sb, url, anonKey){

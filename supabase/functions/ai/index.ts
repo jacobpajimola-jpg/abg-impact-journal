@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers,
-    body: JSON.stringify({model, max_tokens: quick ? 800 : 6000, system, messages}),
+    body: JSON.stringify({model, max_tokens: quick ? 1000 : 12000, system, messages}),
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
@@ -72,5 +72,8 @@ Deno.serve(async (req) => {
     return json({error: msg, code: status === 429 ? 'rate_limited' : setup ? 'config_error' : 'upstream_error'}, status);
   }
   const text = (data.content || []).filter((b: {type: string}) => b.type === 'text').map((b: {text: string}) => b.text).join('');
+  // diagnostics only: note replies that were cut off or don't look like JSON (no student text is logged)
+  if (data.stop_reason === 'max_tokens') console.error('Claude reply hit max_tokens', {model, outputTokens: data.usage && data.usage.output_tokens});
+  else if (body.json && !/^\s*(```(json)?\s*)?[[{]/.test(text)) console.error('Claude reply did not start with JSON', {model, stop: data.stop_reason, length: text.length});
   return json({text, truncated: data.stop_reason === 'max_tokens', refused: data.stop_reason === 'refusal'});
 });

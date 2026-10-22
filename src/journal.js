@@ -445,7 +445,13 @@ async function runAnalysis({sample, mode, story, stories, items, whenHint, stude
     .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0, 80)
     .map(s => ({id: s.id, title: s.title || null, student: s.alias || null, program: s.program || null, community: s.community || null, summary: trunc(s.summary, 220) || null}));
   const prompt = analysisPrompt({mode, story, items, others, whenHint, memo: asStr(memo), studentName: studentName || (story && story.alias) || ''});
-  const raw = await sample.json(prompt, {modelTier: 'default', signal});
+  let raw;
+  try { raw = await sample.json(prompt, {modelTier: 'default', signal}); }
+  catch (e) {
+    if (!e || e.code !== 'invalid_json') throw e;
+    /* one automatic retry, with a firmer reminder about the format */
+    raw = await sample.json(prompt + '\n\nYour previous reply could not be read as JSON. Reply with only the JSON object, starting with { and ending with }. Keep "story" under 350 words.', {modelTier: 'default', signal});
+  }
   return normalizeAnalysis(raw, {items, storyIds: new Set(others.map(o => o.id))});
 }
 
