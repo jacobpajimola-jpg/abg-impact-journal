@@ -66,6 +66,10 @@ Supabase's built-in email sender allows only a few sign-in emails per hour. That
 - Get ABG's sign-off before recording real student stories, since audio and text go to Groq and Anthropic.
 
 ## Using it
+- **Student List:** list every student whose story is still only in Kyle's head (first name, roughly when, one line he remembers), one at a time or pasted as a list. Press **Record story** on any name to start their interview; it's marked recorded when the story is saved.
+- **Student metrics card:** every student story gets the same measurable fields (starting grade, years with ABG, sessions, artworks, school attendance, graduation, what they do now, and more). Claude fills in what the interview says, and each value is marked Reported, Estimate or Verified. Only people can mark Verified.
+- **Documented student outcomes** (Insights) adds the cards up across students, and each line says how many students it rests on.
+- **Student outcomes for the consulting team** (Impact Reports) downloads one CSV row per student with first names replaced by codes.
 - **Record a Story:** enter a first name, press **Record**, tell the story, press **Stop**. The recording is saved and transcribed into the text box, where it can be edited. Pause and Resume are available while recording. **Upload a recording** accepts voice memos up to 25 MB.
 - Answer the follow-up questions the same way, skip any, or finish at any time.
 - Review the Student Impact Report, then save it.

@@ -130,6 +130,25 @@ E. Long-term impact: what happened after; continued art or creative interests; i
 F. Community and stakeholder impact: impact beyond the student; classmates, teachers, families or community involved; encouraging others to join arts programming; lasting public artwork such as a mural; volunteers, schools, businesses or organizations involved; what resources or funding made it possible; what the story shows about investing in ABG; what more ABG could do with more resources.
 G. Supporting evidence: photos, artwork or video; teacher testimonials or feedback; attendance records or program documents; whether Kyle observed it directly or someone else reported it; a memorable quote; details or numbers still to verify; whether permission to share publicly is documented.`;
 const METRIC_SUGGESTIONS = ['Students served','Schools reached','Workshops completed','Murals or projects completed','Volunteer hours','Volunteers','Families attending events','Program sessions held'];
+/* the standard metrics card: the same measurable fields on every student story */
+const METRIC_FIELDS = [
+  {id:'startGrade', label:'Grade or age when they started', short:'Starting grade or age', type:'text', ph:'e.g. 7th grade, about 12'},
+  {id:'yearsWithAbg', label:'Years involved with ABG', short:'Years with ABG', type:'number', unit:'years'},
+  {id:'sessionsAttended', label:'Sessions or workshops attended', short:'Sessions attended', type:'number', unit:'sessions'},
+  {id:'programs', label:'ABG programs or projects', short:'Programs', type:'text', ph:'e.g. School mural program'},
+  {id:'artworksCompleted', label:'Murals or artworks completed', short:'Artworks completed', type:'number', unit:'works'},
+  {id:'continuedArt', label:'Kept making art after the program', short:'Kept making art', type:'choice', options:['Yes','No']},
+  {id:'schoolAttendance', label:'School attendance during or after ABG', short:'School attendance', type:'choice', options:['Improved','Stayed about the same','Declined']},
+  {id:'graduated', label:'Graduated high school', short:'Graduated high school', type:'choice', options:['Yes','No','Not yet (still in school)']},
+  {id:'nextStep', label:'College, training or creative work afterward', short:'College or creative path', type:'text', ph:'e.g. community college art classes'},
+  {id:'returnedToAbg', label:'Came back to ABG (volunteer, mentor or alum)', short:'Came back to ABG', type:'choice', options:['Yes','No']},
+  {id:'currentStatus', label:'What they are doing now', short:'Doing now', type:'text', ph:'e.g. high school senior'},
+];
+const METRIC_STATUS = [
+  {id:'verified', label:'Verified', tone:'good'},
+  {id:'reported', label:'Reported', tone:'blue'},
+  {id:'estimate', label:'Estimate', tone:'warn'},
+];
 
 /* ================= utilities ================= */
 const byId = (list, id) => list.find(x => x.id === id);
@@ -159,6 +178,38 @@ function asArr(v){ return Array.isArray(v) ? v : []; }
 function pickEnum(v, list, dflt){ return list.some(x => x.id === v) ? v : dflt; }
 function yn(v){ return v === true || v === 'yes' ? 'yes' : (v === false || v === 'no' ? 'no' : 'unknown'); }
 function cleanIso(v){ const s = asStr(v); return /^\d{4}(-\d{2}(-\d{2})?)?$/.test(s) ? s : ''; }
+function matchOption(f, v){
+  let k = norm(v); if (k === 'true') k = 'yes'; if (k === 'false') k = 'no';
+  if (!k) return '';
+  return f.options.find(o => norm(o) === k) || f.options.find(o => norm(o).startsWith(k + ' ')) || f.options.find(o => k.startsWith(norm(o) + ' ') && norm(o).length > 3) || '';
+}
+/* cleans one metrics-card map; aiOnly drops "verified", which only ABG staff may set */
+function cleanMetrics(raw, aiOnly){
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const out = {};
+  METRIC_FIELDS.forEach(f => {
+    let x = r[f.id]; if (x == null) return;
+    if (typeof x !== 'object') x = {value: x};
+    let v = asStr(x.value).replace(/^(null|unknown)$/i, '');
+    if (!v) return;
+    let status = pickEnum(x.status, METRIC_STATUS, 'reported');
+    if (aiOnly && status === 'verified') status = 'reported';
+    if (f.type === 'number') { const mm = v.replace(/,/g, '').match(/-?\d+(\.\d+)?/); const n = mm ? toNum(mm[0]) : null; if (aiOnly && n == null) return; if (n != null && (aiOnly || /^\s*(about|around|roughly|approx\.?|~)?\s*-?[\d.,]+\s*\+?\s*[a-z]*\s*$/i.test(v))) v = String(n); }
+    if (f.type === 'choice') { const o = matchOption(f, v); if (!o) return; v = o; }
+    const m = {value: v, status: status};
+    if (x._new) m._new = true;
+    out[f.id] = m;
+  });
+  return out;
+}
+function metricVal(s, id){ const m = ((s && s.metrics) || {})[id]; const v = m && asStr(m.value); return v ? {value: v, status: pickEnum(m.status, METRIC_STATUS, 'reported')} : null; }
+function metricsKnown(s){ return METRIC_FIELDS.filter(f => metricVal(s, f.id)).length; }
+function isStudentStory(s){ return !!(s && (s.studentId || asStr(s.alias))); }
+function fmtMetric(f, v){
+  if (f.type !== 'number') return v;
+  const n = toNum(v); if (n == null) return v;
+  return fmtNum(n) + (f.unit ? ' ' + (n === 1 ? f.unit.replace(/s$/, '') : f.unit) : '');
+}
 function titleFromText(t){ const w = String(t || '').trim().split(/\s+/).slice(0, 8).join(' '); return w ? w + '…' : 'Untitled story'; }
 
 /* story helpers */
@@ -191,7 +242,7 @@ function sortMilestones(ms){
 function blankStory(me){
   const t = nowISO();
   return { id: uid('s'), title: '', summary: '', story: '', alias: '', studentId: null, publicName: '', overview: {ageOrGrade: '', background: '', involvementDate: ''},
-    missingMetrics: [], materials: [], stakeholderWhy: '', period: 'recent', eventDate: {text: '', iso: '', approximate: false}, program: '', community: '',
+    missingMetrics: [], metrics: {}, materials: [], stakeholderWhy: '', period: 'recent', eventDate: {text: '', iso: '', approximate: false}, program: '', community: '',
     categories: [], themes: [], audiences: [], takeaways: [], structure: {}, evidence: [], quotes: [], milestones: [], followUps: [], links: [], drafts: [],
     status: 'draft', privacy: {minor: 'unknown', identifying: 'unknown', permission: 'unknown', external: 'unknown', redact: 'unknown'},
     entryCount: 1, createdAt: t, updatedAt: t, createdBy: (me && me.id) || null, updatedBy: (me && me.id) || null, analysis: {state: 'none'} };
@@ -224,13 +275,15 @@ function dbErrorMessage(e){
 /* ================= AI prompts ================= */
 const ABG_CONTEXT = "Arts Bridging the Gap (ABG) is a Los Angeles nonprofit that serves youth from under-resourced communities through arts education, creative programming and community art projects. Kyle is its Executive Director.";
 
-function interviewPrompt({name, turns, mode, story, asked, target}){
+function interviewPrompt({name, turns, mode, story, asked, target, memo}){
   const convo = turns.map(t => 'Q (' + t.kind + '): ' + t.q + '\nA: ' + (t.status === 'skipped' ? '[Kyle skipped this question]' : t.a)).join('\n\n');
-  const existing = story ? {summary: story.summary, timeline: (story.milestones || []).map(m => (fmtEventDate(m.date) || 'undated') + ': ' + m.label), missingMetrics: (story.missingMetrics || []).map(m => m.metric)} : null;
+  const existing = story ? {summary: story.summary, timeline: (story.milestones || []).map(m => (fmtEventDate(m.date) || 'undated') + ': ' + m.label), missingMetrics: (story.missingMetrics || []).map(m => m.metric),
+    metricsCardAlreadyKnown: METRIC_FIELDS.filter(f => metricVal(story, f.id)).map(f => f.label + ': ' + metricVal(story, f.id).value)} : null;
   return `${ABG_CONTEXT}
 
 You are a thoughtful interviewer helping Kyle tell the story of a student named ${name}. Story first, evidence second, stakeholder value third.
 ${mode === 'update' ? 'This is an UPDATE interview about a story already in the journal. Focus on what is new since it was recorded. Existing record: ' + JSON.stringify(existing) : ''}
+${memo ? "Kyle's one-line note about " + name + ' from his student list: "' + memo + '". Treat it as a starting point he wants to cover, not as confirmed detail.' : ''}
 
 Choose the single best NEXT follow-up question.
 
@@ -242,6 +295,7 @@ How to choose:
 - Ask only for background that helps explain ABG's impact. Never ask for a last name, address, or other identifying details.
 - When choosing metric questions, think about who the story could serve: schools (attendance, classroom engagement, confidence, communication, retention, access to arts), donors (students served, reach, outcomes, continued participation, what support made possible), corporate partners (volunteer involvement and hours, completed projects), community groups (youth and family engagement, murals, partnerships), artists and volunteers (collaboration, artistic development).
 - Use ${name}'s first name naturally. Warm and conversational, not formal. One question, under 35 words, no preamble or praise.
+- Every student story gets the same metrics card: ${METRIC_FIELDS.map(f => f.label).join('; ')}. In the metrics stage, ask about one or two card items Kyle hasn't covered yet, in a natural way ("roughly", "if you know"). "I don't know" is a fine answer; never press.
 
 Question bank to draw from (adapt to the conversation, never read it verbatim):
 ${QUESTION_BANK}
@@ -261,6 +315,7 @@ const ANALYSIS_SHAPE = `{
   "entrySummary": "1 or 2 sentences on what this specific interview adds",
   "alias": "the student's first name as given, or null",
   "overview": {"ageOrGrade": "approximate age or grade when involved, or null", "background": "1 or 2 sentences of background relevant to ABG's impact, or null", "involvementDate": "when they were involved with ABG, in Kyle's words, or null"},
+  "metricsCard": {"field id": {"value": "the value; for choice fields one of the listed options exactly", "status": "reported | estimate"}},
   "isMinor": "yes | no | unknown",
   "period": "past (months or years ago) | recent",
   "eventDate": {"text": "when the original experience happened, in Kyle's words, or null", "iso": "YYYY, YYYY-MM or YYYY-MM-DD, or null", "approximate": true},
@@ -282,13 +337,14 @@ const ANALYSIS_SHAPE = `{
   "containsIdentifying": false
 }`;
 
-function analysisPrompt({mode, story, items, others, whenHint, studentName}){
+function analysisPrompt({mode, story, items, others, whenHint, studentName, memo}){
   const entriesText = items.map((it, i) => '--- Entry ' + (i + 1) + ' (recorded ' + (fmtDate(it.recordedAt) || 'today') + ') ---\n' + it.text).join('\n\n');
   const existing = story ? {
     title: story.title, story: story.story || story.summary, student: story.alias || null, overview: story.overview || {}, when: fmtEventDate(story.eventDate) || null,
     program: story.program || null, community: story.community || null,
     timeline: (story.milestones || []).map(m => ({when: fmtEventDate(m.date) || null, what: m.label, phase: m.phase})),
     evidence: (story.evidence || []).map(e => e.statement), missingMetrics: (story.missingMetrics || []).map(m => m.metric),
+    metricsCard: Object.fromEntries(METRIC_FIELDS.filter(f => metricVal(story, f.id)).map(f => [f.id, metricVal(story, f.id)])),
     questionsAlreadyAsked: (story.followUps || []).filter(f => f.kind === 'question').map(f => f.question),
   } : null;
   return [
@@ -296,6 +352,7 @@ function analysisPrompt({mode, story, items, others, whenHint, studentName}){
     studentName ? "The student's first name is " + studentName + ". Use only the first name." : '',
     mode === 'update' ? "This is an UPDATE to a story already in the journal. Treat the existing record as true context and keep its facts.\nEXISTING RECORD:\n" + JSON.stringify(existing) : '',
     whenHint ? "Kyle says the experience happened: " + whenHint : '',
+    memo ? "Kyle's one-line note from his student list (context only, not a source for evidence excerpts): " + memo : '',
     `RULES
 - Story first, evidence second, stakeholder value third. Preserve the human element; don't reduce the story to statistics.
 - Use only what the entries${mode === 'update' ? ' and existing record' : ''} say. Never invent names, numbers, dates, outcomes, percentages, survey results or quotes. Use null or an empty list when information isn't there.
@@ -306,10 +363,11 @@ function analysisPrompt({mode, story, items, others, whenHint, studentName}){
 - Every evidence item needs "excerpt": a short passage copied word for word from the entries that supports it, and "basis": who observed or reported it.
 - Evidence status: "reported" for numbers or facts Kyle states plainly; "estimate" for approximate numbers ("about", "around", "maybe"); "qualitative" for non-numeric observations; "unverified" for secondhand or uncertain claims; "future" for hoped-for or expected outcomes. Never use "verified": only ABG staff verify evidence, against records.
 - Numeric evidence: put the number in "value" only when Kyle states it.
+- metricsCard: the standard metrics card, filled in the same way for every student story. Fields: ${METRIC_FIELDS.map(f => f.id + ' (' + f.label + (f.type === 'number' ? ', a number only' : f.type === 'choice' ? ', one of: ' + f.options.join(' / ') : ', short text') + ')').join('; ')}. Include a field only when the entries actually say it, and leave the rest out (they show as unknown). Status "reported" when Kyle states it plainly, "estimate" when approximate ("about", "maybe", "I think"). Never "verified". Don't infer attendance from participation, or graduation from age. If the entries aren't about one student, use an empty object.
 - missingMetrics: information that would make the story more credible for stakeholders but isn't documented yet (attendance records, program size, teacher feedback...). Only ones relevant to this story.
 - Quotes: "exact" for words that appear word for word in the entries and were clearly said, including Kyle's own quotable statements (speaker "Narrator"); "remembered" when Kyle recalls what someone said; "paraphrase" for statements put in other words. Copy exact and remembered quotes exactly as they appear. Never create a quote.
 - Milestones fill the student's timeline. Use phase "future" only for possible developments worth checking on, with confirmed false. Never present anticipated impact as accomplished.`,
-    mode === 'update' ? `FOR THIS UPDATE: "story" and "summary" are the full updated versions combining the existing record with the new information. "takeaways" and "stakeholders" cover the whole story. "missingMetrics" is the complete current list. "evidence", "quotes", "milestones", "materials" and "recommendedFollowUps" contain ONLY new items from the new entries. In "structure", give updated text only for parts the new entries change and null for the rest. "eventDate" is when the new development happened.` : '',
+    mode === 'update' ? `FOR THIS UPDATE: "story" and "summary" are the full updated versions combining the existing record with the new information. "takeaways" and "stakeholders" cover the whole story. "missingMetrics" is the complete current list. "metricsCard" contains only fields the new entries state or change. "evidence", "quotes", "milestones", "materials" and "recommendedFollowUps" contain ONLY new items from the new entries. In "structure", give updated text only for parts the new entries change and null for the rest. "eventDate" is when the new development happened.` : '',
     `ID LISTS
 categories: ${CATEGORIES.map(c => c.id + ' (' + c.label + ')').join(', ')}
 themes: ${THEMES.map(t => t.id + ' (' + t.label + ')').join(', ')}
@@ -376,15 +434,16 @@ function normalizeAnalysis(raw, ctx){
     audiences: uniq(asArr(st.primary).concat(asArr(r.audiences)).filter(id => byId(AUDIENCES, id))),
     stakeholderWhy: nul(st.why),
     evidence, quotes, milestones, followUps, missingMetrics, materials, links,
+    metrics: cleanMetrics(r.metricsCard, true),
     containsIdentifying: r.containsIdentifying === true,
   };
 }
 
-async function runAnalysis({sample, mode, story, stories, items, whenHint, studentName, signal}){
+async function runAnalysis({sample, mode, story, stories, items, whenHint, studentName, memo, signal}){
   const others = stories.filter(s => !story || s.id !== story.id)
     .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0, 80)
     .map(s => ({id: s.id, title: s.title || null, student: s.alias || null, program: s.program || null, community: s.community || null, summary: trunc(s.summary, 220) || null}));
-  const prompt = analysisPrompt({mode, story, items, others, whenHint, studentName: studentName || (story && story.alias) || ''});
+  const prompt = analysisPrompt({mode, story, items, others, whenHint, memo: asStr(memo), studentName: studentName || (story && story.alias) || ''});
   const raw = await sample.json(prompt, {modelTier: 'default', signal});
   return normalizeAnalysis(raw, {items, storyIds: new Set(others.map(o => o.id))});
 }
@@ -463,6 +522,8 @@ function reportPrompt(stories, metrics){
   const M = metrics.map((m, i) => ({ref: 'M' + (i + 1), label: m.label, value: m.value, unit: m.unit || null, period: m.period || null, source: m.source || null}));
   const themeCounts = THEMES.map(t => ({theme: t.label, storiesMentioning: stories.filter(s => (s.themes || []).includes(t.id)).length})).filter(x => x.storiesMentioning > 0);
   const audienceCounts = AUDIENCES.map(a => ({audience: a.label, approvedStoriesRelevant: approved.filter(s => (s.audiences || []).includes(a.id)).length}));
+  const profiles = studentProfiles(stories);
+  const cardSummary = outcomeLines(profiles).filter(l => l.n > 0 && l.f.type !== 'text').map(l => ({field: l.f.label, finding: l.text, studentsWithAValue: l.n, studentsDocumented: l.N, verified: l.counts.verified, reported: l.counts.reported, estimated: l.counts.estimate}));
   const totals = {storiesRecorded: stories.length, historicalStories: stories.filter(s => s.period === 'past').length, recentStories: stories.filter(s => s.period !== 'past').length, storiesWithUpdates: stories.filter(isOngoing).length, approvedForExternalUse: approved.length};
   const gaps = {
     storiesNeedingInformation: stories.filter(needsInfo).length,
@@ -491,6 +552,7 @@ Rules:
 - Never add together numbers from different stories; several stories can describe the same student or program.
 - Describe outcomes as observed or reported, not as caused by ABG unless a story says so. Pending timeline items are not accomplishments.
 - Refer to students only by the name given in each story's "student" field.
+- Student metrics card summaries describe only the students documented in this journal, drawn from all stories (approved or not) with no names. Always say how many students a finding rests on (e.g. "4 of the 6 students documented") and whether the values are verified, reported or estimated. Never present them as rates for all ABG students. Use them in sections 1, 5 and 7; in section 4 only if every value behind a finding is verified.
 - Cite stories as [S1], [S2] after each claim drawn from them. Use only approvedQuotes, word for word, with the speaker.
 - 700 to 1,000 words. Start with "# ABG Impact Report" and a one-line note that this is a draft for review.
 
@@ -499,6 +561,7 @@ Theme counts (all stories): ${JSON.stringify(themeCounts)}
 Approved stories relevant to each audience: ${JSON.stringify(audienceCounts)}
 Documentation gaps (all stories): ${JSON.stringify(gaps)}
 Verified program metrics: ${JSON.stringify(M)}
+Student metrics card summaries: ${JSON.stringify(cardSummary)}
 Approved stories: [${S.join(',')}]`;
 }
 
@@ -511,7 +574,7 @@ function newStoryFromAnalysis(a, opts){
     eventDate: {text: a.eventDate.text || opts.whenHint || '', iso: a.eventDate.iso, approximate: !!(opts.approx || a.eventDate.approximate)},
     program: a.program, community: a.community, categories: a.categories, themes: a.themes, audiences: a.audiences, stakeholderWhy: a.stakeholderWhy,
     takeaways: a.takeaways, structure: a.structure, evidence: a.evidence, missingMetrics: a.missingMetrics, quotes: a.quotes, milestones: a.milestones,
-    materials: a.materials, followUps: a.followUps, analysis: {state: 'done', at: nowISO()},
+    materials: a.materials, followUps: a.followUps, metrics: a.metrics || {}, analysis: {state: 'done', at: nowISO()},
   });
   s._suggest = a.links;
   s.privacy = {minor: a.isMinor, identifying: a.containsIdentifying ? 'yes' : 'unknown', permission: 'unknown', external: 'unknown', redact: a.containsIdentifying ? 'yes' : 'unknown'};
@@ -545,6 +608,8 @@ function mergeUpdate(base, a){
   d.materials = (d.materials || []).concat(a.materials.map(mark));
   const seen = new Set((d.followUps || []).map(f => norm(f.question)));
   d.followUps = (d.followUps || []).concat(a.followUps.filter(f => !seen.has(norm(f.question))).map(mark));
+  d.metrics = Object.assign({}, d.metrics || {});
+  Object.keys(a.metrics || {}).forEach(k => { const cur = d.metrics[k]; if (cur && cur.status === 'verified' && asStr(cur.value)) return; if (cur && norm(cur.value) === norm(a.metrics[k].value)) return; d.metrics[k] = Object.assign({}, a.metrics[k], {_new: true}); });
   if (d.status === 'approved') { d.status = 'needs_verification'; d._wasApproved = true; }
   d.analysis = {state: 'done', at: nowISO()};
   return d;
@@ -574,6 +639,7 @@ function finalizeStory(d, me){
   s.missingMetrics = s.missingMetrics.filter(m => asStr(m.metric));
   s.materials = s.materials.filter(m => asStr(m.description));
   s.takeaways = (s.takeaways || []).map(t => asStr(t)).filter(Boolean);
+  s.metrics = cleanMetrics(s.metrics, false); Object.keys(s.metrics).forEach(k => { delete s.metrics[k]._new; });
   s.eventDate = Object.assign({text: '', iso: '', approximate: false}, s.eventDate || {});
   s.eventDate.iso = cleanIso(s.eventDate.iso);
   s.alias = asStr(s.alias); s.publicName = asStr(s.publicName);
@@ -599,7 +665,7 @@ function storiesCSV(stories){
   return toCSV([
     ['Story ID', s => s.id], ['Student record ID', s => s.studentId], ['Student first name', s => s.alias], ['Public alias', s => s.publicName], ['Title', s => s.title], ['Status', s => labelOf(STATUSES, s.status)], ['Type', s => s.period === 'past' ? 'Historical' : 'Recent'],
     ['When it happened', s => fmtEventDate(s.eventDate)], ['Sort date', s => s.eventDate && s.eventDate.iso], ['Approximate date', s => s.eventDate && s.eventDate.approximate ? 'Yes' : 'No'],
-    ['Age or grade', s => (s.overview || {}).ageOrGrade], ['Program', s => s.program], ['School or community', s => s.community], ['Summary', s => s.summary], ['Impact story', s => s.story],
+    ['Age or grade', s => (s.overview || {}).ageOrGrade], ['Program', s => s.program], ['Metrics known', s => isStudentStory(s) ? metricsKnown(s) + ' of ' + METRIC_FIELDS.length : ''], ['School or community', s => s.community], ['Summary', s => s.summary], ['Impact story', s => s.story],
     ['Key takeaways', s => (s.takeaways || []).join(' | ')], ['Impact categories', s => lbls(CATEGORIES, s.categories)], ['Themes', s => lbls(THEMES, s.themes)], ['Useful for', s => lbls(AUDIENCES, s.audiences)], ['Why it matters to them', s => s.stakeholderWhy],
     ['Journal entries', s => s.entryCount || 1], ['Evidence items', s => (s.evidence || []).length], ['Verified evidence', s => evidenceCounts(s).verified || 0], ['Missing metrics', s => (s.missingMetrics || []).map(m => m.metric).join(' | ')],
     ['Open follow-ups', s => openQuestions(s).length + openTasks(s).length],
@@ -644,6 +710,97 @@ function metricsCSV(metrics, stories){
     ['Metric', m => m.label], ['Value', m => m.value], ['Unit', m => m.unit], ['Period', m => m.period], ['Source', m => m.source], ['Notes', m => m.notes],
     ['Related story', m => { const s = stories.find(x => x.id === m.storyId); return s ? s.title : ''; }], ['Entered', m => m.createdAt],
   ], metrics);
+}
+/* ---------- student metrics roll-up ---------- */
+const MS_RANK = {verified: 3, reported: 2, estimate: 1};
+/* one profile per student (stories grouped by student record), with the best-supported value for each card field */
+function studentProfiles(stories){
+  const groups = new Map();
+  stories.filter(isStudentStory).forEach(s => { const k = s.studentId || ('story:' + s.id); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); });
+  const out = [];
+  groups.forEach((list, key) => {
+    const ss = list.slice().sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+    const latest = ss.slice().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))[0];
+    const metrics = {};
+    METRIC_FIELDS.forEach(f => {
+      let best = null;
+      ss.forEach(s => { const m = metricVal(s, f.id); if (!m) return; const r = MS_RANK[m.status] || 0; if (!best || r > best.r || (r === best.r && (s.updatedAt || '') > (best.at || ''))) best = {value: m.value, status: m.status, storyId: s.id, r, at: s.updatedAt || ''}; });
+      if (best) metrics[f.id] = {value: best.value, status: best.status, storyId: best.storyId};
+    });
+    out.push({key, studentId: list[0].studentId || null, name: asStr(latest.alias), stories: ss, latest, metrics, first: ss[0].createdAt || ''});
+  });
+  return out.sort((a, b) => a.first.localeCompare(b.first) || a.key.localeCompare(b.key));
+}
+function statusCounts(vals){ const c = {verified: 0, reported: 0, estimate: 0}; vals.forEach(v => { c[v.status] = (c[v.status] || 0) + 1; }); return c; }
+function round1(n){ return Math.round(n * 10) / 10; }
+/* one sourced line per card field: what the documented students show, and how many it rests on */
+function outcomeLines(profiles){
+  const N = profiles.length;
+  return METRIC_FIELDS.map(f => {
+    const vals = profiles.filter(p => p.metrics[f.id]).map(p => Object.assign({p}, p.metrics[f.id]));
+    const line = {f, N, vals, n: vals.length, counts: statusCounts(vals), text: '', parts: []};
+    if (!vals.length) return line;
+    if (f.type === 'number') {
+      const nums = vals.map(v => toNum(v.value)).filter(x => x != null);
+      if (!nums.length) { line.text = 'Recorded for ' + vals.length + ', but not as numbers.'; return line; }
+      const avg = round1(nums.reduce((a, b) => a + b, 0) / nums.length), lo = Math.min.apply(null, nums), hi = Math.max.apply(null, nums);
+      line.text = 'Average ' + fmtMetric(f, String(avg)) + ' per student' + (lo !== hi ? ' (range ' + fmtNum(lo) + ' to ' + fmtNum(hi) + ')' : '') + '.';
+      line.parts = [['Average', fmtNum(avg)], ['Lowest', fmtNum(lo)], ['Highest', fmtNum(hi)]];
+    } else if (f.type === 'choice') {
+      const cnt = f.options.map(o => [o, vals.filter(v => v.value === o).length]);
+      line.parts = cnt;
+      line.text = cnt.filter(c => c[1] > 0).map(c => c[0] + ': ' + c[1]).join(' · ') + ' (of ' + vals.length + ' with a known answer)';
+    } else {
+      const m = new Map(); vals.forEach(v => { const k = norm(v.value); if (!m.has(k)) m.set(k, [v.value, 0]); m.get(k)[1]++; });
+      const top = Array.from(m.values()).sort((a, b) => b[1] - a[1]);
+      line.text = top.slice(0, 3).map(t => trunc(t[0], 40) + (t[1] > 1 ? ' (' + t[1] + ')' : '')).join(' · ') + (top.length > 3 ? ' · and ' + (top.length - 3) + ' more' : '');
+    }
+    return line;
+  });
+}
+function basisText(line){
+  const c = line.counts;
+  const st = [c.verified ? c.verified + ' verified' : '', c.reported ? c.reported + ' reported' : '', c.estimate ? c.estimate + ' estimated' : ''].filter(Boolean).join(', ');
+  return 'Based on ' + line.n + ' of ' + line.N + ' documented student' + (line.N === 1 ? '' : 's') + (st ? ' · ' + st : '');
+}
+/* names removed: every known student first name becomes that student's code, or "another student" */
+function teamCSV(stories, students){
+  const profiles = studentProfiles(stories);
+  const codeOf = new Map(); profiles.forEach((p, i) => codeOf.set(p.key, 'Student ' + String(i + 1).padStart(2, '0')));
+  const nameMap = new Map();
+  profiles.forEach(p => uniq(p.stories.map(s => asStr(s.alias))).forEach(n => { if (n) nameMap.set(norm(n), {name: n, code: codeOf.get(p.key)}); }));
+  (students || []).forEach(st => { const n = asStr(st.firstName); if (n && !nameMap.has(norm(n))) nameMap.set(norm(n), {name: n, code: 'another student'}); });
+  const names = Array.from(nameMap.values()).sort((a, b) => b.name.length - a.name.length);
+  const scrub = (t, own) => { let x = String(t || ''); if (own) own.forEach(n => { x = scrubName(x, n, own.code); }); names.forEach(n => { x = scrubName(x, n.name, n.code); }); return x; };
+  const rows = profiles.map(p => {
+    const own = uniq(p.stories.map(s => asStr(s.alias))); own.code = codeOf.get(p.key);
+    const sc = t => scrub(t, own);
+    const all = k => uniq([].concat.apply([], p.stories.map(s => s[k] || [])));
+    const ev = [].concat.apply([], p.stories.map(s => s.evidence || []));
+    const best = ['approved', 'internal', 'needs_verification', 'draft'].find(st => p.stories.some(s => s.status === st)) || 'draft';
+    const minor = p.stories.some(s => (s.privacy || {}).minor === 'yes') ? 'yes' : p.stories.some(s => (s.privacy || {}).minor === 'no') ? 'no' : 'unknown';
+    return {p, code: own.code, sc, all, ev, best, minor};
+  });
+  const cols = [
+    ['Student code', r => r.code], ['Stories', r => r.p.stories.length], ['Story titles', r => r.p.stories.map(s => r.sc(s.title)).join(' | ')],
+    ['Type', r => uniq(r.p.stories.map(s => s.period === 'past' ? 'Historical' : 'Recent')).join(' and ')],
+    ['When', r => uniq(r.p.stories.map(s => fmtEventDate(s.eventDate))).join('; ')],
+    ['ABG program', r => uniq(r.p.stories.map(s => s.program)).join('; ')], ['School or community', r => uniq(r.p.stories.map(s => s.community)).join('; ')],
+    ['Metrics known', r => Object.keys(r.p.metrics).length + ' of ' + METRIC_FIELDS.length],
+  ];
+  METRIC_FIELDS.forEach(f => {
+    cols.push([f.short || f.label, r => r.p.metrics[f.id] ? r.sc(r.p.metrics[f.id].value) : 'Unknown']);
+    cols.push([(f.short || f.label) + ' (status)', r => r.p.metrics[f.id] ? labelOf(METRIC_STATUS, r.p.metrics[f.id].status) : '']);
+  });
+  cols.push(
+    ['Themes', r => lbls(THEMES, r.all('themes'))], ['Impact categories', r => lbls(CATEGORIES, r.all('categories'))], ['Useful for', r => lbls(AUDIENCES, r.all('audiences'))],
+    ['Evidence items', r => r.ev.length], ['Verified evidence', r => r.ev.filter(e => e.status === 'verified').length], ['Estimated or unverified evidence', r => r.ev.filter(e => e.status === 'estimate' || e.status === 'unverified').length],
+    ['Missing metrics', r => r.sc(uniq([].concat.apply([], r.p.stories.map(s => (s.missingMetrics || []).map(m => m.metric)))).join(' | '))],
+    ['Approval status', r => labelOf(STATUSES, r.best)], ['Involves a minor', r => r.minor],
+    ['Summary', r => r.sc(r.p.latest.summary)], ['Key takeaways', r => r.sc((r.p.latest.takeaways || []).join(' | '))],
+    ['Last updated', r => (r.p.latest.updatedAt || '').slice(0, 10)],
+  );
+  return toCSV(cols, rows);
 }
 /* external collection: first names only where permission is documented, otherwise the public alias or "a student" */
 function approvedMarkdown(stories, audience){
@@ -740,6 +897,7 @@ const ICONS = {
   filter: '<path d="M4 5h16l-6 8v6l-4-2v-4z"/>',
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.2 5 2.6 5 5.8"/>',
 };
 function Icon({name, size}){ const s = size || 20; return html`<svg className="ic" width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{__html: ICONS[name] || ''}}></svg>`; }
 
@@ -751,6 +909,7 @@ const useApp = () => useContext(Ctx);
 function Pill({tone, dot, children}){ return html`<span className=${'pill tone-' + (tone || 'neutral')}>${dot ? html`<span className="dot"></span>` : null}${children}</span>`; }
 function StatusPill({status}){ const s = byId(STATUSES, status) || STATUSES[0]; return html`<${Pill} tone=${s.tone} dot=${true}>${s.label}<//>`; }
 function EvPill({status}){ const s = byId(EVIDENCE_STATUS, status) || EVIDENCE_STATUS[3]; return html`<${Pill} tone=${s.tone}>${s.label}<//>`; }
+function MetricPill({status}){ const s = byId(METRIC_STATUS, status) || METRIC_STATUS[1]; return html`<${Pill} tone=${s.tone}>${s.label}<//>`; }
 function Field({label, hint, children}){ return html`<label className="field"><span>${label}</span>${children}${hint ? html`<small className="hint">${hint}</small>` : null}</label>`; }
 function Sec({title, count, open, children, refEl, id}){
   return html`<details className="sec" open=${!!open} ref=${refEl} id=${id}>
@@ -804,6 +963,7 @@ function useNames(ids){
 /* ================= navigation chrome ================= */
 const NAV = [
   {id: 'home', label: 'Home', icon: 'home'},
+  {id: 'backlog', label: 'Student List', short: 'Students', icon: 'users'},
   {id: 'library', label: 'Story Library', short: 'Library', icon: 'book'},
   {id: 'followups', label: 'Follow-Ups', short: 'Follow-ups', icon: 'flag'},
   {id: 'insights', label: 'Impact Dashboard', short: 'Insights', icon: 'chart'},
@@ -824,10 +984,12 @@ function Sidebar(){
   </aside>`;
 }
 function TopBar(){
-  const {route, nav} = useApp();
+  const {route, nav, stories} = useApp();
+  const due = countDue(stories);
   return html`<header className="topbar">
     <button className="icon-btn" style=${{width: 'auto', borderRadius: '10px', padding: '0 4px'}} onClick=${() => nav('home')} aria-label="Home"><${Brand} /></button>
     <div className="topbar-actions">
+      <button className="icon-btn" aria-label=${'Follow-Ups' + (due ? ', ' + due + ' due' : '')} aria-current=${route.name === 'followups' ? 'page' : undefined} onClick=${() => nav('followups')}><${Icon} name="flag" />${due > 0 ? html`<span className="badge">${due}</span>` : null}</button>
       <button className="icon-btn" aria-label="Impact Reports" aria-current=${route.name === 'reports' ? 'page' : undefined} onClick=${() => nav('reports')}><${Icon} name="file" /></button>
       <button className="icon-btn" aria-label="Settings" aria-current=${route.name === 'settings' ? 'page' : undefined} onClick=${() => nav('settings')}><${Icon} name="gear" /></button>
     </div>
@@ -839,9 +1001,9 @@ function TabBar(){
   const tab = (id, label, icon) => html`<button key=${id} className="tab" aria-current=${isCurrent(route, id) ? 'page' : undefined} onClick=${() => nav(id)}><${Icon} name=${icon} size=${22} /><span>${label}</span>${id === 'followups' && due > 0 ? html`<span className="badge">${due}</span>` : null}</button>`;
   return html`<nav className="tabbar" aria-label="Main">
     ${tab('home', 'Home', 'home')}
-    ${tab('library', 'Library', 'book')}
+    ${tab('backlog', 'Students', 'users')}
     <button className="tab tab-rec" onClick=${() => nav('interview')} disabled=${readOnly} aria-label="Record a Story"><span className="tab-blob"><${Icon} name="mic" size=${24} /></span><span>Record</span></button>
-    ${tab('followups', 'Follow-ups', 'flag')}
+    ${tab('library', 'Library', 'book')}
     ${tab('insights', 'Insights', 'chart')}
   </nav>`;
 }
@@ -877,6 +1039,24 @@ function StoryCard({story, why}){
 }
 
 /* ================= home ================= */
+function BacklogHomeCard(){
+  const {backlog, nav, readOnly} = useApp();
+  const waiting = sortBacklog(backlog.filter(b => b.status === 'waiting'));
+  const done = backlog.filter(b => b.status === 'recorded').length;
+  const total = backlog.filter(b => b.status !== 'skipped').length;
+  if (!backlog.length) return html`<section className="card bl-home">
+    <div><h2>Start your student list</h2><p className="small muted">Jot down every student you still think about: a first name, roughly when, and one line you remember. Each one becomes an interview to record.</p></div>
+    <button className="btn btn-ghost" disabled=${readOnly} onClick=${() => nav('backlog')}><${Icon} name="users" size=${18} /> Make the list</button>
+  </section>`;
+  const next = waiting[0];
+  return html`<section className="card bl-home">
+    <div className="bl-home-top"><div><h2>Student list</h2><p className="small muted tnum">${done} of ${total} stories recorded${waiting.length ? ' · ' + waiting.length + ' to go' : ''}</p></div>
+      <button className="btn btn-quiet btn-sm" onClick=${() => nav('backlog')}>Open list</button></div>
+    <${Progress} done=${done} total=${total} />
+    ${next && !readOnly ? html`<div className="bl-next"><p><strong>Up next: ${next.name}</strong>${next.when ? html` <span className="small muted">· ${next.when}</span>` : null}${next.memory ? html`<br /><span className="small muted">${next.memory}</span>` : null}</p>
+      <button className="btn btn-primary btn-sm" onClick=${() => startBacklogInterview(nav, next)}><${Icon} name="mic" size=${16} /> Record ${next.name}'s story</button></div>` : null}
+  </section>`;
+}
 function HomeView(){
   const {caps, stories, storiesLoaded, nav, readOnly} = useApp();
   const first = caps.me && caps.me.name ? caps.me.name.split(' ')[0] : '';
@@ -905,6 +1085,7 @@ function HomeView(){
         </div>
       </div>
     </section>
+    <${BacklogHomeCard} />
     <div className="action-row">
       <button className="action-card" onClick=${() => nav('library')}>
         <span className="ac-ic tone-teal"><${Icon} name="book" size=${22} /></span>
@@ -1107,7 +1288,11 @@ function DictationBox({id, value, onChange, placeholder, label, compact, onAudio
 }
 
 /* saves an entry without Claude analysis (new story or added to an existing one) */
-async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, approx, newStudent, studentId, studentName, followupId}){
+async function markBacklogRecorded(db, backlogId, storyId, studentId){
+  if (!backlogId) return;
+  try { await db.collection('backlog').doc(backlogId).update({status: 'recorded', storyId: storyId, studentId: studentId || null, recordedAt: nowISO()}); } catch (e) { /* the list item was removed; the story is still saved */ }
+}
+async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, approx, newStudent, studentId, studentName, followupId, backlogId}){
   const db = caps.db; const me = caps.me || {};
   const sid = story ? story.id : uid('s');
   const ed = Object.assign({}, entry, {storyId: sid}); delete ed.id;
@@ -1125,6 +1310,7 @@ async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, app
       const sd = Object.assign({}, s); delete sd.id;
       await db.collection('stories').doc(sid).set(sd);
     }
+    await markBacklogRecorded(db, backlogId, sid, studentId);
   });
   return ok ? sid : null;
 }
@@ -1216,15 +1402,15 @@ function InterviewView({params}){
   const storyId = params.storyId || null;
   const story = storyId ? stories.find(s => s.id === storyId) : null;
   const mode = storyId ? 'update' : 'new';
-  const draftKey = 'abg-interview:' + (storyId || 'new');
+  const draftKey = 'abg-interview:' + (storyId || (params.backlogId ? 'bl-' + params.backlogId : 'new'));
   const init = useMemo(() => { try { return JSON.parse(lsGet(draftKey) || 'null') || null; } catch (e) { return null; } }, [draftKey]);
-  const fresh = !init || (params.followupId && init.followupId !== params.followupId);
+  const fresh = !init || (params.followupId && init.followupId !== params.followupId) || (params.backlogId && init.backlogId !== params.backlogId);
   const I = fresh ? {} : init;
   const [step, setStep] = useState(I.step || (mode === 'update' ? 'interview' : 'name'));
-  const [first, setFirst] = useState(I.first || '');
+  const [first, setFirst] = useState(I.first || asStr(params.firstName));
   const [pick, setPick] = useState(I.pick || '');
   const [note, setNote] = useState(I.note || '');
-  const [when, setWhen] = useState(I.when || '');
+  const [when, setWhen] = useState(I.when || asStr(params.when));
   const [turns, setTurns] = useState(I.turns || []);
   const [current, setCurrent] = useState(I.current || null);
   const [answer, setAnswer] = useState(I.answer || '');
@@ -1243,6 +1429,8 @@ function InterviewView({params}){
   const storyStudent = story && story.studentId ? students.find(x => x.id === story.studentId) : null;
   const name = mode === 'update' ? ((storyStudent && storyStudent.firstName) || (story && story.alias) || 'this student') : ((student && student.firstName) || asStr(first));
   const followupId = params.followupId || I.followupId || null;
+  const backlogId = mode === 'new' ? (params.backlogId || I.backlogId || null) : null;
+  const memo = backlogId ? asStr(params.memory || I.memo) : '';
 
   useEffect(() => {
     if (mode === 'update' && story && !current && turns.length === 0) setCurrent({q: params.prompt || UPDATE_OPENING_Q(name), kind: 'opening'});
@@ -1250,7 +1438,7 @@ function InterviewView({params}){
   useEffect(() => {
     const t = setTimeout(() => {
       if (step === 'name' && !asStr(first)) { lsDel(draftKey); return; }
-      lsSet(draftKey, JSON.stringify({step, first, pick, note, when, turns, current, answer, target, phase, student, clips, followupId, at: Date.now()}));
+      lsSet(draftKey, JSON.stringify({step, first, pick, note, when, turns, current, answer, target, phase, student, clips, followupId, backlogId, memo, at: Date.now()}));
     }, 350);
     return () => clearTimeout(t);
   }, [step, first, pick, note, when, turns, current, answer, target, phase, student, clips]);
@@ -1275,7 +1463,7 @@ function InterviewView({params}){
     setErr(''); setLoadingQ(true); setCurrent(null);
     const ctl = new AbortController(); qCtl.current = ctl;
     try {
-      const r = await caps.sample.json(interviewPrompt({name, turns: nt, mode, story, asked: nt.filter(t => t.kind === 'followup').length, target}), {modelTier: 'quick', cache: false, signal: ctl.signal});
+      const r = await caps.sample.json(interviewPrompt({name, turns: nt, mode, story, memo, asked: nt.filter(t => t.kind === 'followup').length, target}), {modelTier: 'quick', cache: false, signal: ctl.signal});
       const q = asStr(r && r.question);
       if (!q) throw {code: 'invalid_json'};
       setCurrent({q, kind: 'followup', category: asStr(r.category).slice(0, 1).toUpperCase(), why: asStr(r.why)});
@@ -1319,12 +1507,12 @@ function InterviewView({params}){
     const entry = makeEntry(nt);
     const items = [{id: entry.id, text: entry.transcript, recordedAt: entry.recordedAt}];
     try {
-      const analysis = await runAnalysis({sample: caps.sample, mode, story, stories, items, whenHint: asStr(when), studentName: name, signal: ctl.signal});
+      const analysis = await runAnalysis({sample: caps.sample, mode, story, stories, items, whenHint: asStr(when), studentName: name, memo, signal: ctl.signal});
       aCtl.current = null;
       const ns = student && !student.existing ? Object.assign({}, student) : null;
       if (ns) delete ns.existing;
       nav('review', {mode, storyId: story ? story.id : null, analysis, entry, items, draftKey, whenHint: asStr(when), followupId,
-        studentId: mode === 'new' ? student.id : (story.studentId || null), studentName: name, newStudent: ns, returnTo: {name: 'interview', params}});
+        studentId: mode === 'new' ? student.id : (story.studentId || null), studentName: name, newStudent: ns, backlogId, returnTo: {name: 'interview', params}});
     } catch (e) {
       aCtl.current = null; setBusy(null);
       if (e && e.code === 'cancelled') return;
@@ -1337,7 +1525,7 @@ function InterviewView({params}){
     setBusy('save');
     const ns = student && !student.existing ? Object.assign({}, student) : null;
     if (ns) delete ns.existing;
-    const sid = await saveRawEntry({caps, safeWrite, story, entry: makeEntry(nt), title: name + "'s story", whenText: asStr(when), newStudent: ns, studentId: student ? student.id : null, studentName: name, followupId});
+    const sid = await saveRawEntry({caps, safeWrite, story, entry: makeEntry(nt), title: name + "'s story", whenText: asStr(when), newStudent: ns, studentId: student ? student.id : null, studentName: name, followupId, backlogId});
     setBusy(null);
     if (sid) { lsDel(draftKey); showToast('Interview saved'); nav('story', {id: sid}); }
   }
@@ -1353,7 +1541,8 @@ function InterviewView({params}){
     const fn = asStr(first);
     const needPick = matches.length > 0 && !pick;
     return html`<div className="view interview">
-      <${FocusHeader} title="Record a Story" sub="Step 1 of 2: who is this story about?" onBack=${back} />
+      <${FocusHeader} title="Record a Story" sub="Step 1 of 2: who is this story about?" onBack=${backlogId ? () => nav('backlog') : back} />
+      ${memo ? html`<p className="memo-note"><${Icon} name="users" size=${16} /><span><strong>From your student list:</strong> ${memo}</span></p>` : null}
       <section className="card name-card">
         <${Field} label="Student's First Name"><input id="iv-first" className="input input-lg" autoComplete="off" placeholder="Enter student's first name" value=${first} onChange=${e => { setFirst(e.target.value.replace(/\s{2,}/g, ' ')); setPick(''); }} /><//>
         <p className="small muted"><${Icon} name="lock" size=${14} /> Only a first name is needed. Please do not enter a last name or other identifying information. A nickname or pseudonym is fine.</p>
@@ -1380,6 +1569,7 @@ function InterviewView({params}){
   return html`<div className="view interview">
     <${FocusHeader} title=${(mode === 'update' ? 'Story update: ' : 'Interview: ') + name} sub=${mode === 'update' ? story.title : 'Step 2 of 2: tell the story, then answer a few follow-ups'} onBack=${back} />
     ${restored ? html`<p className="small muted">Restored your unsaved interview from this device. <button className="btn btn-quiet btn-sm" onClick=${startOver}>Start over</button></p>` : null}
+    ${memo && turns.length === 0 ? html`<p className="memo-note"><${Icon} name="users" size=${16} /><span><strong>Your note:</strong> ${memo}</span></p>` : null}
     ${turns.length > 0 ? html`<details className="sec convo"><summary><span>Conversation so far<span className="count">${turns.length} ${turns.length === 1 ? 'answer' : 'answers'}</span></span><${Icon} name="chev" size=${18} /></summary>
       <div className="sec-body">${turns.map((t, i) => html`<div className="turn" key=${i}><p className="turn-q">${t.q}</p><p className=${'turn-a' + (t.status === 'skipped' ? ' muted' : '')}>${t.status === 'skipped' ? 'Skipped' : t.a}</p></div>`)}</div>
     </details>` : null}
@@ -1532,6 +1722,11 @@ function StoryEditor({draft, setDraft, items, mode}){
       <datalist id="dl-communities">${communities.map(p => html`<option key=${p} value=${p}></option>`)}</datalist>
     <//>
 
+    ${isStudentStory(draft) ? html`<${Sec} title="Student metrics card" count=${metricsKnown(draft) + ' of ' + METRIC_FIELDS.length + ' known'} open=${true}>
+      <p className="small muted">The same measurable fields on every student story, so they can be added up across students. Claude filled in what the interview said. Leave a field blank if it's unknown, and mark a value Verified only after checking it against a record.${mode === 'update' ? ' Values this update changed have an orange edge.' : ''}</p>
+      <${MetricsCardEdit} metrics=${draft.metrics} onChange=${m => upd(n => { n.metrics = m; })} />
+    <//>` : null}
+
     <${Sec} title="Supporting metrics and evidence" count=${(draft.evidence || []).length} open=${true}>
       <p className="small muted">Each item shows its source and the words it came from. Mark something Verified only after checking it against documentation.</p>
       ${(draft.evidence || []).length === 0 ? html`<p className="empty-note">No evidence found in this interview.</p>` : null}
@@ -1641,7 +1836,7 @@ function StoryEditor({draft, setDraft, items, mode}){
 }
 function ReviewView({params}){
   const {caps, stories, students, nav, safeWrite, showToast} = useApp();
-  const {mode, storyId, analysis, entry, items, draftKey, whenHint, approx, followupId, answered, analyzedEntryIds, returnTo, studentId, studentName, newStudent} = params;
+  const {mode, storyId, analysis, entry, items, draftKey, whenHint, approx, followupId, answered, analyzedEntryIds, returnTo, studentId, studentName, newStudent, backlogId} = params;
   const base = storyId ? stories.find(s => s.id === storyId) : null;
   const me = caps.me || {};
   const [draft, setDraft] = useState(() => buildReviewDraft({mode, base, analysis, whenHint, approx, me, followupId, answered, entry, studentId, studentName}));
@@ -1676,6 +1871,7 @@ function ReviewView({params}){
         const ol = clone(other.links || []);
         if (!ol.some(x => x.storyId === s.id && x.type === l.type)) { ol.push({storyId: s.id, type: l.type, reason: l.reason, confirmed: true}); await db.collection('stories').doc(other.id).update({links: ol}); }
       }
+      await markBacklogRecorded(db, backlogId, s.id, s.studentId);
     });
     setSaving(false);
     if (ok) { if (draftKey) lsDel(draftKey); showToast(mode === 'edit' ? 'Changes saved' : 'Story saved'); nav('story', {id: s.id}); }
@@ -2060,6 +2256,8 @@ function StoryView({id}){
       ${siblings.length ? html`<p className="small muted">Other stories about this student: ${siblings.map((s, i) => html`<button key=${s.id} className="btn btn-quiet btn-sm" onClick=${() => nav('story', {id: s.id})}>${s.title}</button>`)}</p>` : null}
     </section>
 
+    ${isStudentStory(story) ? html`<${MetricsCardView} story=${story} readOnly=${readOnly} onEdit=${() => nav('review', {mode: 'edit', storyId: id, items, returnTo: {name: 'story', params: {id}}})} />` : null}
+
     <section className="card prose">
       <h2>Impact story</h2>
       ${story.story ? story.story.split(/\n{2,}/).map((p, i) => html`<p key=${i}>${p}</p>`) : story.summary ? html`<p>${story.summary}</p>` : html`<p className="muted">No story written yet.</p>`}
@@ -2179,6 +2377,185 @@ function StoryView({id}){
     </section>
 
     ${!readOnly ? html`<div><button className="btn btn-ghost danger" onClick=${confirmDelete}><${Icon} name="trash" size=${18} /> Delete story</button></div>` : null}
+  </div>`;
+}
+
+/* ================= student metrics card ================= */
+function MetricsCardEdit({metrics, onChange}){
+  const m = metrics || {};
+  const set = (id, patch) => {
+    const cur = Object.assign({value: '', status: 'reported'}, m[id] || {});
+    const nx = Object.assign({}, cur, patch); delete nx._new;
+    const out = Object.assign({}, m);
+    if (!String(nx.value == null ? '' : nx.value).trim()) delete out[id]; else out[id] = nx;
+    onChange(out);
+  };
+  return html`<div className="mc-edit">${METRIC_FIELDS.map(f => {
+    const x = m[f.id] || {}; const v = x.value == null ? '' : String(x.value);
+    return html`<div className=${'mc-row' + (x._new ? ' is-new' : '')} key=${f.id}>
+      <label className="mc-label" htmlFor=${'mc-' + f.id}>${f.label}</label>
+      <div className="mc-inputs">
+        ${f.type === 'choice'
+          ? html`<select id=${'mc-' + f.id} className="select select-sm mc-val" value=${v} onChange=${e => set(f.id, {value: e.target.value})}><option value="">Unknown</option>${f.options.map(o => html`<option key=${o} value=${o}>${o}</option>`)}</select>`
+          : html`<input id=${'mc-' + f.id} className="input mc-val" inputMode=${f.type === 'number' ? 'decimal' : 'text'} placeholder=${f.type === 'number' ? 'Unknown (' + f.unit + ')' : 'Unknown, ' + f.ph} value=${v} onChange=${e => set(f.id, {value: e.target.value})} />`}
+        <select className="select select-sm mc-status" aria-label=${f.label + ': how certain'} disabled=${!v.trim()} value=${v.trim() ? (x.status || 'reported') : ''} onChange=${e => set(f.id, {status: e.target.value})}>
+          ${!v.trim() ? html`<option value="">No value</option>` : null}
+          ${METRIC_STATUS.map(s => html`<option key=${s.id} value=${s.id}>${s.label}</option>`)}
+        </select>
+      </div>
+    </div>`; })}</div>`;
+}
+function MetricsCardView({story, readOnly, onEdit}){
+  const rows = METRIC_FIELDS.map(f => ({f, m: metricVal(story, f.id)}));
+  const n = rows.filter(r => r.m).length;
+  return html`<section className="card">
+    <div className="sec-head"><h2>Student metrics card</h2><div className="row-btns"><span className="small muted tnum">${n} of ${METRIC_FIELDS.length} known</span>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${onEdit}><${Icon} name="edit" size=${16} /> Fill in</button>` : null}</div></div>
+    <p className="small muted">The same measurable fields on every student story. Unknown fields are worth asking about in the next update.</p>
+    <dl className="mc-view">${rows.map(r => html`<div key=${r.f.id} className=${r.m ? '' : 'is-unknown'}><dt>${r.f.label}</dt><dd>${r.m ? html`<span>${fmtMetric(r.f, r.m.value)}</span> <${MetricPill} status=${r.m.status} />` : html`<span className="muted">Unknown</span>`}</dd></div>`)}</dl>
+  </section>`;
+}
+function OutcomesSection(){
+  const {stories, nav, storiesLoaded} = useApp();
+  const profiles = useMemo(() => studentProfiles(stories), [stories]);
+  const lines = useMemo(() => outcomeLines(profiles), [profiles]);
+  const N = profiles.length;
+  const filled = lines.reduce((a, l) => a + l.n, 0);
+  const gaps = lines.filter(l => l.n < N).sort((a, b) => a.n - b.n).slice(0, 3);
+  return html`<section className="card">
+    <h2>Documented student outcomes</h2>
+    <p className="small muted">Rolled up from the metrics card on each student story. Every line says how many students it rests on and how sure the values are. These describe the students documented here, not every student ABG serves. Open a line to see whose stories it comes from.</p>
+    ${!storiesLoaded ? html`<div className="skeleton"></div>`
+      : N === 0 ? html`<p className="empty-note">No student stories yet. Outcomes appear here once stories with metrics cards are saved.</p>`
+      : html`<div className="stats stats-3">
+          <div className="stat"><b>${N}</b><span>Students documented</span></div>
+          <div className="stat"><b>${Math.round(100 * filled / (N * METRIC_FIELDS.length))}%</b><span>Metrics cards filled in</span></div>
+          <div className="stat"><b>${lines.reduce((a, l) => a + l.counts.verified, 0)}</b><span>Verified values</span></div>
+        </div>
+        <div className="oc-list">${lines.map(l => html`<details className=${'oc' + (l.n ? '' : ' is-empty')} key=${l.f.id}>
+          <summary><span className="oc-main"><strong>${l.f.label}</strong>${l.text ? html`<span>${l.text}</span>` : null}<span className="small muted tnum">${l.n ? basisText(l) : 'Unknown for all ' + N + ' documented students'}</span></span><${Icon} name="chev" size=${18} /></summary>
+          <div className="oc-body">${l.vals.length ? l.vals.map(v => html`<div className="linked" key=${v.p.key}><button className="btn btn-quiet btn-sm" style=${{whiteSpace: 'normal', textAlign: 'left'}} onClick=${() => nav('story', {id: v.storyId})}>${v.p.name || 'Student'}</button><span className="small tnum">${fmtMetric(l.f, v.value)} <${MetricPill} status=${v.status} /></span></div>`) : html`<p className="small muted">No values recorded yet.</p>`}</div>
+        </details>`)}</div>
+        ${gaps.length ? html`<p className="small muted"><strong>Most often unknown:</strong> ${gaps.map(g => g.f.short + ' (' + (N - g.n) + ' of ' + N + ')').join(', ')}. Worth asking about in the next interviews or updates.</p>` : null}`}
+  </section>`;
+}
+
+/* ================= student list (backlog) ================= */
+const WHENISH = /\b(19|20)\d{2}\b|\b(spring|summer|fall|autumn|winter|ago|last year|this year|grade|semester|years?)\b|\d(st|nd|rd|th)\b/i;
+function cleanFirstName(s){ const w = asStr(s).replace(/[^\p{L}\p{M}'’-]+/gu, ' ').trim().split(/\s+/)[0] || ''; return w ? w.charAt(0).toUpperCase() + w.slice(1) : ''; }
+function parseBacklog(text){
+  return String(text || '').split(/\r?\n/).map(l => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean).map(l => {
+    const parts = l.split(/\s*[,;|\t]\s*|\s+[-–—]\s+|\s*:\s+/).map(asStr).filter(Boolean);
+    const name = cleanFirstName(parts.shift());
+    let when = '';
+    if (parts.length >= 2 || (parts.length === 1 && WHENISH.test(parts[0]) && parts[0].length <= 30)) when = parts.shift();
+    return {name: name.slice(0, 40), when: when.slice(0, 60), memory: parts.join(', ').slice(0, 300)};
+  }).filter(x => x.name);
+}
+function sortBacklog(list){ return list.slice().sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || '').localeCompare(b.createdAt || '')); }
+function startBacklogInterview(nav, b){ nav('interview', {backlogId: b.id, firstName: b.name, when: b.when || '', memory: b.memory || ''}); }
+function Progress({done, total}){ const pct = total ? Math.round(100 * done / total) : 0; return html`<div className="progress" role="progressbar" aria-valuemin="0" aria-valuemax=${total} aria-valuenow=${done} aria-label=${done + ' of ' + total + ' recorded'}><span style=${{width: pct + '%'}}></span></div>`; }
+function BacklogSheet({item, close}){
+  const {caps, safeWrite, showToast} = useApp();
+  const [name, setName] = useState(item.name || '');
+  const [when, setWhen] = useState(item.when || '');
+  const [memory, setMemory] = useState(item.memory || '');
+  const ref = caps.db.collection('backlog').doc(item.id);
+  async function save(){ const n = cleanFirstName(name); if (!n) return; if (await safeWrite(() => ref.update({name: n, when: asStr(when), memory: asStr(memory)}))) close(); }
+  async function remove(){ if (await safeWrite(() => ref.delete())) { showToast('Removed from the list'); close(); } }
+  return html`<div className="view" style=${{gap: '12px'}}>
+    <${SheetHead} title="Edit student" close=${close} />
+    <${Field} label="First name" hint="First name or nickname only."><input id="bl-edit-name" className="input" value=${name} onChange=${e => setName(e.target.value)} /><//>
+    <${Field} label="Roughly when"><input className="input" value=${when} onChange=${e => setWhen(e.target.value)} placeholder="e.g. 2019, or this fall" /><//>
+    <${Field} label="What you remember"><textarea className="textarea" rows="3" value=${memory} onChange=${e => setMemory(e.target.value)}></textarea><//>
+    ${item.status === 'recorded' ? html`<p className="small muted">Removing this from the list doesn't delete the story.</p>` : null}
+    <div className="row-btns end"><button className="btn btn-quiet danger" onClick=${remove}>Remove</button><button className="btn btn-ghost" onClick=${close}>Cancel</button><button className="btn btn-primary" disabled=${!cleanFirstName(name)} onClick=${save}>Save</button></div>
+  </div>`;
+}
+function BacklogView(){
+  const {caps, backlog, backlogLoaded, stories, nav, readOnly, safeWrite, showToast, openSheet} = useApp();
+  const [name, setName] = useState('');
+  const [when, setWhen] = useState('');
+  const [memory, setMemory] = useState('');
+  const [paste, setPaste] = useState(() => lsGet('abg-backlog-paste') || '');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { const t = setTimeout(() => { if (paste.trim()) lsSet('abg-backlog-paste', paste); else lsDel('abg-backlog-paste'); }, 300); return () => clearTimeout(t); }, [paste]);
+  const waiting = sortBacklog(backlog.filter(b => b.status === 'waiting'));
+  const recorded = backlog.filter(b => b.status === 'recorded').sort((a, b) => (b.recordedAt || '').localeCompare(a.recordedAt || ''));
+  const skipped = sortBacklog(backlog.filter(b => b.status === 'skipped'));
+  const total = waiting.length + recorded.length;
+  const parsed = parseBacklog(paste);
+  const exists = x => backlog.some(b => norm(b.name) === norm(x.name) && norm(b.memory) === norm(x.memory));
+  const fresh = parsed.filter(x => !exists(x));
+  const db = caps.db;
+  const maxOrder = backlog.reduce((m, b) => Math.max(m, b.order || 0), 0);
+  const doc = (x, i) => ({name: x.name, when: asStr(x.when), memory: asStr(x.memory), status: 'waiting', storyId: null, studentId: null, order: maxOrder + i + 1, createdAt: nowISO(), createdBy: (caps.me && caps.me.id) || null});
+  async function addOne(e){
+    e.preventDefault();
+    const n = cleanFirstName(name); if (!n) return;
+    setBusy(true);
+    const ok = await safeWrite(() => db.collection('backlog').doc(uid('bl')).set(doc({name: n, when, memory}, 0)));
+    setBusy(false);
+    if (ok) { setName(''); setWhen(''); setMemory(''); showToast(n + ' added to the list'); try { document.getElementById('bl-name').focus(); } catch (er) {} }
+  }
+  async function addAll(){
+    if (!fresh.length) return;
+    setBusy(true);
+    const ok = await safeWrite(async () => { for (let i = 0; i < fresh.length; i++) await db.collection('backlog').doc(uid('bl')).set(doc(fresh[i], i)); });
+    setBusy(false);
+    if (ok) { showToast(fresh.length + ' student' + (fresh.length > 1 ? 's' : '') + ' added'); setPaste(''); }
+  }
+  const setStatus = (b, status) => safeWrite(() => db.collection('backlog').doc(b.id).update({status}));
+  const storyOf = b => b.storyId ? stories.find(s => s.id === b.storyId) : null;
+  const edit = b => openSheet(close => html`<${BacklogSheet} item=${b} close=${close} />`);
+  return html`<div className="view backlog">
+    <header className="page-head"><h1>Student List</h1><p className="muted">Every student whose story is still only in your head. List them quickly, then record them one at a time. Each interview ends with the same metrics card, so the stories add up.</p></header>
+    ${readOnly ? html`<p className="notice small"><strong>View-only access.</strong> You can see the list but not change it.</p>` : null}
+    <section className="card">
+      <div className="sec-head"><h2>Progress</h2><span className="small muted tnum">${backlogLoaded ? recorded.length + ' of ' + total + ' stories recorded' : ''}</span></div>
+      <${Progress} done=${recorded.length} total=${total} />
+      ${backlogLoaded && total === 0 ? html`<p className="small muted">Nobody on the list yet. Add students below, one at a time or as a pasted list.</p>` : null}
+    </section>
+    ${!readOnly ? html`<section className="card">
+      <h2>Add students</h2>
+      <p className="small muted"><${Icon} name="lock" size=${14} /> First names or nicknames only. Only the first word of a name is kept, so last names never get saved.</p>
+      <form className="bl-form" onSubmit=${addOne}>
+        <${Field} label="First name"><input id="bl-name" className="input" autoComplete="off" value=${name} onChange=${e => setName(e.target.value)} placeholder="e.g. Maya" /><//>
+        <${Field} label="Roughly when (optional)"><input id="bl-when" className="input" value=${when} onChange=${e => setWhen(e.target.value)} placeholder="e.g. 2019, or 7th grade" /><//>
+        <${Field} label="One thing you remember (optional)"><input id="bl-memory" className="input" value=${memory} onChange=${e => setMemory(e.target.value)} placeholder="e.g. barely spoke, then led the library mural" /><//>
+        <button className="btn btn-primary" type="submit" disabled=${!cleanFirstName(name) || busy}><${Icon} name="plus" size=${18} /> Add to list</button>
+      </form>
+      <details className="sec bl-paste" open=${!!paste.trim()}>
+        <summary><span>Paste or dictate a whole list</span><${Icon} name="chev" size=${18} /></summary>
+        <div className="sec-body">
+          <p className="small muted">One student per line: first name, roughly when, what you remember. For example: <em>Maya, 2019, painted the library mural</em>. Dictating works too; just start a new line for each student.</p>
+          <textarea id="bl-paste" className="textarea" rows="7" value=${paste} onChange=${e => setPaste(e.target.value)} placeholder=${'Maya, 2019, barely spoke, then led the library mural\nLuis, spring 2021, came every Saturday\nAna, 8th grade, wants to study design'}></textarea>
+          ${parsed.length ? html`<div className="bl-preview">${parsed.slice(0, 40).map((x, i) => html`<p key=${i} className=${'small' + (exists(x) ? ' muted' : '')}><strong>${x.name}</strong>${x.when ? ' · ' + x.when : ''}${x.memory ? ' · ' + x.memory : ''}${exists(x) ? ' (already on the list)' : ''}</p>`)}${parsed.length > 40 ? html`<p className="small muted">and ${parsed.length - 40} more</p>` : null}</div>` : null}
+          <div className="row-btns"><button className="btn btn-primary" disabled=${!fresh.length || busy} onClick=${addAll}>${fresh.length ? 'Add ' + fresh.length + ' student' + (fresh.length > 1 ? 's' : '') : 'Add students'}</button></div>
+        </div>
+      </details>
+    </section>` : null}
+    <section className="card">
+      <div className="sec-head"><h2>To record</h2><span className="count">${waiting.length}</span></div>
+      ${!backlogLoaded ? html`<div className="skeleton"></div>` : waiting.length === 0 ? html`<p className="empty-note">${total ? 'Every student on the list has a story. Nice work.' : 'No students waiting.'}</p>`
+        : waiting.map((b, i) => html`<div className="bl-item" key=${b.id}>
+          <div className="bl-text"><p><strong>${b.name}</strong>${b.when ? html` <span className="small muted">· ${b.when}</span>` : null}</p>${b.memory ? html`<p className="small muted">${b.memory}</p>` : null}</div>
+          ${!readOnly ? html`<div className="row-btns">
+            <button className=${'btn btn-sm ' + (i === 0 ? 'btn-primary' : 'btn-ghost')} onClick=${() => startBacklogInterview(nav, b)}><${Icon} name="mic" size=${16} /> Record story</button>
+            <button className="btn btn-quiet btn-sm" onClick=${() => setStatus(b, 'skipped')}>Skip</button>
+            <button className="icon-btn" aria-label=${'Edit ' + b.name} onClick=${() => edit(b)}><${Icon} name="edit" size=${18} /></button>
+          </div>` : null}
+        </div>`)}
+    </section>
+    ${recorded.length ? html`<section className="card">
+      <div className="sec-head"><h2>Recorded</h2><span className="count">${recorded.length}</span></div>
+      ${recorded.map(b => { const s = storyOf(b); return html`<div className="bl-item" key=${b.id}>
+        <div className="bl-text"><p><strong>${b.name}</strong> <${Pill} tone="good">Recorded<//></p>${s ? html`<p className="small muted tnum">${metricsKnown(s)} of ${METRIC_FIELDS.length} metrics known · ${labelOf(STATUSES, s.status)}</p>` : html`<p className="small muted">The story was removed.</p>`}</div>
+        <div className="row-btns">${s ? html`<button className="btn btn-ghost btn-sm" onClick=${() => nav('story', {id: s.id})}>${trunc(s.title, 40)}</button>` : null}${!readOnly ? html`<button className="icon-btn" aria-label=${'Edit ' + b.name} onClick=${() => edit(b)}><${Icon} name="edit" size=${18} /></button>` : null}</div>
+      </div>`; })}
+    </section>` : null}
+    ${skipped.length ? html`<details className="sec"><summary><span>Skipped<span className="count">${skipped.length}</span></span><${Icon} name="chev" size=${18} /></summary><div className="sec-body">
+      ${skipped.map(b => html`<div className="bl-item" key=${b.id}><div className="bl-text"><p><strong>${b.name}</strong>${b.memory ? html` <span className="small muted">· ${b.memory}</span>` : null}</p></div>${!readOnly ? html`<div className="row-btns"><button className="btn btn-quiet btn-sm" onClick=${() => setStatus(b, 'waiting')}>Put back</button><button className="icon-btn" aria-label=${'Edit ' + b.name} onClick=${() => edit(b)}><${Icon} name="edit" size=${18} /></button></div>` : null}</div>`)}
+    </div></details>` : null}
   </div>`;
 }
 
@@ -2365,6 +2742,7 @@ function InsightsView(){
       <h2>Story documentation</h2>
       <div className="stats stats-6">${tiles.map(t => html`<div className="stat" key=${t[0]}><b>${storiesLoaded ? t[1] : '–'}</b><span>${t[0]}</span></div>`)}</div>
     </section>
+    <${OutcomesSection} />
     <section className="card">
       <h2>Impact themes</h2>
       <p className="small muted">Number of stories with evidence related to each theme. These are counts of stories, not the share of students who experienced an outcome. Select a theme to see its stories.</p>
@@ -2447,7 +2825,7 @@ function FollowupsView(){
 
 /* ================= reports ================= */
 function ReportsView(){
-  const {caps, stories, metrics, showToast} = useApp();
+  const {caps, stories, students, metrics, showToast} = useApp();
   const approved = stories.filter(s => s.status === 'approved');
   const [report, setReport] = useState(() => lsGet('abg-report') || '');
   const [busy, setBusy] = useState(false);
@@ -2502,6 +2880,7 @@ function ReportsView(){
       ${!caps.downloads ? html`<p className="notice small">Downloads aren't available in this view. Open the journal in Claude to export files.</p>` : null}
       <div>
         ${row('Approved stories', 'Summaries, takeaways, evidence with status, approved quotes, and approved audience drafts. Markdown pastes cleanly into Google Docs and Word.', html`<select id="exp-aud" className="select select-sm" aria-label="Audience" value=${aud} onChange=${e => setAud(e.target.value)}><option value="">All audiences</option>${AUDIENCES.map(a => html`<option key=${a.id} value=${a.id}>${a.short}</option>`)}</select><${CopyButton} text=${approvedMarkdown(stories, aud)} />${dlBtn(() => dl('abg-approved-stories' + (aud ? '-' + aud : '') + '.md', approvedMarkdown(stories, aud)))}`)}
+        ${row('Student outcomes for the consulting team (CSV, names removed)', 'One row per student: the metrics card with how certain each value is, themes, audiences, evidence counts, approval status, and summaries. First names are replaced with codes (Student 01, Student 02…). Program and school names stay in, so read the summaries for other identifying details before sharing.', dlBtn(() => dl('abg-student-outcomes-team.csv', teamCSV(stories, students))))}
         ${row('Stories (CSV)', 'Every story with status, dates, program, themes, audiences, and privacy fields. Internal.', dlBtn(() => dl('abg-stories.csv', storiesCSV(stories))))}
         ${row('Supporting metrics and evidence (CSV)', 'Each piece of evidence with its source, verification status, and transcript passage, plus missing metrics.', dlBtn(() => dl('abg-evidence.csv', evidenceCSV(stories))))}
         ${row('Verified program metrics (CSV)', 'Numbers entered from verified sources, with their sources.', dlBtn(() => dl('abg-verified-metrics.csv', metricsCSV(metrics, stories))))}
@@ -2566,7 +2945,7 @@ function SheetHost({sheet, close}){
 function initialRoute(){
   let h = '';
   try { h = (location.hash || '').replace('#', ''); } catch (e) {}
-  const ok = ['record', 'library', 'insights', 'followups', 'reports'];
+  const ok = ['record', 'library', 'insights', 'followups', 'reports', 'backlog'];
   return {name: h === 'record' ? 'interview' : (ok.includes(h) ? h : 'home'), params: {}, key: 1};
 }
 function App(){
@@ -2575,6 +2954,8 @@ function App(){
   const [storiesLoaded, setStoriesLoaded] = useState(false);
   const [metrics, setMetrics] = useState([]);
   const [students, setStudents] = useState([]);
+  const [backlog, setBacklog] = useState([]);
+  const [backlogLoaded, setBacklogLoaded] = useState(false);
   const [settings, setSettings] = useState({programs: [], communities: []});
   const [route, setRoute] = useState(initialRoute);
   const [sheet, setSheet] = useState(null);
@@ -2608,7 +2989,8 @@ function App(){
     const u2 = db.collection('metrics').onSnapshot(snap => setMetrics(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
     const u4 = db.collection('students').onSnapshot(snap => setStudents(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
     const u3 = db.doc('config/settings').onSnapshot(snap => { const d = snap.exists ? (snap.data() || {}) : {}; setSettings({programs: asArr(d.programs), communities: asArr(d.communities)}); }, () => {});
-    return () => { u1(); u2(); u3(); u4(); };
+    const u5 = db.collection('backlog').onSnapshot(snap => { setBacklog(snap.docs.map(d => Object.assign({id: d.id}, d.data()))); setBacklogLoaded(true); }, () => setBacklogLoaded(true));
+    return () => { u1(); u2(); u3(); u4(); u5(); };
   }, [caps.status]);
 
   const nav = useCallback((name, params) => { setSheet(null); setRoute({name, params: params || {}, key: Date.now()}); try { window.scrollTo(0, 0); } catch (e) {} }, []);
@@ -2623,7 +3005,7 @@ function App(){
     }
   }, [caps.canWrite, showToast]);
 
-  const ctx = {caps, stories, students, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite, readOnly};
+  const ctx = {caps, stories, students, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite, readOnly};
   const focus = caps.status === 'ready' && (route.name === 'record' || route.name === 'review' || route.name === 'interview');
   let content;
   if (caps.status === 'loading') content = html`<div className="boot"><div className="boot-mark"></div><p>Opening ABG Impact Journal…</p></div>`;
@@ -2637,6 +3019,7 @@ function App(){
       case 'interview': content = html`<${InterviewView} key=${route.key} params=${p} />`; break;
       case 'review': content = html`<${ReviewView} key=${route.key} params=${p} />`; break;
       case 'insights': content = html`<${InsightsView} />`; break;
+      case 'backlog': content = html`<${BacklogView} />`; break;
       case 'followups': content = html`<${FollowupsView} />`; break;
       case 'reports': content = html`<${ReportsView} />`; break;
       case 'settings': content = html`<${SettingsView} />`; break;
