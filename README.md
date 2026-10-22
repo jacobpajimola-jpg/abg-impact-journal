@@ -36,7 +36,7 @@ You need the accounts from Part 1: GitHub, Anthropic Console (with credits and a
 For each function: **Edge Functions** > **Deploy a new function** > **Via Editor**.
 1. Name it exactly `ai`. Replace the sample code with all of [`supabase/functions/ai/index.ts`](supabase/functions/ai/index.ts). Deploy.
 2. Name it exactly `transcribe`. Replace the sample code with all of [`supabase/functions/transcribe/index.ts`](supabase/functions/transcribe/index.ts). Deploy.
-3. Leave **Verify JWT** (sometimes "Enforce JWT verification") turned **on** for both.
+3. Each function checks that the caller is signed in. If calls fail with 401 errors, turn **off** "Verify JWT with legacy secret" for that function; the function's own check still protects it.
 
 ### 5. Put the website online
 1. In Supabase, open **Project Settings** > **API** (or **API Keys**) and copy the **Project URL** and the **anon / publishable** key. Do not use the service_role or secret key here.

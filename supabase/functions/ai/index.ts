@@ -2,7 +2,8 @@
 // Calls the Claude API on the server so the API key never reaches the browser.
 // Secrets required (Edge Functions > Secrets): ANTHROPIC_API_KEY
 // Optional: ANTHROPIC_MODEL (default claude-sonnet-5-5), ANTHROPIC_MODEL_FAST (default claude-haiku-5-5)
-// Keep "Verify JWT" ON for this function so only signed-in journal users can call it.
+// The function checks the caller's sign-in itself, so it works whether or not "Verify JWT" is on.
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -11,9 +12,28 @@ const CORS = {
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {status, headers: {...CORS, 'Content-Type': 'application/json'}});
 
+
+// Works with both legacy keys (SUPABASE_SERVICE_ROLE_KEY) and the newer secret keys (SUPABASE_SECRET_KEYS).
+function serverKey(): string {
+  const legacy = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (legacy) return legacy;
+  const raw = Deno.env.get('SUPABASE_SECRET_KEYS') || '';
+  try { const v = JSON.parse(raw); const first = typeof v === 'string' ? v : Object.values(v)[0]; if (first) return String(first); } catch { /* not JSON */ }
+  return raw;
+}
+// Only signed-in journal users may call this function.
+async function signedInUser(req: Request) {
+  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!token) return null;
+  const sb = createClient(Deno.env.get('SUPABASE_URL')!, serverKey(), {auth: {persistSession: false}});
+  const {data, error} = await sb.auth.getUser(token);
+  return error ? null : data.user;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', {headers: CORS});
   if (req.method !== 'POST') return json({error: 'Use POST'}, 405);
+  if (!(await signedInUser(req))) return json({error: 'Not signed in', code: 'session_expired'}, 401);
 
   const key = Deno.env.get('ANTHROPIC_API_KEY');
   if (!key) return json({error: 'ANTHROPIC_API_KEY is not set in Edge Function secrets', code: 'sampling_disabled'}, 500);
