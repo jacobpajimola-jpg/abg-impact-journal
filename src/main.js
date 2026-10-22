@@ -1,7 +1,7 @@
 import './globals.js';
 import './styles.css';
 import { createClient } from '@supabase/supabase-js';
-import { makeDb, makeUser, makeSample, makeAudio, downloads } from './platform.js';
+import { makeDb, makeUser, makeSample, makeAudio, makeSpeech, downloads } from './platform.js';
 import './journal.js';
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL;
@@ -65,7 +65,7 @@ async function boot(){
     mounted = true;
     const db = makeDb(sb);
     const caps = {db, user: makeUser(sb, user, db), sample: makeSample(sb, URL_, KEY), downloads};
-    window.__platform = {audio: makeAudio(sb, URL_, KEY), signOut: async () => { await sb.auth.signOut(); window.location.reload(); }, email: user.email};
+    window.__platform = {audio: makeAudio(sb, URL_, KEY), speech: makeSpeech(sb, URL_, KEY), signOut: async () => { await sb.auth.signOut(); window.location.reload(); }, email: user.email};
     window.claude = {use: async name => caps[name] || null};
     if (window.location.hash.includes('access_token')) history.replaceState(null, '', window.location.pathname);
     window.__mountJournal(root);

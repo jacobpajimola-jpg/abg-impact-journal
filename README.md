@@ -59,6 +59,14 @@ Supabase's built-in email sender allows only a few sign-in emails per hour. That
 
 ---
 
+## Optional: natural voice for interview questions
+The app can read each interview question aloud. By default it uses Google's natural voice when that's set up, and the device's built-in voice otherwise. Kyle can switch voices or turn the voice off in Settings.
+1. In Google Cloud Console, create a project and link a billing account. Chirp 3 HD voices include 1 million free characters a month, far more than interview questions use. Set a budget alert (Billing > Budgets & alerts) of $1.
+2. Enable the **Cloud Text-to-Speech API** for the project.
+3. **APIs & Services > Credentials > Create credentials > API key.** Restrict the key to the Cloud Text-to-Speech API. Don't add a website restriction, since Supabase calls it from a server.
+4. In Supabase, add the secret `GOOGLE_TTS_API_KEY` with that key.
+5. Deploy the `speak` function from [`supabase/functions/speak/index.ts`](supabase/functions/speak/index.ts) the same way as the other two.
+
 ## Privacy settings to turn on
 - **Groq:** in the Groq console, open **Settings** > **Data Controls** and turn on **Zero Data Retention**, so recordings sent for transcription aren't kept.
 - **Anthropic:** API data isn't used for model training by default. Keep the monthly spend limit you set.
@@ -90,4 +98,4 @@ npm run dev
 - `src/platform.js`: connects the app to Supabase, the Claude API function, and recording storage
 - `src/main.js`: sign-in screen and startup
 - `supabase/setup.sql`: database tables, security rules, recording bucket
-- `supabase/functions/`: the `ai` and `transcribe` server functions
+- `supabase/functions/`: the `ai`, `transcribe` and `speak` server functions
