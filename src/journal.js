@@ -872,6 +872,46 @@ const DICTATION_TIP = IS_MOBILE
   : /Macintosh/.test(UA) ? "Choose Edit > Start Dictation (or use your dictation shortcut) and start talking. Your Mac types as you speak."
   : /Windows/.test(UA) ? "Press Windows + H to start voice typing, then talk. Windows types as you speak."
   : "Use your device's dictation (the microphone on your keyboard) and start talking.";
+/* reads interview questions aloud with the device's own voice (free, nothing leaves the device) */
+const VOICE = (() => {
+  const ss = window.speechSynthesis;
+  const supported = !!(ss && window.SpeechSynthesisUtterance);
+  let voice = null, unlocked = false;
+  const NATURAL = /(premium|enhanced|natural|neural|siri)/i;
+  const GOOD = /^(Ava|Samantha|Allison|Susan|Zoe|Evan|Nathan|Tom|Karen|Moira|Daniel|Serena|Google US English|Google UK English Female|Microsoft (Aria|Jenny|Guy|Ana|Michelle|Emma|Brian|Ava|Andrew))/i;
+  const NOVELTY = /(compact|eloquence|albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox|grandma|grandpa|rocko|shelley|flo\b|reed|sandy|eddy|fred|junior|ralph|kathy)/i;
+  function pick(){
+    let vs = []; try { vs = ss.getVoices().filter(v => /^en([-_]|$)/i.test(v.lang)); } catch (e) {}
+    if (!vs.length) return null;
+    const score = v => (NATURAL.test(v.name) ? 4 : 0) + (GOOD.test(v.name) ? 2 : 0) + (/en[-_]US/i.test(v.lang) ? 1 : 0) - (NOVELTY.test(v.name) ? 10 : 0);
+    return vs.slice().sort((a, b) => score(b) - score(a))[0];
+  }
+  function chunks(t){
+    const out = [];
+    String(t).split(/(?<=[.?!])\s+/).forEach(sn => {
+      if (sn.length <= 180) { if (sn.trim()) out.push(sn); return; }
+      let cur = '';
+      sn.split(/(?<=,)\s+/).forEach(p => { if (cur && (cur + ' ' + p).length > 180) { out.push(cur); cur = p; } else cur = cur ? cur + ' ' + p : p; });
+      if (cur) out.push(cur);
+    });
+    return out;
+  }
+  function stop(){ if (supported) { try { ss.cancel(); } catch (e) {} } }
+  function say(text){
+    if (!supported || !text) return;
+    stop();
+    if (!voice) voice = pick();
+    chunks(text).forEach(c => { try { const u = new SpeechSynthesisUtterance(c); if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = 'en-US'; u.rate = 0.95; ss.speak(u); } catch (e) {} });
+  }
+  /* phones only allow speech after a tap, so the first tap anywhere unlocks it */
+  function unlock(){ if (!supported || unlocked) return; unlocked = true; try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; ss.speak(u); } catch (e) {} }
+  if (supported) {
+    voice = pick();
+    try { ss.addEventListener('voiceschanged', () => { voice = pick(); }); } catch (e) {}
+    try { document.addEventListener('pointerdown', unlock, {capture: true, once: true}); document.addEventListener('keydown', unlock, {capture: true, once: true}); } catch (e) {}
+  }
+  return {supported, say, stop};
+})();
 const REDUCED = (() => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } })();
 
 /* ================= icons ================= */
@@ -898,6 +938,9 @@ const ICONS = {
   filter: '<path d="M4 5h16l-6 8v6l-4-2v-4z"/>',
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  volume: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/>',
+  mute: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/>',
+  replay: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/>',
   users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.2 5 2.6 5 5.8"/>',
 };
 function Icon({name, size}){ const s = size || 20; return html`<svg className="ic" width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{__html: ICONS[name] || ''}}></svg>`; }
@@ -1224,6 +1267,7 @@ function DictationBox({id, value, onChange, placeholder, label, compact, onAudio
     setMode('idle');
   }
   async function start(){
+    VOICE.stop();
     setErr('');
     let stream;
     try { stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}}); }
@@ -1443,7 +1487,14 @@ function InterviewView({params}){
     }, 350);
     return () => clearTimeout(t);
   }, [step, first, pick, note, when, turns, current, answer, target, phase, student, clips]);
-  useEffect(() => () => { if (qCtl.current) qCtl.current.abort(); if (aCtl.current) aCtl.current.abort(); }, []);
+  useEffect(() => () => { if (qCtl.current) qCtl.current.abort(); if (aCtl.current) aCtl.current.abort(); VOICE.stop(); }, []);
+  const [voiceOn, setVoiceOn] = useState(() => lsGet('abg-voice') !== 'off');
+  useEffect(() => {
+    if (!VOICE.supported || !voiceOn || !current || loadingQ || busy || step !== 'interview') return;
+    const t = setTimeout(() => VOICE.say(current.q), 300);
+    return () => { clearTimeout(t); VOICE.stop(); };
+  }, [current && current.q, voiceOn, loadingQ, busy, step]);
+  function toggleVoice(){ const on = !voiceOn; setVoiceOn(on); lsSet('abg-voice', on ? 'on' : 'off'); if (!on) VOICE.stop(); }
 
   const matches = useMemo(() => { const k = norm(first); return k ? students.filter(x => x.nameKey === k) : []; }, [students, first]);
   const storiesFor = sid => stories.filter(s => s.studentId === sid);
@@ -1592,7 +1643,12 @@ function InterviewView({params}){
       </div>
     </section>`
     : html`<section className="question-card" aria-live="polite">
-        <p className="eyebrow">${loadingQ ? 'Next question' : stageLabel}</p>
+        <div className="q-head"><p className="eyebrow">${loadingQ ? 'Next question' : stageLabel}</p>
+          ${VOICE.supported ? html`<div className="q-voice">
+            ${voiceOn && current && !loadingQ ? html`<button type="button" className="icon-btn" aria-label="Hear the question again" title="Hear it again" onClick=${() => VOICE.say(current.q)}><${Icon} name="replay" size=${18} /></button>` : null}
+            <button type="button" className="voice-toggle" aria-pressed=${voiceOn} title=${voiceOn ? 'Questions are read aloud. Tap to turn the voice off.' : 'Tap to have questions read aloud'} onClick=${toggleVoice}><${Icon} name=${voiceOn ? 'volume' : 'mute'} size=${18} /><span>${voiceOn ? 'Voice on' : 'Voice off'}</span></button>
+          </div>` : null}
+        </div>
         ${loadingQ ? html`<p className="q-text thinking"><span className="paint-dots small-dots" aria-hidden="true"><span></span><span></span><span></span></span> Thinking of the next question…</p>`
           : current ? html`<p className="q-text">${current.q}</p>${current.why ? html`<p className="small muted">${current.why}</p>` : null}`
           : null}
@@ -2910,10 +2966,18 @@ function SettingsView(){
   const me = caps.me || {};
   const save = patch => safeWrite(() => caps.db.doc('config/settings').set(Object.assign({programs: settings.programs || [], communities: settings.communities || []}, patch, {updatedAt: nowISO()})));
   const access = readOnly ? 'View only' : (me.canEdit ? 'Editor' : 'Contributor');
+  const [voiceOn, setVoiceOn] = useState(() => lsGet('abg-voice') !== 'off');
+  const setVoice = on => { setVoiceOn(on); lsSet('abg-voice', on ? 'on' : 'off'); if (!on) VOICE.stop(); };
   return html`<div className="view settings">
     <header className="page-head"><h1>Settings</h1><p className="muted">Lists that make filling in stories faster, plus how privacy works here.</p></header>
     <${ListEditor} id="set-programs" title="Programs and projects" hint="Offered as suggestions on every story, and used as Story Library filters." items=${settings.programs || []} disabled=${readOnly} placeholder="e.g. School mural program" onChange=${v => save({programs: v})} />
     <${ListEditor} id="set-communities" title="Schools and communities" hint="Partner schools, neighborhoods, and community organizations." items=${settings.communities || []} disabled=${readOnly} placeholder="e.g. a partner school or neighborhood" onChange=${v => save({communities: v})} />
+    <section className="card">
+      <h2>Interview voice</h2>
+      ${VOICE.supported ? html`<label className="check voice-setting"><input id="set-voice" type="checkbox" checked=${voiceOn} onChange=${e => setVoice(e.target.checked)} /> <span><strong>Read interview questions aloud</strong><br /><span className="small muted">A voice asks each question as it appears, so the interview feels like a conversation. Only the question is read, and the voice stops when you press Record. Uses this device's built-in voice; the setting is saved on this device.</span></span></label>
+        <div><button type="button" className="btn btn-ghost btn-sm" onClick=${() => VOICE.say("Hi Kyle. Can you walk me through how you first met this student?")}><${Icon} name="volume" size=${16} /> Hear a sample</button></div>`
+      : html`<p className="small muted">This browser can't read questions aloud.</p>`}
+    </section>
     <section className="card">
       <h2>Privacy and AI</h2>
       <ul className="small" style=${{display: 'grid', gap: '8px'}}>
@@ -2923,6 +2987,7 @@ function SettingsView(){
         <li>Recordings are sent to Groq to be transcribed. Story text is sent to Anthropic's Claude API to choose interview questions, write impact stories, find evidence, answer searches, and draft audience versions, </li>
         <li>AI summaries and drafts are never approved automatically. Only approved stories appear in external exports and reports.</li>
         <li>Original transcripts are never overwritten. Corrections are saved alongside them.</li>
+        <li>Interview questions can be read aloud using your device's built-in voice, so no audio or text is sent anywhere for that. Turn it on or off under Interview voice, or with the Voice button on each question.</li>
       </ul>
     </section>
     <section className="card">
