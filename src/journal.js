@@ -84,7 +84,7 @@ const DOMAINS = [
   {id:'other', label:'Other'},
 ];
 const DIRECTIONS = [{id:'improved', label:'Improved'}, {id:'same', label:'No change'}, {id:'declined', label:'Declined'}, {id:'mixed', label:'Mixed'}, {id:'unclear', label:'Not stated'}];
-const LEVELS = [{id:1, label:'Level 1: personal observation'}, {id:2, label:'Level 2: observable improvement'}, {id:3, label:'Level 3: documented metric'}];
+const LEVELS = [{id:1, label:'Level 1: general impression'}, {id:2, label:'Level 2: specific observed change'}, {id:3, label:'Level 3: counted, or confirmed by another adult'}];
 const EVIDENCE_LABELS = [
   {id:'verified', label:'Documented / verified', tone:'good'},
   {id:'teacher', label:'Teacher/parent-reported', tone:'teal'},
@@ -272,7 +272,7 @@ function metricsKnown(s){ return METRIC_FIELDS.filter(f => metricVal(s, f.id)).l
 function comparisonText(e){ if (!e || (!asStr(e.before) && !asStr(e.after))) return ''; return 'Before: ' + (asStr(e.before) || 'unknown') + ' → After: ' + (asStr(e.after) || 'unknown') + (asStr(e.timeframe) ? ' (' + e.timeframe + ')' : ''); }
 function isMeasurable(e){ return e.kind === 'numeric' && e.status !== 'future'; }
 function isQualitative(e){ return e.kind !== 'numeric' && e.status !== 'future'; }
-const STATUS_LEGEND = 'Verified means checked against records. Reported means Kyle stated it. Estimate means approximate. Anecdotal means an observation. Only verified items count as documented proof.';
+const STATUS_LEGEND = 'Reported means Kyle saw it or someone told him. Estimate means approximate. Anecdotal means an impression. Verified is only for items ABG later confirms against school or program records.';
 function isStudentStory(s){ return !!(s && (s.studentId || asStr(s.alias))); }
 function fmtMetric(f, v){
   if (f.type !== 'number') return v;
@@ -368,19 +368,25 @@ YOUR JOB EACH TURN
 1. Update your interview notes from the whole conversation (previous notes are below).
 2. Choose the single most valuable next question, aimed at the biggest gap in the notes.
 
-THE FIVE CORE METRICS (prioritize these, but only the ones that fit this student's story; never force all five):
-- attendance: school attendance before and after, absences, consistency.
-- academics: grades or GPA, assignment completion, academic motivation.
-- engagement: classroom participation, involvement in school activities, interest in school.
-- confidence: observable confidence, willingness to speak or take part, leadership roles, teamwork.
-- participation: how often they came to ABG, sessions attended, how long they stayed, whether they returned or continued.
+WHAT KYLE CAN AND CAN'T KNOW
+Kyle works directly with students. He does NOT have report cards, grades, school attendance data or any school records. His evidence is what he saw himself and what teachers, parents or the student told him.
+- Never ask him for records, documents, report cards, GPAs, test scores or attendance rates, and never ask whether something is documented.
+- If he mentions a school outcome (grades, attendance, behavior), ask how he knows: who told him and what they said.
+- Missing school records are handled later as data for ABG or the consulting team to request. Not his job in the interview.
+
+THE FIVE CORE METRICS, as Kyle can observe them (prioritize these, but only the ones that fit this student's story; never force all five):
+- attendance: whether he noticed, or a teacher, parent or the student mentioned, that they missed less school or showed up more consistently.
+- academics: whether a teacher, parent or the student mentioned changes in grades, homework or motivation for school.
+- engagement: what he saw or heard about participation, focus, involvement in school or ABG activities.
+- confidence: specific behaviors he saw: speaking up, presenting work, leading a group, helping peers, working in a team.
+- participation: things he can count himself: how often they came, roughly how many sessions, how many months or years, projects or murals finished, whether they came back.
 Also valuable when relevant: access (arts education they otherwise wouldn't have had), social (peer relationships), behavior, artistic skills, pathways (interest in college or creative careers), continued arts involvement, testimonials from teachers, parents or administrators.
 
 THREE LEVELS OF EVIDENCE. Move each important claim one level up when you can:
-- Level 1, personal observation ("she became more confident") -> ask what change he actually saw: "What changes did you notice?"
-- Level 2, observable improvement ("she went from not speaking to leading a mural group") -> ask who else saw it or for a number: "Did a teacher or staff member notice that too?" or "How many times did that happen?"
-- Level 3, documented metric ("attendance went from 80% to 93%") -> ask for the source: "Are those numbers documented by the school?"
-Before-and-after comparisons are the most valuable thing you can collect: what it was before ABG, what it is now, and over what period.
+- Level 1, general impression ("she became more confident") -> ask what he actually saw: "What did she do differently?"
+- Level 2, specific observed change ("she went from sitting alone in the back to leading a group of four") -> ask how often or how long, or whether another adult noticed: "How often did that happen?" "Did a teacher mention it too?"
+- Level 3, counted or confirmed: a number Kyle can count himself (sessions, months, murals, times she presented) or a change another adult told him about ("her teacher said she speaks up in class now") -> capture who said it and what they said.
+The most valuable thing to collect is a concrete before-and-after from what he observed: what the student was like when they started, what they're like now, and over what period.
 
 STAKEHOLDERS. Collect evidence that serves all three at once; never ask separate sets of questions for each.
 - School administrators: attendance, academics, classroom engagement, behavior, access to enrichment.
@@ -392,7 +398,7 @@ RULES
 - Don't assume an outcome happened or that ABG caused it. Ask "Did their grades change?", not "How much did their grades improve?", unless he already said they improved.
 - Never pressure him for numbers he doesn't know. Never ask for a last name or other identifying details.
 - One question, ideally under 12 words, never more than 18. Plain and natural, like a colleague asking. No preamble, no praise, no "and/or" double questions, no "could you elaborate", "tell me more" or "share details".
-- Good: "Did their school attendance change?" "By how much?" "Did they take on any leadership roles?" "How often did they come to ABG?" "Did a teacher notice the change?" "Is that in their report card?"
+- Good: "What did she do differently?" "How often did she come?" "About how many sessions?" "How long has she been with ABG?" "Did she take on any leadership roles?" "Did a teacher mention any change?" "What did they say?"
 ${avoid ? '- Your last suggestion repeated an earlier question ("' + avoid + '"). Choose a different gap.' : ''}
 
 Follow-up questions asked so far: ${asked}. Aim for about ${target}. Set "enough" to true when the story and the most important relevant evidence are covered, or the remaining gaps are things Kyle doesn't know.
@@ -434,8 +440,8 @@ const ANALYSIS_SHAPE = `{
   "categories": ["category ids"],
   "themes": ["theme ids"],
   "stakeholders": {"primary": ["up to 3 audience ids, most relevant first"], "schools": "one sentence: how this student's documented or reported outcomes answer 'How does ABG benefit students at our school?', or null if nothing relevant", "donors": "one sentence answering 'What difference is our contribution making?', or null", "grants": "one sentence answering 'Can ABG demonstrate outcomes that justify continued funding?', naming the evidence level, or null", "why": "Stakeholder value: 2 or 3 sentences on how the documented outcomes show ABG's impact and support donor funding or school partnerships. Claim only what the evidence supports, and say when outcomes are reported or estimated rather than verified."},
-  "evidence": [{"metric": "short name of what was measured or observed, e.g. School attendance rate, English grade, Leadership role, Sessions attended", "domain": "attendance | academics | engagement | confidence | participation | access | social | behavior | artistic | pathways | other", "direction": "improved | same | declined | mixed | unclear (only what Kyle said; unclear if he didn't say)", "level": "1 personal observation | 2 observable improvement | 3 documented metric (give the number)", "category": "category id", "kind": "numeric for measurable outcomes (numbers, counts, rates, before-and-after comparisons, durations) | qualitative for observations and testimonials", "statement": "what the evidence shows", "value": null, "unit": "students, sessions, hours, percent, years... or null", "before": "the value or situation before ABG, or null", "after": "the value or situation after, or null", "timeframe": "the period compared, e.g. fall 2023 to spring 2024, or null", "status": "reported | estimate | qualitative | unverified | future", "observer": "abg_staff | teacher | school_staff | parent | student | records | other", "basis": "who observed or reported it, e.g. Kyle observed directly; teacher told Kyle; attendance records Kyle mentioned", "excerpt": "short passage copied word for word from the interview"}],
-  "missingMetrics": [{"metric": "Missing data: an important outcome that was mentioned but not quantified or verified (e.g. School attendance records needed; Teacher testimony could support the reported improvement), or a relevant core metric the interview didn't cover", "why": "how it would strengthen the case for stakeholders", "howToGet": "where it might come from"}],
+  "evidence": [{"metric": "short name of what was observed or counted, e.g. Sessions attended, Months in the program, Leadership role, Speaking up in class (teacher-reported)", "domain": "attendance | academics | engagement | confidence | participation | access | social | behavior | artistic | pathways | other", "direction": "improved | same | declined | mixed | unclear (only what Kyle said; unclear if he didn't say)", "level": "1 personal observation | 2 observable improvement | 3 documented metric (give the number)", "category": "category id", "kind": "numeric for measurable outcomes (numbers, counts, rates, before-and-after comparisons, durations) | qualitative for observations and testimonials", "statement": "what the evidence shows", "value": null, "unit": "students, sessions, hours, percent, years... or null", "before": "the value or situation before ABG, or null", "after": "the value or situation after, or null", "timeframe": "the period compared, e.g. fall 2023 to spring 2024, or null", "status": "reported | estimate | qualitative | unverified | future", "observer": "abg_staff | teacher | school_staff | parent | student | records | other", "basis": "who observed or reported it, e.g. Kyle observed directly; teacher told Kyle; attendance records Kyle mentioned", "excerpt": "short passage copied word for word from the interview"}],
+  "missingMetrics": [{"metric": "Missing data: an outcome that was mentioned but not quantified or confirmed, or a relevant core metric the interview didn't cover. Kyle has no school records, so phrase record-based items as things ABG or the consulting team could request (e.g. School attendance records could be requested from the school; A teacher statement could confirm the change Kyle observed)", "why": "how it would strengthen the case for stakeholders", "howToGet": "where it might come from"}],
   "quotes": [{"text": "the words", "speaker": "first name or role, or Narrator", "kind": "exact | remembered | paraphrase"}],
   "milestones": [{"date": {"text": "when, or null", "iso": "YYYY or YYYY-MM, or null"}, "label": "what happened", "phase": "circumstances | involvement | immediate | short_term | long_term | future", "confirmed": true}],
   "materials": [{"type": "photo | artwork | video | testimonial | record | survey | other", "description": "what exists and where, as Kyle described it"}],
@@ -471,14 +477,14 @@ function analysisPrompt({mode, story, items, others, whenHint, studentName, memo
 - Don't treat a reported change (more confidence, for example) as a measured increase.
 - Every evidence item needs "excerpt": a short passage copied word for word from the entries that supports it, and "basis": who observed or reported it.
 - Evidence status: "reported" for numbers or facts Kyle states plainly; "estimate" for approximate numbers ("about", "around", "maybe"); "qualitative" for non-numeric observations; "unverified" for secondhand or uncertain claims; "future" for hoped-for or expected outcomes. Never use "verified": only ABG staff verify evidence, against records.
-- Every evidence item needs "metric", "domain", "direction" and "level". Level 1 is Kyle's impression ("more confident"); level 2 is a specific observable change ("went from silent to leading a group"); level 3 is a number or documented measure ("attendance rose from 80% to 93%"). A level 3 item is only documented if Kyle says the school or records show it; otherwise it is still "reported".
+- Every evidence item needs "metric", "domain", "direction" and "level". Level 1 is Kyle's general impression ("more confident"); level 2 is a specific change he observed ("went from silent to leading a group"); level 3 is something he counted himself (sessions, months, murals) or a change another adult told him about. Kyle has no school records: his observations are "reported" with observer abg_staff; something a teacher, parent or school staff member told him is "reported" with that observer; something the student said is observer student. Never mark anything verified.
 - Capture before-and-after comparisons whenever Kyle gives them, including non-numeric ones (before: "no leadership role", after: "led a four-student mural group").
 - Never imply ABG caused an outcome just because it happened during participation.
 - Measurable outcomes are "numeric" evidence: specific numbers, counts, rates, durations and before-and-after comparisons. Put the number in "value" only when Kyle states it. Fill "before", "after" and "timeframe" only with what Kyle said.
 - Qualitative evidence: observations and testimonials from the student, parents, teachers, school staff or ABG staff. Set "observer" to who saw or said it.
 - Never present an anecdote or estimate as a proven outcome. Status separates them: documented data is only ever marked verified later by ABG staff; plain statements are "reported"; approximate numbers are "estimate"; observations are "qualitative".
 - metricsCard: the standard metrics card, filled in the same way for every student story. Fields: ${METRIC_FIELDS.map(f => f.id + ' (' + f.label + (f.type === 'number' ? ', a number only' : f.type === 'choice' ? ', one of: ' + f.options.join(' / ') : ', short text') + ')').join('; ')}. Include a field only when the entries actually say it, and leave the rest out (they show as unknown). Status "reported" when Kyle states it plainly, "estimate" when approximate ("about", "maybe", "I think"). Never "verified". Don't infer attendance from participation, or graduation from age. If the entries aren't about one student, use an empty object.
-- missingMetrics: information that would make the story more credible for stakeholders but isn't documented yet (attendance records, program size, teacher feedback...). Only ones relevant to this story.
+- missingMetrics: information that would make the story more credible for stakeholders but isn't available yet (records ABG could request from a school, a teacher or parent statement, program sign-in counts...). Only ones relevant to this story. Never suggest Kyle obtain school records himself.
 - Quotes: "exact" for words that appear word for word in the entries and were clearly said, including Kyle's own quotable statements (speaker "Narrator"); "remembered" when Kyle recalls what someone said; "paraphrase" for statements put in other words. Copy exact and remembered quotes exactly as they appear. Never create a quote.
 - Milestones fill the student's timeline. Use phase "future" only for possible developments worth checking on, with confirmed false. Never present anticipated impact as accomplished.`,
     mode === 'update' ? `FOR THIS UPDATE: "story" and "summary" are the full updated versions combining the existing record with the new information. "takeaways" and "stakeholders" cover the whole story. "missingMetrics" is the complete current list. "metricsCard" contains only fields the new entries state or change. "evidence", "quotes", "milestones", "materials" and "recommendedFollowUps" contain ONLY new items from the new entries. In "structure", give updated text only for parts the new entries change and null for the rest. "eventDate" is when the new development happened.` : '',
@@ -2002,7 +2008,7 @@ function EvidenceEdit({ev, onChange, onRemove, onShow}){
     </div>
     ${src.excerpt
       ? html`<div className=${'excerpt' + (src.found ? '' : ' missing')}><span>“${src.excerpt}”</span>${!src.found ? html`<span className="warn-note"> Not found word for word in the transcript. Check it before relying on it.</span>` : null}${onShow ? html` <button type="button" className="btn btn-quiet btn-sm" onClick=${onShow}>Show in transcript</button>` : null}</div>`
-      : html`<${Field} label="Supporting record" hint="e.g. attendance sheet or school report"><input className="input" value=${src.note || ''} onChange=${e => onChange({source: Object.assign({}, src, {note: e.target.value})})} /><//>`}
+      : html`<${Field} label="How it's known" hint="e.g. Kyle saw it at sessions, or a teacher told him"><input className="input" value=${src.note || ''} onChange=${e => onChange({source: Object.assign({}, src, {note: e.target.value})})} /><//>`}
   </div>`;
 }
 function StoryEditor({draft, setDraft, items, mode}){
@@ -2380,7 +2386,7 @@ function AdaptSheet({storyId, close}){
 function AddEvidenceSheet({storyId, close, kind}){
   const {caps, stories, safeWrite, showToast} = useApp();
   const numeric = kind !== 'qualitative';
-  const [f, setF] = useState({statement: '', category: numeric ? 'reach' : 'personal', value: '', unit: '', before: '', after: '', timeframe: '', observer: numeric ? 'records' : 'teacher', status: numeric ? 'verified' : 'qualitative', note: '', metric: '', domain: numeric ? 'attendance' : 'confidence', direction: 'improved'});
+  const [f, setF] = useState({statement: '', category: numeric ? 'reach' : 'personal', value: '', unit: '', before: '', after: '', timeframe: '', observer: 'abg_staff', status: numeric ? 'reported' : 'qualitative', note: '', metric: '', domain: numeric ? 'attendance' : 'confidence', direction: 'improved'});
   const set = (k, v) => setF(x => Object.assign({}, x, {[k]: v}));
   async function save(){
     const story = stories.find(s => s.id === storyId);
@@ -2393,7 +2399,7 @@ function AddEvidenceSheet({storyId, close, kind}){
   }
   return html`<div className="view" style=${{gap: '12px'}}>
     <${SheetHead} title=${numeric ? 'Add a measurable outcome' : 'Add qualitative evidence'} close=${close} />
-    <p className="small muted">${numeric ? 'For numbers and before-and-after comparisons, ideally from a record such as an attendance sheet, report card, or program log.' : 'For an observation or testimonial, such as something a teacher or parent noticed.'}</p>
+    <p className="small muted">${numeric ? 'For something counted or compared, like sessions attended, months in the program, or how the student acted before versus now.' : 'For an observation, or something a teacher, parent, or the student told you.'}</p>
     <div className="row">
       <${Field} label="Metric"><input id="ae-metric" className="input" placeholder=${numeric ? 'e.g. School attendance rate' : 'e.g. Classroom participation'} value=${f.metric} onChange=${e => set('metric', e.target.value)} /><//>
       <${Field} label="Impact area"><select id="ae-domain" className="select" value=${f.domain} onChange=${e => set('domain', e.target.value)}>${DOMAINS.map(d => html`<option key=${d.id} value=${d.id}>${d.label}</option>`)}</select><//>
@@ -2414,7 +2420,7 @@ function AddEvidenceSheet({storyId, close, kind}){
       <${Field} label="Category"><select id="ae-cat" className="select" value=${f.category} onChange=${e => set('category', e.target.value)}>${CATEGORIES.map(c => html`<option key=${c.id} value=${c.id}>${c.label}</option>`)}</select><//>
       <${Field} label="Status"><select id="ae-status" className="select" value=${f.status} onChange=${e => set('status', e.target.value)}>${EVIDENCE_STATUS.map(s => html`<option key=${s.id} value=${s.id}>${s.label}</option>`)}</select><//>
     </div>
-    <${Field} label="Source"><input id="ae-source" className="input" placeholder="e.g. Spring 2026 attendance sheets" value=${f.note} onChange=${e => set('note', e.target.value)} /><//>
+    <${Field} label="Source"><input id="ae-source" className="input" placeholder="e.g. Saturday sessions, or what her teacher said" value=${f.note} onChange=${e => set('note', e.target.value)} /><//>
     <div className="row-btns end"><button className="btn btn-ghost" onClick=${close}>Cancel</button><button className="btn btn-primary" disabled=${!asStr(f.statement)} onClick=${save}>Add evidence</button></div>
   </div>`;
 }
@@ -2650,7 +2656,7 @@ function StoryView({id}){
 
     <section className="card">
       <div className="sec-head"><h2>Measurable outcomes</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddEvidenceSheet} storyId=${id} close=${close} kind="numeric" />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
-      ${comparisons.length ? html`<${OutcomeTable} rows=${comparisons.map(r => r.e)} />` : html`<p className="empty-note small">No before-and-after comparisons yet. They often come from a report card, attendance records, or a teacher.</p>`}
+      ${comparisons.length ? html`<${OutcomeTable} rows=${comparisons.map(r => r.e)} />` : html`<p className="empty-note small">No before-and-after comparisons yet, such as how the student acted when they started versus now, or a change a teacher mentioned.</p>`}
       ${isStudentStory(story) ? html`<${MetricsCardView} story=${story} readOnly=${readOnly} embedded=${true} onEdit=${editStory} />` : null}
     </section>
 
@@ -2677,7 +2683,7 @@ function StoryView({id}){
 
     <section className="card">
       <h2>Missing data</h2>
-      <p className="small muted">Outcomes that were mentioned but not quantified or verified, and what to check next.</p>
+      <p className="small muted">Outcomes that were mentioned but not counted or confirmed, plus records ABG or the consulting team could request later.</p>
       ${(story.missingMetrics || []).length === 0 ? html`<p className="empty-note small">None identified.</p>` : story.missingMetrics.map(m => html`<div className="ev" key=${m.id}>
         <div className="ev-head"><p className="ev-statement"><strong>${m.metric}</strong></p>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => removeMissing(m.id)}>Found or not needed</button>` : null}</div>
         ${m.why ? html`<p className="small">${m.why}</p>` : null}
