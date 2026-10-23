@@ -67,6 +67,8 @@ const EVIDENCE_STATUS = [
   {id:'unverified', label:'Unverified', tone:'bad'},
   {id:'future', label:'Not yet documented', tone:'outline'},
 ];
+const GENDERS = [{id:'male', label:'Male'}, {id:'female', label:'Female'}, {id:'other', label:'Other'}];
+function studentInfoText(si){ if (!si) return ''; return [si.gender ? 'gender: ' + labelOf(GENDERS, si.gender) : '', si.school ? 'school: ' + si.school : '', si.demographics ? 'other details: ' + si.demographics : ''].filter(Boolean).join('; '); }
 /* who observed or reported a piece of evidence */
 const OBSERVERS = [
   {id:'abg_staff', label:'ABG staff (Kyle)'},
@@ -221,6 +223,13 @@ function fmtMetric(f, v){
 }
 function titleFromText(t){ const w = String(t || '').trim().split(/\s+/).slice(0, 8).join(' '); return w ? w + '…' : 'Untitled story'; }
 
+/* first name for the greeting: "Jacob Pajimola", "jacob.pajimola", "kyle_smith" or "sarah.johnson@email.com" all give the first name */
+function firstNameOf(raw){
+  let t = asStr(raw); if (!t) return '';
+  if (t.includes('@')) t = t.split('@')[0];
+  const part = t.split(/[\s._\-+]+/).map(x => x.replace(/[^\p{L}'’]/gu, '')).find(x => x.length > 1) || '';
+  return part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : '';
+}
 /* story helpers */
 function evidenceCounts(s){ const c = {}; (s.evidence || []).forEach(e => { c[e.status] = (c[e.status] || 0) + 1; }); return c; }
 function hasMeasurable(s){ return (s.evidence || []).some(e => e.kind === 'numeric'); }
@@ -285,7 +294,7 @@ function dbErrorMessage(e){
 /* ================= AI prompts ================= */
 const ABG_CONTEXT = "Arts Bridging the Gap (ABG) is a Los Angeles nonprofit that serves youth from under-resourced communities through arts education, creative programming and community art projects. Kyle is its Executive Director.";
 
-function interviewPrompt({name, turns, mode, story, asked, target, memo}){
+function interviewPrompt({name, turns, mode, story, asked, target, memo, info}){
   const convo = turns.map(t => 'Q (' + t.kind + '): ' + t.q + '\nA: ' + (t.status === 'skipped' ? '[Kyle skipped this question]' : t.a)).join('\n\n');
   const existing = story ? {summary: story.summary, timeline: (story.milestones || []).map(m => (fmtEventDate(m.date) || 'undated') + ': ' + m.label), dataGaps: (story.missingMetrics || []).map(m => m.metric),
     metricsAlreadyKnown: METRIC_FIELDS.filter(f => metricVal(story, f.id)).map(f => f.label + ': ' + metricVal(story, f.id).value)} : null;
@@ -294,6 +303,7 @@ function interviewPrompt({name, turns, mode, story, asked, target, memo}){
 You are interviewing Kyle about a student named ${name}. The consulting team uses these interviews to show donors, school administrators and grant providers what measurable difference ABG makes, so the goal is the student's story plus the concrete evidence behind it.
 ${mode === 'update' ? 'This is an UPDATE interview about a story already in the journal. Focus on what is new since it was recorded. Existing record: ' + JSON.stringify(existing) : ''}
 ${memo ? "Kyle's one-line note about " + name + ' from his student list: "' + memo + '". Treat it as a starting point he wants to cover, not as confirmed detail.' : ''}
+${studentInfoText(info) ? 'Already entered about ' + name + ' (never ask for these again): ' + studentInfoText(info) + '.' : ''}
 
 Choose the single best NEXT follow-up question.
 
@@ -357,9 +367,9 @@ const ANALYSIS_SHAPE = `{
   "structure": {"character": "text or null", "circumstances": "text or null", "involvement": "text or null", "events": "text or null", "outcomes": "text or null", "longTerm": "text or null"},
   "categories": ["category ids"],
   "themes": ["theme ids"],
-  "stakeholders": {"primary": ["up to 3 audience ids, most relevant first"], "why": "Stakeholder Value: 2 or 3 sentences on how the documented outcomes show ABG's impact and support donor funding or school partnerships. Claim only what the evidence supports, and say when outcomes are reported or estimated rather than verified."},
+  "stakeholders": {"primary": ["up to 3 audience ids, most relevant first"], "why": "Stakeholder impact summary: 2 or 3 sentences on how the documented outcomes show ABG's impact and support donor funding or school partnerships. Claim only what the evidence supports, and say when outcomes are reported or estimated rather than verified."},
   "evidence": [{"category": "category id", "kind": "numeric for measurable outcomes (numbers, counts, rates, before-and-after comparisons, durations) | qualitative for observations and testimonials", "statement": "what the evidence shows", "value": null, "unit": "students, sessions, hours, percent, years... or null", "before": "the value or situation before ABG, or null", "after": "the value or situation after, or null", "timeframe": "the period compared, e.g. fall 2023 to spring 2024, or null", "status": "reported | estimate | qualitative | unverified | future", "observer": "abg_staff | teacher | school_staff | parent | student | records | other", "basis": "who observed or reported it, e.g. Kyle observed directly; teacher told Kyle; attendance records Kyle mentioned", "excerpt": "short passage copied word for word from the interview"}],
-  "missingMetrics": [{"metric": "Data Gaps: an important metric that wasn't available in the interview but could be collected later", "why": "how it would strengthen the case for stakeholders", "howToGet": "where it might come from"}],
+  "missingMetrics": [{"metric": "Missing data: an important metric that wasn't available in the interview but could be collected later", "why": "how it would strengthen the case for stakeholders", "howToGet": "where it might come from"}],
   "quotes": [{"text": "the words", "speaker": "first name or role, or Narrator", "kind": "exact | remembered | paraphrase"}],
   "milestones": [{"date": {"text": "when, or null", "iso": "YYYY or YYYY-MM, or null"}, "label": "what happened", "phase": "circumstances | involvement | immediate | short_term | long_term | future", "confirmed": true}],
   "materials": [{"type": "photo | artwork | video | testimonial | record | survey | other", "description": "what exists and where, as Kyle described it"}],
@@ -369,7 +379,7 @@ const ANALYSIS_SHAPE = `{
   "containsIdentifying": false
 }`;
 
-function analysisPrompt({mode, story, items, others, whenHint, studentName, memo}){
+function analysisPrompt({mode, story, items, others, whenHint, studentName, memo, studentInfo}){
   const entriesText = items.map((it, i) => '--- Entry ' + (i + 1) + ' (recorded ' + (fmtDate(it.recordedAt) || 'today') + ') ---\n' + it.text).join('\n\n');
   const existing = story ? {
     title: story.title, story: story.story || story.summary, student: story.alias || null, overview: story.overview || {}, when: fmtEventDate(story.eventDate) || null,
@@ -385,6 +395,7 @@ function analysisPrompt({mode, story, items, others, whenHint, studentName, memo
     mode === 'update' ? "This is an UPDATE to a story already in the journal. Treat the existing record as true context and keep its facts.\nEXISTING RECORD:\n" + JSON.stringify(existing) : '',
     whenHint ? "Kyle says the experience happened: " + whenHint : '',
     memo ? "Kyle's one-line note from his student list (context only, not a source for evidence excerpts): " + memo : '',
+    studentInfoText(studentInfo) ? "Student details Kyle entered on the form (treat as given; don't repeat demographics in the story unless they matter to it): " + studentInfoText(studentInfo) : '',
     `RULES
 - Story first, evidence second, stakeholder value third. Preserve the human element; don't reduce the story to statistics.
 - Use only what the entries${mode === 'update' ? ' and existing record' : ''} say. Never invent names, numbers, dates, outcomes, percentages, survey results or quotes. Use null or an empty list when information isn't there.
@@ -475,11 +486,11 @@ function normalizeAnalysis(raw, ctx){
   };
 }
 
-async function runAnalysis({sample, mode, story, stories, items, whenHint, studentName, memo, signal}){
+async function runAnalysis({sample, mode, story, stories, items, whenHint, studentName, memo, studentInfo, signal}){
   const others = stories.filter(s => !story || s.id !== story.id)
     .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0, 80)
     .map(s => ({id: s.id, title: s.title || null, student: s.alias || null, program: s.program || null, community: s.community || null, summary: trunc(s.summary, 220) || null}));
-  const prompt = analysisPrompt({mode, story, items, others, whenHint, memo: asStr(memo), studentName: studentName || (story && story.alias) || ''});
+  const prompt = analysisPrompt({mode, story, items, others, whenHint, memo: asStr(memo), studentInfo, studentName: studentName || (story && story.alias) || ''});
   let raw;
   try { raw = await sample.json(prompt, {modelTier: 'default', signal}); }
   catch (e) {
@@ -618,6 +629,9 @@ function newStoryFromAnalysis(a, opts){
     takeaways: a.takeaways, structure: a.structure, evidence: a.evidence, missingMetrics: a.missingMetrics, quotes: a.quotes, milestones: a.milestones,
     materials: a.materials, followUps: a.followUps, metrics: a.metrics || {}, analysis: {state: 'done', at: nowISO()},
   });
+  const si = opts.studentInfo || {};
+  s.overview = Object.assign({}, s.overview, {gender: si.gender || '', demographics: si.demographics || ''});
+  if (si.school) s.community = si.school;
   s._suggest = a.links;
   s.privacy = {minor: a.isMinor, identifying: a.containsIdentifying ? 'yes' : 'unknown', permission: 'unknown', external: 'unknown', redact: a.containsIdentifying ? 'yes' : 'unknown'};
   return s;
@@ -657,7 +671,7 @@ function mergeUpdate(base, a){
   return d;
 }
 function buildReviewDraft(p){
-  const {mode, base, analysis, whenHint, approx, me, followupId, answered, entry, studentId, studentName} = p;
+  const {mode, base, analysis, whenHint, approx, me, followupId, answered, entry, studentId, studentName, studentInfo} = p;
   if (mode === 'edit') return base ? Object.assign(blankStory({}), clone(base)) : null;
   if (mode === 'update') {
     if (!base) return null;
@@ -666,7 +680,7 @@ function buildReviewDraft(p){
     if (followupId) d.followUps = d.followUps.map(f => f.id === followupId ? Object.assign({}, f, {status: 'done', answer: analysis.entrySummary || '', entryId: entry ? entry.id : null}) : f);
     return d;
   }
-  const d = newStoryFromAnalysis(analysis, {whenHint, approx, me, studentId, studentName});
+  const d = newStoryFromAnalysis(analysis, {whenHint, approx, me, studentId, studentName, studentInfo});
   if (base) Object.assign(d, {id: base.id, createdAt: base.createdAt, createdBy: base.createdBy, entryCount: base.entryCount || 1, status: base.status || 'draft', drafts: base.drafts || [], links: base.links || [], studentId: base.studentId || null, alias: base.alias || d.alias, publicName: base.publicName || ''});
   return d;
 }
@@ -707,7 +721,7 @@ function storiesCSV(stories){
   return toCSV([
     ['Story ID', s => s.id], ['Student record ID', s => s.studentId], ['Student first name', s => s.alias], ['Public alias', s => s.publicName], ['Title', s => s.title], ['Status', s => labelOf(STATUSES, s.status)], ['Type', s => s.period === 'past' ? 'Historical' : 'Recent'],
     ['When it happened', s => fmtEventDate(s.eventDate)], ['Sort date', s => s.eventDate && s.eventDate.iso], ['Approximate date', s => s.eventDate && s.eventDate.approximate ? 'Yes' : 'No'],
-    ['Age or grade', s => (s.overview || {}).ageOrGrade], ['Program', s => s.program], ['Metrics known', s => isStudentStory(s) ? metricsKnown(s) + ' of ' + METRIC_FIELDS.length : ''], ['School or community', s => s.community], ['Summary', s => s.summary], ['Impact story', s => s.story],
+    ['Gender', s => (s.overview || {}).gender ? labelOf(GENDERS, s.overview.gender) : ''], ['Age or grade', s => (s.overview || {}).ageOrGrade], ['Other details', s => (s.overview || {}).demographics], ['Program', s => s.program], ['Metrics known', s => isStudentStory(s) ? metricsKnown(s) + ' of ' + METRIC_FIELDS.length : ''], ['School or community', s => s.community], ['Summary', s => s.summary], ['Impact story', s => s.story],
     ['Key takeaways', s => (s.takeaways || []).join(' | ')], ['Impact categories', s => lbls(CATEGORIES, s.categories)], ['Themes', s => lbls(THEMES, s.themes)], ['Useful for', s => lbls(AUDIENCES, s.audiences)], ['Why it matters to them', s => s.stakeholderWhy],
     ['Journal entries', s => s.entryCount || 1], ['Evidence items', s => (s.evidence || []).length], ['Verified evidence', s => evidenceCounts(s).verified || 0], ['Missing metrics', s => (s.missingMetrics || []).map(m => m.metric).join(' | ')],
     ['Open follow-ups', s => openQuestions(s).length + openTasks(s).length],
@@ -828,6 +842,7 @@ function teamCSV(stories, students){
     ['Student code', r => r.code], ['Stories', r => r.p.stories.length], ['Story titles', r => r.p.stories.map(s => r.sc(s.title)).join(' | ')],
     ['Type', r => uniq(r.p.stories.map(s => s.period === 'past' ? 'Historical' : 'Recent')).join(' and ')],
     ['When', r => uniq(r.p.stories.map(s => fmtEventDate(s.eventDate))).join('; ')],
+    ['Gender', r => uniq(r.p.stories.map(s => (s.overview || {}).gender ? labelOf(GENDERS, s.overview.gender) : '')).join('; ')], ['Other details', r => r.sc(uniq(r.p.stories.map(s => (s.overview || {}).demographics)).join('; '))],
     ['ABG program', r => uniq(r.p.stories.map(s => s.program)).join('; ')], ['School or community', r => uniq(r.p.stories.map(s => s.community)).join('; ')],
     ['Metrics known', r => Object.keys(r.p.metrics).length + ' of ' + METRIC_FIELDS.length],
   ];
@@ -868,11 +883,11 @@ function approvedMarkdown(stories, audience){
       out.push('');
     }
     const qual = (s.evidence || []).filter(e => isQualitative(e) && e.status !== 'unverified');
-    if (qual.length) { out.push('**Qualitative evidence** (observations, anecdotal)'); qual.forEach(e => out.push(evLine(e, swap))); out.push(''); }
-    if ((s.missingMetrics || []).length) { out.push('**Data gaps**'); s.missingMetrics.forEach(m => out.push('- ' + swap(m.metric))); out.push(''); }
-    if (s.stakeholderWhy) out.push('**Stakeholder value:** ' + swap(s.stakeholderWhy), '');
+    if (qual.length) { out.push('**Qualitative observations** (anecdotal)'); qual.forEach(e => out.push(evLine(e, swap))); out.push(''); }
     const q = (s.quotes || []).filter(x => x.approved);
-    if (q.length) { out.push('**Approved quotes**'); q.forEach(x => out.push('> "' + swap(x.text) + '" (' + (x.speaker === s.alias ? (name || 'a student') : (x.speaker || 'unknown speaker')) + ', ' + labelOf(QUOTE_KINDS, x.kind).toLowerCase() + ')')); out.push(''); }
+    if (q.length) { out.push('**Supporting evidence: approved quotes**'); q.forEach(x => out.push('> "' + swap(x.text) + '" (' + (x.speaker === s.alias ? (name || 'a student') : (x.speaker || 'unknown speaker')) + ', ' + labelOf(QUOTE_KINDS, x.kind).toLowerCase() + ')')); out.push(''); }
+    if ((s.missingMetrics || []).length) { out.push('**Missing data**'); s.missingMetrics.forEach(m => out.push('- ' + swap(m.metric))); out.push(''); }
+    if (s.stakeholderWhy) out.push('**Stakeholder impact summary:** ' + swap(s.stakeholderWhy), '');
     const dr = (s.drafts || []).filter(x => x.approved && (!audience || x.audience === audience));
     if (dr.length) { out.push('**Approved audience versions**'); dr.forEach(x => out.push('', '*' + labelOf(FORMATS, x.format) + ', ' + labelOf(AUDIENCES, x.audience) + '*', '', x.text)); out.push(''); }
   });
@@ -889,7 +904,7 @@ function storyMarkdown(s, entries){
   const ov = s.overview || {};
   const out = ['# ' + s.title, '', 'INTERNAL STUDENT IMPACT REPORT. Contains full transcripts. Status: ' + labelOf(STATUSES, s.status) + '.', ''];
   out.push('## Student overview');
-  [['Student', s.alias], ['Age or grade', ov.ageOrGrade], ['School or community', s.community], ['Background', ov.background], ['ABG program', s.program], ['When involved', ov.involvementDate || fmtEventDate(s.eventDate)]]
+  [['Student', s.alias], ['Gender', ov.gender ? labelOf(GENDERS, ov.gender) : ''], ['Age or grade', ov.ageOrGrade], ['School or community', s.community], ['Other details', ov.demographics], ['Background', ov.background], ['ABG program', s.program], ['When involved', ov.involvementDate || fmtEventDate(s.eventDate)]]
     .filter(r => r[1]).forEach(r => out.push('- **' + r[0] + ':** ' + r[1]));
   out.push('');
   const withPassage = e => evLine(e) + (e.source && e.source.excerpt ? ' (passage: "' + e.source.excerpt + '")' : (e.source && e.source.note ? ' (record: ' + e.source.note + ')' : ''));
@@ -899,19 +914,21 @@ function storyMarkdown(s, entries){
   if (isStudentStory(s)) { out.push('**Student metrics card**'); METRIC_FIELDS.forEach(f => { const m = metricVal(s, f.id); out.push('- ' + f.label + ': ' + (m ? fmtMetric(f, m.value) + ' [' + labelOf(METRIC_STATUS, m.status) + ']' : 'Unknown')); }); out.push(''); }
   const meas = (s.evidence || []).filter(isMeasurable), qual = (s.evidence || []).filter(isQualitative), fut = (s.evidence || []).filter(e => e.status === 'future');
   if (meas.length) { out.push('**Numbers and comparisons**'); meas.forEach(e => out.push(withPassage(e))); out.push(''); } else out.push('No numbers or comparisons recorded yet.', '');
-  out.push('## Qualitative evidence', '');
+  out.push('## Qualitative observations', '');
   if (qual.length) { qual.forEach(e => out.push(withPassage(e))); out.push(''); } else out.push('None recorded.', '');
+  out.push('## Supporting evidence', '');
   if ((s.quotes || []).length) { out.push('**Quotes**'); s.quotes.forEach(q => out.push('> "' + q.text + '" (' + (q.speaker || 'unknown') + ', ' + labelOf(QUOTE_KINDS, q.kind).toLowerCase() + (q.approved ? ', approved' : '') + ')')); out.push(''); }
-  out.push('## Data gaps', '');
+  if ((s.materials || []).length) { out.push('**Photos, records and other materials**'); s.materials.forEach(m => out.push('- ' + labelOf(MATERIAL_TYPES, m.type) + ': ' + m.description)); out.push(''); }
+  if (!(s.quotes || []).length && !(s.materials || []).length) out.push('None noted yet.', '');
+  out.push('## Missing data and follow-up', '');
   (s.missingMetrics || []).forEach(m => out.push('- ' + m.metric + (m.why ? ': ' + m.why : '') + (m.howToGet ? ' (where to find it: ' + m.howToGet + ')' : '')));
   if (isStudentStory(s)) { const unk = METRIC_FIELDS.filter(f => !metricVal(s, f.id)); if (unk.length) out.push('- Unknown on the metrics card: ' + unk.map(f => f.short).join(', ')); }
   fut.forEach(e => out.push('- Expected, not yet documented: ' + e.statement));
+  (s.followUps || []).forEach(f => out.push('- Follow-up: ' + f.question + ' [' + f.status + ']' + (f.answer ? ': ' + f.answer : '')));
   out.push('');
-  out.push('## Stakeholder value', '', s.stakeholderWhy || 'Not written yet.', '');
+  out.push('## Stakeholder impact summary', '', s.stakeholderWhy || 'Not written yet.', '');
   if ((s.audiences || []).length) out.push('**Most useful for:** ' + s.audiences.map(a => labelOf(AUDIENCES, a)).join(', '), '');
-  if ((s.followUps || []).length) { out.push('## Recommended follow-up'); s.followUps.forEach(f => out.push('- ' + f.question + ' [' + f.status + ']' + (f.answer ? ': ' + f.answer : ''))); out.push(''); }
   if ((s.milestones || []).length) { out.push('## Student impact timeline'); sortMilestones(s.milestones).forEach(m => out.push('- ' + labelOf(PHASES, m.phase) + ' · ' + (fmtEventDate(m.date) || 'Date unknown') + ': ' + m.label + (m.phase === 'future' ? ' (pending)' : ''))); out.push(''); }
-  if ((s.materials || []).length) { out.push('## Supporting materials'); s.materials.forEach(m => out.push('- ' + labelOf(MATERIAL_TYPES, m.type) + ': ' + m.description)); out.push(''); }
   (entries || []).forEach((e, i) => {
     out.push('## ' + (i === 0 ? 'Original interview' : 'Story update') + ' (recorded ' + fmtDate(e.recordedAt) + ')', '');
     if (e.transcriptEdited) out.push('**Corrected transcript**', '', e.transcriptEdited, '', '**Original transcript**', '');
@@ -1134,49 +1151,68 @@ function useNames(ids){
 /* ================= navigation chrome ================= */
 const NAV = [
   {id: 'home', label: 'Home', icon: 'home'},
-  {id: 'backlog', label: 'Student List', short: 'Students', icon: 'users'},
-  {id: 'library', label: 'Story Library', short: 'Library', icon: 'book'},
-  {id: 'followups', label: 'Follow-Ups', short: 'Follow-ups', icon: 'flag'},
-  {id: 'insights', label: 'Impact Dashboard', short: 'Insights', icon: 'chart'},
-  {id: 'reports', label: 'Impact Reports', icon: 'file'},
+  {id: 'library', label: 'Stories', icon: 'book'},
+  {id: 'insights', label: 'Impact Dashboard', short: 'Dashboard', icon: 'chart'},
   {id: 'settings', label: 'Settings', icon: 'gear'},
 ];
-function isCurrent(route, id){ return route.name === id || (id === 'library' && route.name === 'story'); }
+const STORIES_ROUTES = ['library', 'story', 'backlog', 'followups'];
+function isCurrent(route, id){ if (id === 'library') return STORIES_ROUTES.includes(route.name); if (id === 'insights') return route.name === 'insights' || route.name === 'reports'; return route.name === id; }
 function Sidebar(){
   const {route, nav, readOnly, stories} = useApp();
   const due = countDue(stories);
   return html`<aside className="sidebar">
     <${Brand} />
-    ${!readOnly ? html`<button className="btn side-rec" onClick=${() => nav('interview')}><${Icon} name="mic" /> Record a Story</button>` : null}
+    ${!readOnly ? html`<button className="btn side-rec" onClick=${() => nav('interview')}><${Icon} name="mic" /> New Story</button>` : null}
     <nav className="side-nav" aria-label="Main">
-      ${NAV.map(n => html`<button key=${n.id} className="side-link" aria-current=${isCurrent(route, n.id) ? 'page' : undefined} onClick=${() => nav(n.id)}><${Icon} name=${n.icon} /><span>${n.label}</span>${n.id === 'followups' && due > 0 ? html`<span className="badge">${due}</span>` : null}</button>`)}
+      ${NAV.map(n => html`<button key=${n.id} className="side-link" aria-current=${isCurrent(route, n.id) ? 'page' : undefined} onClick=${() => nav(n.id)}><${Icon} name=${n.icon} /><span>${n.label}</span>${n.id === 'library' && due > 0 ? html`<span className="badge" title=${due + ' follow-ups due'}>${due}</span>` : null}</button>`)}
     </nav>
     <p className="side-foot small muted">Arts Bridging the Gap · Los Angeles</p>
   </aside>`;
 }
 function TopBar(){
-  const {route, nav, stories} = useApp();
-  const due = countDue(stories);
+  const {nav} = useApp();
   return html`<header className="topbar">
     <button className="icon-btn" style=${{width: 'auto', borderRadius: '10px', padding: '0 4px'}} onClick=${() => nav('home')} aria-label="Home"><${Brand} /></button>
-    <div className="topbar-actions">
-      <button className="icon-btn" aria-label=${'Follow-Ups' + (due ? ', ' + due + ' due' : '')} aria-current=${route.name === 'followups' ? 'page' : undefined} onClick=${() => nav('followups')}><${Icon} name="flag" />${due > 0 ? html`<span className="badge">${due}</span>` : null}</button>
-      <button className="icon-btn" aria-label="Impact Reports" aria-current=${route.name === 'reports' ? 'page' : undefined} onClick=${() => nav('reports')}><${Icon} name="file" /></button>
-      <button className="icon-btn" aria-label="Settings" aria-current=${route.name === 'settings' ? 'page' : undefined} onClick=${() => nav('settings')}><${Icon} name="gear" /></button>
-    </div>
   </header>`;
 }
 function TabBar(){
   const {route, nav, stories, readOnly} = useApp();
   const due = countDue(stories);
-  const tab = (id, label, icon) => html`<button key=${id} className="tab" aria-current=${isCurrent(route, id) ? 'page' : undefined} onClick=${() => nav(id)}><${Icon} name=${icon} size=${22} /><span>${label}</span>${id === 'followups' && due > 0 ? html`<span className="badge">${due}</span>` : null}</button>`;
+  const tab = (id, label, icon) => html`<button key=${id} className="tab" aria-current=${isCurrent(route, id) ? 'page' : undefined} onClick=${() => nav(id)}><${Icon} name=${icon} size=${22} /><span>${label}</span>${id === 'library' && due > 0 ? html`<span className="badge">${due}</span>` : null}</button>`;
   return html`<nav className="tabbar" aria-label="Main">
     ${tab('home', 'Home', 'home')}
-    ${tab('backlog', 'Students', 'users')}
-    <button className="tab tab-rec" onClick=${() => nav('interview')} disabled=${readOnly} aria-label="Record a Story"><span className="tab-blob"><${Icon} name="mic" size=${24} /></span><span>Record</span></button>
-    ${tab('library', 'Library', 'book')}
-    ${tab('insights', 'Insights', 'chart')}
+    ${tab('library', 'Stories', 'book')}
+    <button className="tab tab-rec" onClick=${() => nav('interview')} disabled=${readOnly} aria-label="New Story"><span className="tab-blob"><${Icon} name="mic" size=${24} /></span><span>New Story</span></button>
+    ${tab('insights', 'Dashboard', 'chart')}
+    ${tab('settings', 'Settings', 'gear')}
   </nav>`;
+}
+/* segmented tabs used to combine pages */
+function PageTabs({tabs, value, onChange, label}){
+  return html`<div className="page-tabs" role="tablist" aria-label=${label}>${tabs.map(t => html`<button key=${t.id} type="button" role="tab" aria-selected=${value === t.id} className="page-tab" onClick=${() => onChange(t.id)}>${t.label}${t.badge ? html`<span className="count">${t.badge}</span>` : null}</button>`)}</div>`;
+}
+function StoriesView({tab: initial}){
+  const {stories, backlog} = useApp();
+  const [tab, setTab] = useState(initial || 'stories');
+  const due = countDue(stories);
+  const waiting = backlog.filter(b => b.status === 'waiting').length;
+  return html`<div className="view">
+    <header className="page-head"><h1>Stories</h1></header>
+    <${PageTabs} label="Stories" value=${tab} onChange=${setTab} tabs=${[
+      {id: 'stories', label: 'All stories', badge: stories.length || null},
+      {id: 'list', label: 'Student list', badge: waiting || null},
+      {id: 'followups', label: 'Follow-ups', badge: due || null},
+    ]} />
+    ${tab === 'list' ? html`<${BacklogView} embedded=${true} />` : tab === 'followups' ? html`<${FollowupsView} embedded=${true} />` : html`<${LibraryView} embedded=${true} />`}
+  </div>`;
+}
+function DashboardView({tab: initial}){
+  const [tab, setTab] = useState(initial || 'overview');
+  return html`<div className="view">
+    <header className="page-head"><h1>Impact Dashboard</h1></header>
+    <${PageTabs} label="Impact Dashboard" value=${tab} onChange=${setTab} tabs=${[{id: 'overview', label: 'Overview'}, {id: 'reports', label: 'Reports and exports'}]} />
+    ${tab === 'reports' ? html`<${ReportsView} embedded=${true} />` : html`<${InsightsView} embedded=${true} />`}
+  </div>`;
 }
 
 /* ================= story card ================= */
@@ -1210,81 +1246,34 @@ function StoryCard({story, why}){
 }
 
 /* ================= home ================= */
-function BacklogHomeCard(){
-  const {backlog, nav, readOnly} = useApp();
-  const waiting = sortBacklog(backlog.filter(b => b.status === 'waiting'));
-  const done = backlog.filter(b => b.status === 'recorded').length;
-  const total = backlog.filter(b => b.status !== 'skipped').length;
-  if (!backlog.length) return html`<section className="card bl-home">
-    <div><h2>Start your student list</h2><p className="small muted">Jot down every student you still think about: a first name, roughly when, and one line you remember. Each one becomes an interview to record.</p></div>
-    <button className="btn btn-ghost" disabled=${readOnly} onClick=${() => nav('backlog')}><${Icon} name="users" size=${18} /> Make the list</button>
-  </section>`;
-  const next = waiting[0];
-  return html`<section className="card bl-home">
-    <div className="bl-home-top"><div><h2>Student list</h2><p className="small muted tnum">${done} of ${total} stories recorded${waiting.length ? ' · ' + waiting.length + ' to go' : ''}</p></div>
-      <button className="btn btn-quiet btn-sm" onClick=${() => nav('backlog')}>Open list</button></div>
-    <${Progress} done=${done} total=${total} />
-    ${next && !readOnly ? html`<div className="bl-next"><p><strong>Up next: ${next.name}</strong>${next.when ? html` <span className="small muted">· ${next.when}</span>` : null}${next.memory ? html`<br /><span className="small muted">${next.memory}</span>` : null}</p>
-      <button className="btn btn-primary btn-sm" onClick=${() => startBacklogInterview(nav, next)}><${Icon} name="mic" size=${16} /> Record ${next.name}'s story</button></div>` : null}
-  </section>`;
-}
 function HomeView(){
   const {caps, stories, storiesLoaded, nav, readOnly} = useApp();
-  const first = caps.me && caps.me.name ? caps.me.name.split(' ')[0] : '';
-  const recent = stories.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 4);
-  const ongoing = stories.filter(isOngoing).sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0, 4);
-  const today = todayLocal();
-  const due = allTasks(stories).filter(x => x.t.status === 'open' && x.t.due).sort(byDue).slice(0, 3);
+  const first = firstNameOf(caps.me && caps.me.name) || firstNameOf(window.__platform && window.__platform.email) || firstNameOf(caps.me && caps.me.email);
+  const n = stories.length;
   return html`<div className="view home">
     <header className="hello">
-      <p className="eyebrow">ABG Impact Journal</p>
-      <h1>${first ? 'Welcome back, ' + first : 'Welcome to ABG Impact Journal'}</h1>
-      <p className="lede">Every story matters. Capture the moments that show the impact of art.</p>
+      <h1>${first ? 'Welcome back, ' + first : 'Welcome back'}</h1>
+      <p className="lede">Capture student stories and measure the impact of art.</p>
     </header>
-    ${readOnly ? html`<p className="notice small"><strong>View-only access.</strong> Ask the person who shared this journal for Editor access to add stories.</p>` : null}
-    <section className="record-hero" aria-label="Record a Story">
-      <button className="blob-btn" onClick=${() => nav('interview')} disabled=${readOnly}>
-        <span className="blob" aria-hidden="true"></span>
-        <span className="blob-inner"><${Icon} name="mic" size=${40} /><span className="blob-label">Begin</span></span>
-      </button>
-      <div className="record-copy">
-        <h2>Record a Story</h2>
-        <p className="muted">Start with a student's first name. Tell their story in your own words, answer a few follow-up questions, and Claude writes the impact story with its supporting evidence.</p>
-        <div className="row-btns" style=${{justifyContent: 'inherit'}}>
-          <button className="btn btn-primary" disabled=${readOnly} onClick=${() => nav('interview')}><${Icon} name="mic" size=${18} /> Start a student story</button>
-          <button className="btn btn-quiet btn-sm" disabled=${readOnly} onClick=${() => nav('record')}>Record a program or mural story</button>
-        </div>
+    ${readOnly ? html`<p className="notice small"><strong>View-only access.</strong> Ask for Editor access to add stories.</p>` : null}
+    <section className="start-card" aria-label="Record a story">
+      <span className="start-ic" aria-hidden="true"><${Icon} name="mic" size=${30} /></span>
+      <div className="start-copy">
+        <h2>Record a story</h2>
+        <p className="muted">Tell a student's story in your own words. A short AI-guided interview asks the follow-up questions, then writes the impact report for you to review.</p>
       </div>
+      <button className="btn btn-primary btn-lg start-btn" disabled=${readOnly} onClick=${() => nav('interview')}>Start New Story</button>
     </section>
-    <${BacklogHomeCard} />
-    <div className="action-row">
-      <button className="action-card" onClick=${() => nav('library')}>
-        <span className="ac-ic tone-teal"><${Icon} name="book" size=${22} /></span>
-        <span className="txt"><strong>Explore Story Library</strong><small>${stories.length} ${stories.length === 1 ? 'story' : 'stories'} recorded</small></span>
-        <${Icon} name="chev" size=${18} />
+    <div className="quick-row">
+      <button className="quick-card" onClick=${() => nav('library')}>
+        <span className="quick-num tnum">${storiesLoaded ? n : '–'}</span>
+        <span className="quick-label">${n === 1 ? 'Story recorded' : 'Stories recorded'}</span>
       </button>
-      <button className="action-card" onClick=${() => nav('insights')}>
-        <span className="ac-ic tone-blue"><${Icon} name="chart" size=${22} /></span>
-        <span className="txt"><strong>View Impact Insights</strong><small>Themes, evidence, and what's missing</small></span>
-        <${Icon} name="chev" size=${18} />
+      <button className="quick-card" onClick=${() => nav('insights')}>
+        <span className="quick-ic"><${Icon} name="chart" size=${22} /></span>
+        <span className="quick-label">Impact Dashboard</span>
       </button>
     </div>
-    ${due.length > 0 ? html`<section className="card">
-      <div className="sec-head"><h2>Check back on</h2><button className="btn btn-quiet btn-sm" onClick=${() => nav('followups')}>All follow-ups</button></div>
-      ${due.map(x => html`<div className="task" key=${x.t.id}><div><p>${x.t.question}</p><p className="small muted">${x.s.title}${x.t.due ? ' · ' + (x.t.due < today ? 'Overdue since ' : 'By ') + fmtDay(x.t.due) : ''}</p></div>
-        <button className="btn btn-ghost btn-sm" onClick=${() => nav('story', {id: x.s.id})}>Open story</button></div>`)}
-    </section>` : null}
-    <section className="view" style=${{gap: '12px'}}>
-      <div className="sec-head"><h2>Recent stories</h2>${stories.length > 0 ? html`<button className="btn btn-quiet btn-sm" onClick=${() => nav('library')}>See all</button>` : null}</div>
-      ${!storiesLoaded ? html`<div className="grid"><div className="skeleton"></div><div className="skeleton"></div></div>`
-        : recent.length ? html`<div className="grid">${recent.map(s => html`<${StoryCard} key=${s.id} story=${s} />`)}</div>`
-        : html`<div className="empty"><h3>No stories yet</h3><p className="muted">The first story you record shows up here with its impact story, themes, and evidence. Start with a student you worked with recently, or one you still think about from years ago.</p>${!readOnly ? html`<button className="btn btn-primary" onClick=${() => nav('interview')}><${Icon} name="mic" size=${18} /> Start the first story</button>` : null}</div>`}
-    </section>
-    ${ongoing.length > 0 ? html`<section className="view" style=${{gap: '12px'}}>
-      <div className="sec-head"><h2>Ongoing stories</h2></div>
-      <p className="small muted">Stories that have received updates since they were first recorded.</p>
-      <div className="grid">${ongoing.map(s => html`<${StoryCard} key=${s.id} story=${s} />`)}</div>
-    </section>` : null}
   </div>`;
 }
 
@@ -1464,7 +1453,7 @@ async function markBacklogRecorded(db, backlogId, storyId, studentId){
   if (!backlogId) return;
   try { await db.collection('backlog').doc(backlogId).update({status: 'recorded', storyId: storyId, studentId: studentId || null, recordedAt: nowISO()}); } catch (e) { /* the list item was removed; the story is still saved */ }
 }
-async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, approx, newStudent, studentId, studentName, followupId, backlogId}){
+async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, approx, newStudent, studentId, studentName, followupId, backlogId, studentInfo}){
   const db = caps.db; const me = caps.me || {};
   const sid = story ? story.id : uid('s');
   const ed = Object.assign({}, entry, {storyId: sid}); delete ed.id;
@@ -1479,6 +1468,7 @@ async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, app
       const s = blankStory(me);
       s.title = title; s.alias = studentName || ''; s.studentId = studentId || null;
       s.eventDate = {text: whenText || '', iso: '', approximate: !!approx};
+      if (studentInfo) { s.overview = Object.assign({}, s.overview, {gender: studentInfo.gender || '', demographics: studentInfo.demographics || ''}); if (studentInfo.school) s.community = studentInfo.school; }
       const sd = Object.assign({}, s); delete sd.id;
       await db.collection('stories').doc(sid).set(sd);
     }
@@ -1570,7 +1560,7 @@ function ComposerView({params}){
 /* ================= student interview ================= */
 function turnsToText(turns){ return turns.map(t => 'Q: ' + t.q + '\nA: ' + (t.status === 'skipped' ? '(skipped)' : t.a)).join('\n\n'); }
 function InterviewView({params}){
-  const {caps, stories, students, storiesLoaded, nav, readOnly, safeWrite, showToast} = useApp();
+  const {caps, stories, students, storiesLoaded, settings, nav, readOnly, safeWrite, showToast} = useApp();
   const storyId = params.storyId || null;
   const story = storyId ? stories.find(s => s.id === storyId) : null;
   const mode = storyId ? 'update' : 'new';
@@ -1583,6 +1573,9 @@ function InterviewView({params}){
   const [pick, setPick] = useState(I.pick || '');
   const [note, setNote] = useState(I.note || '');
   const [when, setWhen] = useState(I.when || asStr(params.when));
+  const [gender, setGender] = useState(I.gender || '');
+  const [school, setSchool] = useState(I.school || '');
+  const [demo, setDemo] = useState(I.demo || '');
   const [turns, setTurns] = useState(I.turns || []);
   const [current, setCurrent] = useState(I.current || null);
   const [answer, setAnswer] = useState(I.answer || '');
@@ -1610,10 +1603,12 @@ function InterviewView({params}){
   useEffect(() => {
     const t = setTimeout(() => {
       if (step === 'name' && !asStr(first)) { lsDel(draftKey); return; }
-      lsSet(draftKey, JSON.stringify({step, first, pick, note, when, turns, current, answer, target, phase, student, clips, followupId, backlogId, memo, at: Date.now()}));
+      lsSet(draftKey, JSON.stringify({step, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips, followupId, backlogId, memo, at: Date.now()}));
     }, 350);
     return () => clearTimeout(t);
-  }, [step, first, pick, note, when, turns, current, answer, target, phase, student, clips]);
+  }, [step, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips]);
+  const storyStudentInfo = story ? {gender: (story.overview || {}).gender || '', school: story.community || '', demographics: (story.overview || {}).demographics || ''} : null;
+  const studentInfo = mode === 'update' ? storyStudentInfo : (student ? {gender: student.gender || '', school: student.school || '', demographics: student.demographics || ''} : null);
   useEffect(() => () => { if (qCtl.current) qCtl.current.abort(); if (aCtl.current) aCtl.current.abort(); VOICE.stop(); }, []);
   const [voiceOn, setVoiceOn] = useState(() => lsGet('abg-voice') !== 'off');
   useEffect(() => {
@@ -1632,8 +1627,9 @@ function InterviewView({params}){
     if (!fn) return;
     fn = fn.charAt(0).toUpperCase() + fn.slice(1);
     let st;
-    if (pick && pick !== 'new') { const ex = students.find(x => x.id === pick); st = {id: ex.id, firstName: ex.firstName, existing: true}; }
-    else st = {id: uid('st'), firstName: fn, nameKey: norm(fn), note: asStr(note), createdAt: nowISO(), createdBy: (caps.me && caps.me.id) || null, existing: false};
+    const info = {gender, school: asStr(school), demographics: asStr(demo)};
+    if (pick && pick !== 'new') { const ex = students.find(x => x.id === pick); st = Object.assign({id: ex.id, firstName: ex.firstName, existing: true}, {gender: info.gender || ex.gender || '', school: info.school || ex.school || '', demographics: info.demographics || ex.demographics || ''}); }
+    else st = Object.assign({id: uid('st'), firstName: fn, nameKey: norm(fn), note: asStr(note), createdAt: nowISO(), createdBy: (caps.me && caps.me.id) || null, existing: false}, info);
     setStudent(st); setStep('interview'); setPhase('asking');
     setCurrent({q: OPENING_Q(st.firstName), kind: 'opening'});
   }
@@ -1642,7 +1638,7 @@ function InterviewView({params}){
     setErr(''); setLoadingQ(true); setCurrent(null);
     const ctl = new AbortController(); qCtl.current = ctl;
     try {
-      const r = await caps.sample.json(interviewPrompt({name, turns: nt, mode, story, memo, asked: nt.filter(t => t.kind === 'followup').length, target}), {modelTier: 'quick', cache: false, signal: ctl.signal});
+      const r = await caps.sample.json(interviewPrompt({name, turns: nt, mode, story, memo, info: studentInfo, asked: nt.filter(t => t.kind === 'followup').length, target}), {modelTier: 'quick', cache: false, signal: ctl.signal});
       const q = asStr(r && r.question);
       if (!q) throw {code: 'invalid_json'};
       setCurrent({q, kind: 'followup', category: asStr(r.category).slice(0, 1).toUpperCase(), why: asStr(r.why)});
@@ -1686,12 +1682,12 @@ function InterviewView({params}){
     const entry = makeEntry(nt);
     const items = [{id: entry.id, text: entry.transcript, recordedAt: entry.recordedAt}];
     try {
-      const analysis = await runAnalysis({sample: caps.sample, mode, story, stories, items, whenHint: asStr(when), studentName: name, memo, signal: ctl.signal});
+      const analysis = await runAnalysis({sample: caps.sample, mode, story, stories, items, whenHint: asStr(when), studentName: name, memo, studentInfo, signal: ctl.signal});
       aCtl.current = null;
       const ns = student && !student.existing ? Object.assign({}, student) : null;
       if (ns) delete ns.existing;
       nav('review', {mode, storyId: story ? story.id : null, analysis, entry, items, draftKey, whenHint: asStr(when), followupId,
-        studentId: mode === 'new' ? student.id : (story.studentId || null), studentName: name, newStudent: ns, backlogId, returnTo: {name: 'interview', params}});
+        studentId: mode === 'new' ? student.id : (story.studentId || null), studentName: name, newStudent: ns, backlogId, studentInfo, returnTo: {name: 'interview', params}});
     } catch (e) {
       aCtl.current = null; setBusy(null);
       if (e && e.code === 'cancelled') return;
@@ -1704,11 +1700,11 @@ function InterviewView({params}){
     setBusy('save');
     const ns = student && !student.existing ? Object.assign({}, student) : null;
     if (ns) delete ns.existing;
-    const sid = await saveRawEntry({caps, safeWrite, story, entry: makeEntry(nt), title: name + "'s story", whenText: asStr(when), newStudent: ns, studentId: student ? student.id : null, studentName: name, followupId, backlogId});
+    const sid = await saveRawEntry({caps, safeWrite, story, entry: makeEntry(nt), title: name + "'s story", whenText: asStr(when), newStudent: ns, studentId: student ? student.id : null, studentName: name, followupId, backlogId, studentInfo});
     setBusy(null);
     if (sid) { lsDel(draftKey); showToast('Interview saved'); nav('story', {id: sid}); }
   }
-  function startOver(){ lsDel(draftKey); setClips([]); setStep(mode === 'update' ? 'interview' : 'name'); setTurns([]); setAnswer(''); setPhase('asking'); setErr(''); setTarget(mode === 'update' ? 3 : 5); setStudent(null); setFirst(''); setPick(''); setNote(''); setWhen('');
+  function startOver(){ lsDel(draftKey); setClips([]); setStep(mode === 'update' ? 'interview' : 'name'); setTurns([]); setAnswer(''); setPhase('asking'); setErr(''); setTarget(mode === 'update' ? 3 : 5); setStudent(null); setFirst(''); setPick(''); setNote(''); setWhen(''); setGender(''); setSchool(''); setDemo('');
     setCurrent(mode === 'update' ? {q: params.prompt || UPDATE_OPENING_Q(name), kind: 'opening'} : null); }
   const back = () => story ? nav('story', {id: story.id}) : nav('home');
 
@@ -1720,11 +1716,11 @@ function InterviewView({params}){
     const fn = asStr(first);
     const needPick = matches.length > 0 && !pick;
     return html`<div className="view interview">
-      <${FocusHeader} title="Record a Story" sub="Step 1 of 2: who is this story about?" onBack=${backlogId ? () => nav('backlog') : back} />
+      <${FocusHeader} title="New Story" sub="Step 1 of 3: Student information" onBack=${backlogId ? () => nav('backlog') : back} />
       ${memo ? html`<p className="memo-note"><${Icon} name="users" size=${16} /><span><strong>From your student list:</strong> ${memo}</span></p>` : null}
       <section className="card name-card">
         <${Field} label="Student's First Name"><input id="iv-first" className="input input-lg" autoComplete="off" placeholder="Enter student's first name" value=${first} onChange=${e => { setFirst(e.target.value.replace(/\s{2,}/g, ' ')); setPick(''); }} /><//>
-        <p className="small muted"><${Icon} name="lock" size=${14} /> Only a first name is needed. Please do not enter a last name or other identifying information. A nickname or pseudonym is fine.</p>
+        <p className="small muted"><${Icon} name="lock" size=${14} /> First name only, never a last name. A nickname is fine.</p>
         ${matches.length > 0 ? html`<div className="field"><span className="field-label">There ${matches.length === 1 ? 'is already a student' : 'are already students'} named ${fn} in the journal. Is this the same person?</span>
           <div className="pick-list">
             ${matches.map(m => { const ss = storiesFor(m.id); return html`<label key=${m.id} className=${'pick' + (pick === m.id ? ' on' : '')}><input type="radio" name="iv-pick" checked=${pick === m.id} onChange=${() => setPick(m.id)} /><span><strong>${m.firstName}</strong>${m.note ? ' · ' + m.note : ''}<br /><span className="small muted">${ss.length ? ss.map(s => s.title).slice(0, 2).join('; ') : 'No stories yet'}</span></span></label>`; })}
@@ -1733,10 +1729,15 @@ function InterviewView({params}){
           ${pick && pick !== 'new' ? html`<p className="small muted">To add to one of their existing stories instead, open it and choose Add Story Update. Continuing starts a new story about the same student.</p>` : null}
         </div>` : null}
         ${pick === 'new' ? html`<${Field} label="How to tell them apart (internal only)" hint="e.g. mural program 2018. Never shown in external materials."><input id="iv-note" className="input" value=${note} onChange=${e => setNote(e.target.value)} /><//>` : null}
-        <${Field} label=${'Roughly when was ' + (fn || 'the student') + ' involved with ABG? (optional)'}><input id="iv-when" className="input" placeholder="e.g. 2018 to 2020, or this fall" value=${when} onChange=${e => setWhen(e.target.value)} /><//>
-        <button className="btn btn-primary btn-lg" disabled=${!fn || needPick} onClick=${begin}><${Icon} name="mic" size=${20} /> Begin Interview</button>
+        <div className="field"><span className="field-label">Gender</span>
+          <div className="seg" role="group" aria-label="Gender">${GENDERS.map(g => html`<button type="button" key=${g.id} className="seg-btn" aria-pressed=${gender === g.id} onClick=${() => setGender(gender === g.id ? '' : g.id)}>${g.label}</button>`)}</div>
+        </div>
+        <${Field} label="School"><input id="iv-school" className="input" list="dl-iv-schools" autoComplete="off" placeholder="e.g. Roosevelt Middle School" value=${school} onChange=${e => setSchool(e.target.value)} /><//>
+        <datalist id="dl-iv-schools">${uniq((settings.communities || []).concat(stories.map(x => x.community))).map(c => html`<option key=${c} value=${c}></option>`)}</datalist>
+        <${Field} label="Other details (optional)" hint="Grade or age, or anything else useful for reporting."><input id="iv-demo" className="input" placeholder="e.g. 7th grade, age 12" value=${demo} onChange=${e => setDemo(e.target.value)} /><//>
+        <button className="btn btn-primary btn-lg" disabled=${!fn || needPick} onClick=${begin}><${Icon} name="mic" size=${20} /> Start interview</button>
       </section>
-      <p className="small muted">Not about one student? <button className="btn btn-quiet btn-sm" onClick=${() => nav('record')}>Record a program or mural story</button></p>
+      <p className="small muted">Recording a program or mural instead? <button className="btn btn-quiet btn-sm" onClick=${() => nav('record')}>Record a program or mural story</button></p>
     </div>`;
   }
 
@@ -1746,7 +1747,7 @@ function InterviewView({params}){
   const answeredCount = turns.filter(t => t.status === 'answered').length;
   const stageLabel = !current ? '' : current.kind === 'opening' ? (mode === 'update' ? 'Story update' : 'Opening story') : current.kind === 'closing' ? 'Closing question' : 'Follow-up ' + (asked + 1) + ' of about ' + Math.max(target, asked + 1);
   return html`<div className="view interview">
-    <${FocusHeader} title=${(mode === 'update' ? 'Story update: ' : 'Interview: ') + name} sub=${mode === 'update' ? story.title : 'Step 2 of 2: tell the story, then answer a few follow-ups'} onBack=${back} />
+    <${FocusHeader} title=${(mode === 'update' ? 'Story update: ' : 'Interview: ') + name} sub=${mode === 'update' ? story.title : 'Step 2 of 3: Interview'} onBack=${back} />
     ${restored ? html`<p className="small muted">Restored your unsaved interview from this device. <button className="btn btn-quiet btn-sm" onClick=${startOver}>Start over</button></p>` : null}
     ${memo && turns.length === 0 ? html`<p className="memo-note"><${Icon} name="users" size=${16} /><span><strong>Your note:</strong> ${memo}</span></p>` : null}
     ${turns.length > 0 ? html`<details className="sec convo"><summary><span>Conversation so far<span className="count">${turns.length} ${turns.length === 1 ? 'answer' : 'answers'}</span></span><${Icon} name="chev" size=${18} /></summary>
@@ -1895,6 +1896,10 @@ function StoryEditor({draft, setDraft, items, mode}){
         <${Field} label="Student's first name" hint="First name or pseudonym only."><input id="ed-alias" className="input" value=${draft.alias || ''} onChange=${val((n, v) => { n.alias = v; })} /><//>
         <${Field} label="Age or grade when involved"><input id="ed-age" className="input" value=${ov.ageOrGrade || ''} onChange=${val((n, v) => { n.overview = Object.assign({}, n.overview, {ageOrGrade: v}); })} /><//>
       </div>
+      <div className="row">
+        <${Field} label="Gender"><select id="ed-gender" className="select" value=${ov.gender || ''} onChange=${val((n, v) => { n.overview = Object.assign({}, n.overview, {gender: v}); })}><option value="">Not recorded</option>${GENDERS.map(g => html`<option key=${g.id} value=${g.id}>${g.label}</option>`)}</select><//>
+        <${Field} label="Other details"><input id="ed-demo" className="input" value=${ov.demographics || ''} onChange=${val((n, v) => { n.overview = Object.assign({}, n.overview, {demographics: v}); })} /><//>
+      </div>
       <${Field} label="Relevant background" hint="Only what helps explain ABG's impact."><textarea id="ed-bg" className="textarea" rows="2" value=${ov.background || ''} onChange=${val((n, v) => { n.overview = Object.assign({}, n.overview, {background: v}); })}></textarea><//>
       <div className="row">
         <${Field} label="ABG program"><input id="ed-program" className="input" list="dl-programs" value=${draft.program || ''} onChange=${val((n, v) => { n.program = v; })} /><//>
@@ -1931,7 +1936,7 @@ function StoryEditor({draft, setDraft, items, mode}){
       </div>
     <//>
 
-    <${Sec} title="Qualitative evidence" count=${(draft.evidence || []).filter(isQualitative).length + (draft.quotes || []).length} open=${true}>
+    <${Sec} title="Qualitative observations" count=${(draft.evidence || []).filter(isQualitative).length} open=${true}>
       <p className="small muted">Observations and testimonials from the student, parents, teachers, school staff, or ABG staff. Anecdotal unless backed by a record.</p>
       ${(draft.evidence || []).filter(isQualitative).length === 0 ? html`<p className="empty-note">None found in this interview.</p>` : null}
       ${(draft.evidence || []).map((ev, i) => isQualitative(ev) ? html`<${EvidenceEdit} key=${ev.id} ev=${ev}
@@ -1939,7 +1944,10 @@ function StoryEditor({draft, setDraft, items, mode}){
           onRemove=${() => upd(n => { n.evidence.splice(i, 1); })}
           onShow=${hasTr && ev.source && ev.source.found ? () => showIn(ev.source.excerpt) : null} />` : null)}
       ${addBtn('Add observation', n => { n.evidence = (n.evidence || []).concat([{id: uid('ev'), category: 'personal', kind: 'qualitative', statement: '', value: '', unit: '', observer: '', status: 'qualitative', basis: '', source: {entryId: null, excerpt: '', found: false, note: ''}, observed: '', _new: mode === 'update'}]); })}
-      <div className="field" style=${{marginTop: '8px'}}><span className="field-label">Quotes</span>
+    <//>
+
+    <${Sec} title="Supporting evidence" count=${(draft.quotes || []).length + (draft.materials || []).length} open=${true}>
+      <div className="field"><span className="field-label">Quotes</span>
         <p className="small muted">Exact words appear word for word in the transcript. Remembered quotes are what Kyle recalls someone saying. Paraphrased statements can't be used as quotes.</p>
         ${(draft.quotes || []).length === 0 ? html`<p className="empty-note">No quotes found.</p>` : null}
         ${(draft.quotes || []).map((q, i) => html`<div className=${'quote-edit' + (q._new ? ' is-new' : '')} key=${q.id}>
@@ -1954,10 +1962,20 @@ function StoryEditor({draft, setDraft, items, mode}){
           </div>
         </div>`)}
       </div>
+      <div className="field" style=${{marginTop: '8px'}}><span className="field-label">Photos, records and other materials</span>
+      <p className="small muted">What exists and where it's kept.</p>
+      ${(draft.materials || []).map((m, i) => html`<div className=${'list-row' + (m._new ? ' is-new' : '')} key=${m.id}>
+        <select className="select select-sm" aria-label="Material type" value=${m.type} onChange=${val((n, v) => { n.materials[i].type = v; })}>${MATERIAL_TYPES.map(t => html`<option key=${t.id} value=${t.id}>${t.label}</option>`)}</select>
+        <input className="input" aria-label="Description and location" value=${m.description} onChange=${val((n, v) => { n.materials[i].description = v; })} />
+        ${trash('Remove material', n => { n.materials.splice(i, 1); })}
+      </div>`)}
+      ${addBtn('Add material', n => { n.materials = (n.materials || []).concat([{id: uid('mat'), type: 'photo', description: ''}]); })}
+      </div>
+
     <//>
 
-    <${Sec} title="Data gaps" count=${(draft.missingMetrics || []).length} open=${true}>
-      <p className="small muted">Important metrics that weren't available in the interview but could be collected later.</p>
+    <${Sec} title="Missing data and follow-up" count=${(draft.missingMetrics || []).length + fuCount} open=${true}>
+      <p className="small muted">Important metrics that weren't available yet, and what to check on next.</p>
       ${(draft.missingMetrics || []).map((m, i) => html`<div className=${'ms-edit' + (m._new ? ' is-new' : '')} key=${m.id}>
         <div className="list-row"><input className="input" aria-label="Data gap" value=${m.metric} onChange=${val((n, v) => { n.missingMetrics[i].metric = v; })} />${trash('Remove data gap', n => { n.missingMetrics.splice(i, 1); })}</div>
         <div className="row">
@@ -1969,9 +1987,22 @@ function StoryEditor({draft, setDraft, items, mode}){
         ${(draft.evidence || []).map((ev, i) => ev.status === 'future' ? html`<${EvidenceEdit} key=${ev.id} ev=${ev} onChange=${patch => upd(n => { Object.assign(n.evidence[i], patch); })} onRemove=${() => upd(n => { n.evidence.splice(i, 1); })} onShow=${null} />` : null)}
       </div>` : null}
       ${addBtn('Add data gap', n => { n.missingMetrics = (n.missingMetrics || []).concat([{id: uid('mm'), metric: '', why: '', howToGet: ''}]); })}
+    ${mode !== 'edit' ? html`<div className="field" style=${{marginTop: '8px'}}><span className="field-label">Follow-up <span className="muted">(${fuCount})</span></span>
+      <p className="small muted">Actions that would make the story stronger. They stay on the story until marked done.</p>
+      ${(draft.followUps || []).map((f, i) => showT(f) ? html`<div className=${'ms-edit' + (f._new ? ' is-new' : '')} key=${f.id}>
+          <div className="list-row"><input className="input" aria-label="Follow-up action" value=${f.question} onChange=${val((n, v) => { n.followUps[i].question = v; })} />${trash('Remove follow-up', n => { n.followUps.splice(i, 1); })}</div>
+          <${Field} label="Follow-up date (optional)"><input className="input" type="date" value=${f.due || ''} onChange=${val((n, v) => { n.followUps[i].due = v; })} /><//>
+        </div>` : showQ(f) ? html`<div className="list-row" key=${f.id}>
+          <span className="pill tone-teal">Question</span>
+          <input className="input" aria-label="Open question" value=${f.question} onChange=${val((n, v) => { n.followUps[i].question = v; })} />
+          ${trash('Remove question', n => { n.followUps.splice(i, 1); })}
+        </div>` : null)}
+      ${addBtn('Add follow-up', n => { n.followUps = (n.followUps || []).concat([{id: uid('f'), kind: 'task', question: '', due: '', status: 'open', answer: '', entryId: null}]); })}
+    </div>` : null}
+
     <//>
 
-    <${Sec} title="Stakeholder value" open=${true}>
+    <${Sec} title="Stakeholder impact summary" open=${true}>
       <${Field} label="How these outcomes show ABG's impact" hint="How the documented outcomes support donor funding or school partnerships. Claim only what the evidence supports."><textarea id="ed-why" className="textarea" rows="3" value=${draft.stakeholderWhy || ''} onChange=${val((n, v) => { n.stakeholderWhy = v; })}></textarea><//>
       <div className="field"><span className="field-label">Most useful for</span><${ChipGroup} options=${AUDIENCES} value=${draft.audiences} label="Most useful for" onChange=${v => upd(n => { n.audiences = v; })} /></div>
       <div className="field"><span className="field-label">Impact categories</span><${ChipGroup} options=${CATEGORIES} value=${draft.categories} label="Impact categories" onChange=${v => upd(n => { n.categories = v; })} /></div>
@@ -1995,33 +2026,10 @@ function StoryEditor({draft, setDraft, items, mode}){
       ${addBtn('Add milestone', n => { n.milestones = (n.milestones || []).concat([{id: uid('m'), date: {text: '', iso: ''}, label: '', phase: 'immediate', confirmed: true, entryId: null, _new: mode === 'update'}]); })}
     <//>
 
-    <${Sec} title="Supporting materials" count=${(draft.materials || []).length}>
-      <p className="small muted">Photos, artwork, videos, testimonials, or records that back up the story, and where they are.</p>
-      ${(draft.materials || []).map((m, i) => html`<div className=${'list-row' + (m._new ? ' is-new' : '')} key=${m.id}>
-        <select className="select select-sm" aria-label="Material type" value=${m.type} onChange=${val((n, v) => { n.materials[i].type = v; })}>${MATERIAL_TYPES.map(t => html`<option key=${t.id} value=${t.id}>${t.label}</option>`)}</select>
-        <input className="input" aria-label="Description and location" value=${m.description} onChange=${val((n, v) => { n.materials[i].description = v; })} />
-        ${trash('Remove material', n => { n.materials.splice(i, 1); })}
-      </div>`)}
-      ${addBtn('Add material', n => { n.materials = (n.materials || []).concat([{id: uid('mat'), type: 'photo', description: ''}]); })}
-    <//>
-
     <${Sec} title="Story structure">
       <p className="small muted">Filled in only where the interview gives the detail. Leave blanks blank.</p>
       ${STRUCTURE.map(f => html`<${Field} key=${f.id} label=${f.label} hint=${f.hint}><textarea className="textarea" rows="2" value=${(draft.structure || {})[f.id] || ''} onChange=${val((n, v) => { n.structure = n.structure || {}; n.structure[f.id] = v; })}></textarea><//>`)}
     <//>
-
-    ${mode !== 'edit' ? html`<${Sec} title="Recommended follow-up" count=${fuCount} open=${fuCount > 0}>
-      <p className="small muted">Actions that would make the story more valuable. They show up in Follow-Ups until you mark them done.</p>
-      ${(draft.followUps || []).map((f, i) => showT(f) ? html`<div className=${'ms-edit' + (f._new ? ' is-new' : '')} key=${f.id}>
-          <div className="list-row"><input className="input" aria-label="Follow-up action" value=${f.question} onChange=${val((n, v) => { n.followUps[i].question = v; })} />${trash('Remove follow-up', n => { n.followUps.splice(i, 1); })}</div>
-          <${Field} label="Follow-up date (optional)"><input className="input" type="date" value=${f.due || ''} onChange=${val((n, v) => { n.followUps[i].due = v; })} /><//>
-        </div>` : showQ(f) ? html`<div className="list-row" key=${f.id}>
-          <span className="pill tone-teal">Question</span>
-          <input className="input" aria-label="Open question" value=${f.question} onChange=${val((n, v) => { n.followUps[i].question = v; })} />
-          ${trash('Remove question', n => { n.followUps.splice(i, 1); })}
-        </div>` : null)}
-      ${addBtn('Add follow-up', n => { n.followUps = (n.followUps || []).concat([{id: uid('f'), kind: 'task', question: '', due: '', status: 'open', answer: '', entryId: null}]); })}
-    <//>` : null}
 
     ${suggest.length > 0 ? html`<${Sec} title="Possible connections" count=${suggest.length} open=${true}>
       ${suggest.map((l, i) => { const other = stories.find(s => s.id === l.storyId); if (!other) return null; return html`<div className="link-suggest" key=${l.storyId}>
@@ -2043,10 +2051,10 @@ function StoryEditor({draft, setDraft, items, mode}){
 }
 function ReviewView({params}){
   const {caps, stories, students, nav, safeWrite, showToast} = useApp();
-  const {mode, storyId, analysis, entry, items, draftKey, whenHint, approx, followupId, answered, analyzedEntryIds, returnTo, studentId, studentName, newStudent, backlogId} = params;
+  const {mode, storyId, analysis, entry, items, draftKey, whenHint, approx, followupId, answered, analyzedEntryIds, returnTo, studentId, studentName, newStudent, backlogId, studentInfo} = params;
   const base = storyId ? stories.find(s => s.id === storyId) : null;
   const me = caps.me || {};
-  const [draft, setDraft] = useState(() => buildReviewDraft({mode, base, analysis, whenHint, approx, me, followupId, answered, entry, studentId, studentName}));
+  const [draft, setDraft] = useState(() => buildReviewDraft({mode, base, analysis, whenHint, approx, me, followupId, answered, entry, studentId, studentName, studentInfo}));
   const [saving, setSaving] = useState(false);
   const back = () => { if (returnTo) nav(returnTo.name, returnTo.params || {}); else if (storyId) nav('story', {id: storyId}); else nav('home'); };
   if (!draft) return html`<div className="view"><${FocusHeader} title="Review" onBack=${() => nav('library')} /><p className="notice">This story isn't in the journal anymore.</p></div>`;
@@ -2085,7 +2093,7 @@ function ReviewView({params}){
   }
   const title = mode === 'edit' ? 'Edit story' : mode === 'update' ? 'Review the update' : 'Student Impact Report';
   return html`<div className="view review">
-    <${FocusHeader} title=${title} sub=${mode === 'update' && base ? base.title : (draft.alias ? draft.alias : null)} onBack=${back} />
+    <${FocusHeader} title=${title} sub=${mode === 'update' && base ? base.title : mode === 'new' ? 'Step 3 of 3' + (draft.alias ? ': ' + draft.alias : '') : (draft.alias || null)} onBack=${back} />
     ${mode !== 'edit' ? html`<p className="review-note"><${Icon} name="spark" size=${16} /><span>Claude drafted this from your words. Nothing is saved until you press Save, and nothing is approved for outside use until you approve it.${mode === 'update' ? ' New items are marked with an orange edge.' : ''}</span></p>` : null}
     <${StoryEditor} draft=${draft} setDraft=${setDraft} items=${items || []} mode=${mode} />
     <div className="savebar"><div className="inner">
@@ -2390,7 +2398,7 @@ function StoryView({id}){
   const updateTarget = (story.studentId || story.alias) ? 'interview' : 'record';
   const overviewRows = [
     ['Student', (story.alias || 'Not recorded') + (student && student.note ? ' (' + student.note + ')' : '')],
-    ['Age or grade', ov.ageOrGrade], ['School or community', story.community], ['Background', ov.background], ['ABG program', story.program],
+    ['Gender', ov.gender ? labelOf(GENDERS, ov.gender) : ''], ['Age or grade', ov.ageOrGrade], ['School or community', story.community], ['Other details', ov.demographics], ['Background', ov.background], ['ABG program', story.program],
     ['When involved', ov.involvementDate || (ev ? ev + (story.eventDate.approximate ? ' (approx.)' : '') : '')],
     ['Recorded', fmtDate(story.createdAt) + (updates > 0 ? ' · last update ' + fmtDate(story.updatedAt) : '')],
   ].filter(r => r[1]);
@@ -2490,9 +2498,14 @@ function StoryView({id}){
     </section>
 
     <section className="card">
-      <div className="sec-head"><h2>Qualitative evidence</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddEvidenceSheet} storyId=${id} close=${close} kind="qualitative" />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
+      <div className="sec-head"><h2>Qualitative observations</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddEvidenceSheet} storyId=${id} close=${close} kind="qualitative" />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
       <p className="small muted">Observations and testimonials from the student, parents, teachers, school staff, or ABG staff. Valuable, but anecdotal unless backed by a record.</p>
       ${qualitative.length === 0 ? html`<p className="empty-note small">None recorded.</p>` : qualitative.map(r => html`<${EvidenceRow} key=${r.e.id} ev=${r.e} entries=${entries} readOnly=${readOnly} onStatus=${v => setEvStatus(r.i, v)} />`)}
+    </section>
+
+    <section className="card">
+      <h2>Supporting evidence</h2>
+      <p className="small muted">Quotes, photos, records, and testimonials that back up the story.</p>
       ${(story.quotes || []).length > 0 ? html`<div className="ev-group">
         <div className="ev-group-head"><h3>Quotes</h3><span className="count">${story.quotes.length}</span></div>
         ${story.quotes.map((q, i) => { const usable = q.kind !== 'paraphrase' && q.found; return html`<figure className="quote" key=${q.id}>
@@ -2501,11 +2514,17 @@ function StoryView({id}){
           ${!readOnly ? html`<label className="check small"><input type="checkbox" checked=${!!q.approved} disabled=${!usable && !q.approved} onChange=${e => setQuote(i, e.target.checked)} /> Approved for external use${!usable ? ' (only exact or remembered quotes found in the transcript)' : ''}</label>` : (q.approved ? html`<${Pill} tone="good">Approved<//>` : null)}
         </figure>`; })}
       </div>` : null}
+      <div className="ev-group"><div className="sec-head"><h3>Photos, records and other materials</h3>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${MaterialSheet} storyId=${id} close=${close} />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
+      ${(story.materials || []).length === 0 ? html`<p className="empty-note">No photos, artwork, testimonials, or records noted yet.</p>` : story.materials.map(m => html`<div className="linked" key=${m.id}>
+        <div style=${{minWidth: 0}}><${Pill} tone="neutral">${labelOf(MATERIAL_TYPES, m.type)}<//> <span>${m.description}</span></div>
+        ${!readOnly ? html`<button className="icon-btn" aria-label="Remove material" onClick=${() => removeMaterial(m.id)}><${Icon} name="close" size=${18} /></button>` : null}
+      </div>`)}
+      </div>
     </section>
 
     <section className="card">
-      <h2>Data gaps</h2>
-      <p className="small muted">Important information that wasn't available in the interview but could be collected later.</p>
+      <h2>Missing data and follow-up</h2>
+      <p className="small muted">Information that wasn't available yet, and what to check on next.</p>
       ${(story.missingMetrics || []).length === 0 ? html`<p className="empty-note small">None identified.</p>` : story.missingMetrics.map(m => html`<div className="ev" key=${m.id}>
         <div className="ev-head"><p className="ev-statement"><strong>${m.metric}</strong></p>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => removeMissing(m.id)}>Found or not needed</button>` : null}</div>
         ${m.why ? html`<p className="small">${m.why}</p>` : null}
@@ -2517,17 +2536,7 @@ function StoryView({id}){
         <p className="small muted">Hoped-for outcomes. Not accomplishments.</p>
         ${expected.map(r => html`<${EvidenceRow} key=${r.e.id} ev=${r.e} entries=${entries} readOnly=${readOnly} onStatus=${v => setEvStatus(r.i, v)} />`)}
       </div>` : null}
-    </section>
-
-    <section className="card">
-      <h2>Stakeholder value</h2>
-      ${story.stakeholderWhy ? html`<p>${story.stakeholderWhy}</p>` : html`<p className="muted">Not written yet.</p>`}
-      ${primaryAud.length ? html`<p className="small"><strong>Most useful for:</strong> ${primaryAud.map(a => labelOf(AUDIENCES, a)).join(', ')}</p>` : null}
-      ${!readOnly ? html`<div><button className="btn btn-ghost btn-sm" onClick=${adapt}><${Icon} name="spark" size=${16} /> Adapt story for audience</button></div>` : null}
-    </section>
-
-    <section className="card">
-      <div className="sec-head"><h2>Recommended follow-up</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddTaskSheet} storyId=${id} close=${close} />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
+      <div className="ev-group"><div className="sec-head"><h3>Follow-up</h3>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddTaskSheet} storyId=${id} close=${close} />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
       ${tasks.length === 0 && doneQs.length === 0 ? html`<p className="empty-note">Nothing to follow up on.</p>` : null}
       ${tasks.map(t => html`<div className=${'task' + (t.status !== 'open' ? ' done' : '')} key=${t.id}>
         <div><p>${t.question}</p><p className="small muted">${t.status === 'open' ? (t.due ? 'By ' + fmtDay(t.due) : 'No date set') + ' · Awaiting update' : 'Done' + (t.answer ? ': ' + t.answer : '')}</p></div>
@@ -2536,6 +2545,15 @@ function StoryView({id}){
       ${doneQs.length > 0 ? html`<details><summary className="small muted" style=${{cursor: 'pointer'}}>${doneQs.length} answered or skipped question${doneQs.length > 1 ? 's' : ''}</summary>
         <ul className="small" style=${{marginTop: '8px', display: 'grid', gap: '6px'}}>${doneQs.map(q => html`<li key=${q.id}>${q.question} <span className="muted">(${q.status === 'answered' ? 'answered' + (q.answer ? ': ' + q.answer : '') : q.status})</span></li>`)}</ul>
       </details>` : null}
+      </div>
+
+    </section>
+
+    <section className="card">
+      <h2>Stakeholder impact summary</h2>
+      ${story.stakeholderWhy ? html`<p>${story.stakeholderWhy}</p>` : html`<p className="muted">Not written yet.</p>`}
+      ${primaryAud.length ? html`<p className="small"><strong>Most useful for:</strong> ${primaryAud.map(a => labelOf(AUDIENCES, a)).join(', ')}</p>` : null}
+      ${!readOnly ? html`<div><button className="btn btn-ghost btn-sm" onClick=${adapt}><${Icon} name="spark" size=${16} /> Adapt story for audience</button></div>` : null}
     </section>
 
     <section className="card">
@@ -2544,13 +2562,6 @@ function StoryView({id}){
     </section>
 
 
-    <section className="card">
-      <div className="sec-head"><h2>Supporting materials</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${MaterialSheet} storyId=${id} close=${close} />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
-      ${(story.materials || []).length === 0 ? html`<p className="empty-note">No photos, artwork, testimonials, or records noted yet.</p>` : story.materials.map(m => html`<div className="linked" key=${m.id}>
-        <div style=${{minWidth: 0}}><${Pill} tone="neutral">${labelOf(MATERIAL_TYPES, m.type)}<//> <span>${m.description}</span></div>
-        ${!readOnly ? html`<button className="icon-btn" aria-label="Remove material" onClick=${() => removeMaterial(m.id)}><${Icon} name="close" size=${18} /></button>` : null}
-      </div>`)}
-    </section>
 
     ${filledStructure.length > 0 ? html`<details className="sec"><summary><span>Story structure</span><${Icon} name="chev" size=${18} /></summary><div className="sec-body">
       ${filledStructure.map(f => html`<div key=${f.id}><p className="eyebrow">${f.label}</p><p>${story.structure[f.id]}</p></div>`)}
@@ -2699,7 +2710,7 @@ function BacklogSheet({item, close}){
     <div className="row-btns end"><button className="btn btn-quiet danger" onClick=${remove}>Remove</button><button className="btn btn-ghost" onClick=${close}>Cancel</button><button className="btn btn-primary" disabled=${!cleanFirstName(name)} onClick=${save}>Save</button></div>
   </div>`;
 }
-function BacklogView(){
+function BacklogView({embedded}){
   const {caps, backlog, backlogLoaded, stories, nav, readOnly, safeWrite, showToast, openSheet} = useApp();
   const [name, setName] = useState('');
   const [when, setWhen] = useState('');
@@ -2736,7 +2747,7 @@ function BacklogView(){
   const storyOf = b => b.storyId ? stories.find(s => s.id === b.storyId) : null;
   const edit = b => openSheet(close => html`<${BacklogSheet} item=${b} close=${close} />`);
   return html`<div className="view backlog">
-    <header className="page-head"><h1>Student List</h1><p className="muted">Every student whose story is still only in your head. List them quickly, then record them one at a time. Each interview ends with the same metrics card, so the stories add up.</p></header>
+    ${embedded ? null : html`<header className="page-head"><h1>Student List</h1><p className="muted">Every student whose story is still only in your head. List them quickly, then record them one at a time. Each interview ends with the same metrics card, so the stories add up.</p></header>`}
     ${readOnly ? html`<p className="notice small"><strong>View-only access.</strong> You can see the list but not change it.</p>` : null}
     <section className="card">
       <div className="sec-head"><h2>Progress</h2><span className="small muted tnum">${backlogLoaded ? recorded.length + ' of ' + total + ' stories recorded' : ''}</span></div>
@@ -2846,7 +2857,7 @@ function FilterSheet({initial, programs, communities, students, onApply, close})
     <div className="row-btns end"><button className="btn btn-ghost" onClick=${() => setF({})}>Clear all</button><button className="btn btn-primary" onClick=${() => { onApply(f); close(); }}>Show stories</button></div>
   </div>`;
 }
-function LibraryView(){
+function LibraryView({embedded}){
   const {caps, stories, students, storiesLoaded, settings, nav, openSheet, readOnly} = useApp();
   const [q, setQ] = useState('');
   const [f, setF] = useState(() => { try { return JSON.parse(lsGet('abg-lib-f') || '{}') || {}; } catch (e) { return {}; } });
@@ -2877,7 +2888,7 @@ function LibraryView(){
     ctlRef.current = null;
   }
   return html`<div className="view library">
-    <header className="page-head"><h1>Story Library</h1><p className="muted">${stories.length} ${stories.length === 1 ? 'story' : 'stories'} from every period of ABG's work.</p></header>
+    ${embedded ? null : html`<header className="page-head"><h1>Story Library</h1><p className="muted">${stories.length} ${stories.length === 1 ? 'story' : 'stories'} from every period of ABG's work.</p></header>`}
     <form className="search" role="search" onSubmit=${e => { e.preventDefault(); ask(); }}>
       <div className="search-box"><${Icon} name="search" size=${18} /><input id="lib-search" className="search-input" type="search" aria-label="Search stories" placeholder="Search, or ask: students whose attendance improved" value=${q} onChange=${e => { setQ(e.target.value); if (ai) setAi(null); }} /></div>
       ${caps.sample ? html`<button type="submit" className="btn btn-ghost" disabled=${!asStr(q) || !stories.length}><${Icon} name="spark" size=${18} /> Ask Claude</button>` : null}
@@ -2945,7 +2956,7 @@ function MetricSheet({metric, close}){
     <div className="row-btns end">${metric ? html`<button className="btn btn-quiet danger" onClick=${remove}>Delete</button>` : null}<button className="btn btn-ghost" onClick=${close}>Cancel</button><button className="btn btn-primary" disabled=${!valid} onClick=${save}>${metric ? 'Save' : 'Add metric'}</button></div>
   </div>`;
 }
-function InsightsView(){
+function InsightsView({embedded}){
   const {stories, metrics, nav, openSheet, readOnly, storiesLoaded} = useApp();
   const total = stories.length;
   const past = stories.filter(s => s.period === 'past').length;
@@ -2965,7 +2976,7 @@ function InsightsView(){
     ['With long-term updates', stories.filter(s => isOngoing(s) && isLongTerm(s)).length], ['Approved for communications', approved], ['Students documented', uniq(stories.map(s => s.studentId)).length],
   ];
   return html`<div className="view insights">
-    <header className="page-head"><h1>Impact Insights</h1><p className="muted">What the journal has documented so far. Story counts describe what's been recorded, not outcomes for every student.</p></header>
+    ${embedded ? null : html`<header className="page-head"><h1>Impact Insights</h1><p className="muted">What the journal has documented so far. Story counts describe what's been recorded, not outcomes for every student.</p></header>`}
     <section className="view" style=${{gap: '10px'}}>
       <h2>Story documentation</h2>
       <div className="stats stats-6">${tiles.map(t => html`<div className="stat" key=${t[0]}><b>${storiesLoaded ? t[1] : '–'}</b><span>${t[0]}</span></div>`)}</div>
@@ -3018,7 +3029,7 @@ function InsightsView(){
 }
 
 /* ================= follow-ups ================= */
-function FollowupsView(){
+function FollowupsView({embedded}){
   const {stories, nav, openSheet, safeWrite, caps, readOnly} = useApp();
   const today = todayLocal();
   const tasks = allTasks(stories);
@@ -3029,7 +3040,7 @@ function FollowupsView(){
   const setTask = (s, tid, patch) => { const fu = clone(s.followUps || []).map(f => f.id === tid ? Object.assign(f, patch) : f); safeWrite(() => caps.db.collection('stories').doc(s.id).update({followUps: fu, updatedAt: nowISO()})); };
   const dueTone = d => !d ? 'neutral' : d < today ? 'bad' : d <= soon ? 'warn' : 'neutral';
   return html`<div className="view followups">
-    <header className="page-head"><h1>Follow-Ups</h1><p className="muted">Stories that may develop further. These are possibilities to check on, not documented impact.</p></header>
+    ${embedded ? null : html`<header className="page-head"><h1>Follow-Ups</h1><p className="muted">Stories that may develop further. These are possibilities to check on, not documented impact.</p></header>`}
     <section className="card">
       <h2>Awaiting updates</h2>
       ${open.length === 0 ? html`<p className="empty-note">No open reminders. Add one from any story page with "Check-back reminder".</p>` : open.map(x => html`<div className="task" key=${x.t.id}>
@@ -3052,7 +3063,7 @@ function FollowupsView(){
 }
 
 /* ================= reports ================= */
-function ReportsView(){
+function ReportsView({embedded}){
   const {caps, stories, students, metrics, showToast} = useApp();
   const approved = stories.filter(s => s.status === 'approved');
   const [report, setReport] = useState(() => lsGet('abg-report') || '');
@@ -3089,7 +3100,7 @@ function ReportsView(){
   const row = (title, desc, btn) => html`<div className="export-row" key=${title}><div><p><strong>${title}</strong></p><p className="small muted">${desc}</p></div><div className="row-btns">${btn}</div></div>`;
   const dlBtn = (fn, label) => html`<button className="btn btn-ghost btn-sm" disabled=${!caps.downloads} onClick=${fn}><${Icon} name="download" size=${16} /> ${label || 'Download'}</button>`;
   return html`<div className="view reports">
-    <header className="page-head"><h1>Impact Reports</h1><p className="muted">Turn approved stories and verified evidence into fundraising materials, grant applications, partnership packets, newsletters, and annual impact summaries.</p></header>
+    ${embedded ? null : html`<header className="page-head"><h1>Impact Reports</h1><p className="muted">Turn approved stories and verified evidence into fundraising materials, grant applications, partnership packets, newsletters, and annual impact summaries.</p></header>`}
     <section className="card">
       <h2>Generate Impact Report</h2>
       <p className="small muted">Uses only stories approved for external use (${approved.length} now) and verified program metrics (${metrics.length}). Theme counts and data gaps cover all stories. The draft keeps storytelling separate from verified numbers and cites each story.</p>
@@ -3268,15 +3279,15 @@ function App(){
   else {
     const p = route.params || {};
     switch (route.name) {
-      case 'library': content = html`<${LibraryView} key=${route.key} />`; break;
+      case 'library': content = html`<${StoriesView} key=${route.key} tab=${p.tab || 'stories'} />`; break;
       case 'story': content = html`<${StoryView} key=${p.id} id=${p.id} />`; break;
       case 'record': content = html`<${ComposerView} key=${route.key} params=${p} />`; break;
       case 'interview': content = html`<${InterviewView} key=${route.key} params=${p} />`; break;
       case 'review': content = html`<${ReviewView} key=${route.key} params=${p} />`; break;
-      case 'insights': content = html`<${InsightsView} />`; break;
-      case 'backlog': content = html`<${BacklogView} />`; break;
-      case 'followups': content = html`<${FollowupsView} />`; break;
-      case 'reports': content = html`<${ReportsView} />`; break;
+      case 'insights': content = html`<${DashboardView} key=${route.key} tab="overview" />`; break;
+      case 'backlog': content = html`<${StoriesView} key=${route.key} tab="list" />`; break;
+      case 'followups': content = html`<${StoriesView} key=${route.key} tab="followups" />`; break;
+      case 'reports': content = html`<${DashboardView} key=${route.key} tab="reports" />`; break;
       case 'settings': content = html`<${SettingsView} />`; break;
       default: content = html`<${HomeView} />`;
     }
