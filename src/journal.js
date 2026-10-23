@@ -63,9 +63,19 @@ const EVIDENCE_STATUS = [
   {id:'verified', label:'Verified', tone:'good'},
   {id:'reported', label:'Reported', tone:'blue'},
   {id:'estimate', label:'Estimate', tone:'warn'},
-  {id:'qualitative', label:'Observation', tone:'teal'},
+  {id:'qualitative', label:'Anecdotal', tone:'teal'},
   {id:'unverified', label:'Unverified', tone:'bad'},
   {id:'future', label:'Not yet documented', tone:'outline'},
+];
+/* who observed or reported a piece of evidence */
+const OBSERVERS = [
+  {id:'abg_staff', label:'ABG staff (Kyle)'},
+  {id:'teacher', label:'Teacher'},
+  {id:'school_staff', label:'School administrator or staff'},
+  {id:'parent', label:'Parent or family'},
+  {id:'student', label:'The student'},
+  {id:'records', label:'Records or documents'},
+  {id:'other', label:'Someone else'},
 ];
 const QUOTE_KINDS = [
   {id:'exact', label:'Exact words'},
@@ -122,13 +132,6 @@ const UPDATE_PROMPT = "What has happened since? Share any new developments, even
 const OPENING_Q = name => "Can you walk me through the full story of " + name + ", starting with their background, where they came from, the challenges they faced, how they became involved with ABG, and what their experience has looked like since?";
 const CLOSING_Q = name => "Is there anything else about " + name + "'s experience that you think people should understand about the impact of ABG?";
 const UPDATE_OPENING_Q = name => "What has happened with " + name + " since you last recorded their story? Share any new developments, even small ones.";
-const QUESTION_BANK = `A. Background and context (only what helps explain ABG's impact): where they grew up; approximate age when they started; school or community; whether the school is Title I or under-resourced; challenges or barriers before ABG; art opportunities available beforehand; how they found ABG; attitude toward art or school before joining.
-B. ABG's involvement: which program or project; how long; how often they attended; activities; how they first responded; a memorable interaction or turning point; what ABG offered they otherwise wouldn't have had; challenges during the program and how they responded.
-C. Development and personal impact: changes in confidence or self-expression; willingness to participate or engage with others; behavior or attitude; new artistic, communication or leadership skills; relationships with students, artists or mentors; the moment Kyle realized it made a difference; changes teachers or family reported outside ABG; the most meaningful outcome.
-D. Quantifiable impact: whether school attendance changed; attendance before and after; classroom participation; documented changes in grades or behavior; how many students in the program; how many workshops or sessions; program length; continuing voluntarily beyond the program; completed projects or artworks; surveys, attendance records, teacher evaluations or feedback collected; approximate numbers that could be verified later; outcomes ABG can't currently measure.
-E. Long-term impact: what happened after; continued art or creative interests; influence on later education or opportunities; ongoing relationship with ABG; returning as volunteer, mentor or participant; updates from teachers, family or the student; lasting influence; developments worth following up on.
-F. Community and stakeholder impact: impact beyond the student; classmates, teachers, families or community involved; encouraging others to join arts programming; lasting public artwork such as a mural; volunteers, schools, businesses or organizations involved; what resources or funding made it possible; what the story shows about investing in ABG; what more ABG could do with more resources.
-G. Supporting evidence: photos, artwork or video; teacher testimonials or feedback; attendance records or program documents; whether Kyle observed it directly or someone else reported it; a memorable quote; details or numbers still to verify; whether permission to share publicly is documented.`;
 const METRIC_SUGGESTIONS = ['Students served','Schools reached','Workshops completed','Murals or projects completed','Volunteer hours','Volunteers','Families attending events','Program sessions held'];
 /* the standard metrics card: the same measurable fields on every student story */
 const METRIC_FIELDS = [
@@ -138,7 +141,9 @@ const METRIC_FIELDS = [
   {id:'programs', label:'ABG programs or projects', short:'Programs', type:'text', ph:'e.g. School mural program'},
   {id:'artworksCompleted', label:'Murals or artworks completed', short:'Artworks completed', type:'number', unit:'works'},
   {id:'continuedArt', label:'Kept making art after the program', short:'Kept making art', type:'choice', options:['Yes','No']},
+  {id:'grades', label:'Grades or schoolwork during or after ABG', short:'Grades', type:'choice', options:['Improved','Stayed about the same','Declined']},
   {id:'schoolAttendance', label:'School attendance during or after ABG', short:'School attendance', type:'choice', options:['Improved','Stayed about the same','Declined']},
+  {id:'stillParticipating', label:'Still participating in ABG', short:'Still participating', type:'choice', options:['Yes','No']},
   {id:'graduated', label:'Graduated high school', short:'Graduated high school', type:'choice', options:['Yes','No','Not yet (still in school)']},
   {id:'nextStep', label:'College, training or creative work afterward', short:'College or creative path', type:'text', ph:'e.g. community college art classes'},
   {id:'returnedToAbg', label:'Came back to ABG (volunteer, mentor or alum)', short:'Came back to ABG', type:'choice', options:['Yes','No']},
@@ -204,6 +209,10 @@ function cleanMetrics(raw, aiOnly){
 }
 function metricVal(s, id){ const m = ((s && s.metrics) || {})[id]; const v = m && asStr(m.value); return v ? {value: v, status: pickEnum(m.status, METRIC_STATUS, 'reported')} : null; }
 function metricsKnown(s){ return METRIC_FIELDS.filter(f => metricVal(s, f.id)).length; }
+function comparisonText(e){ if (!e || (!asStr(e.before) && !asStr(e.after))) return ''; return 'Before: ' + (asStr(e.before) || 'unknown') + ' → After: ' + (asStr(e.after) || 'unknown') + (asStr(e.timeframe) ? ' (' + e.timeframe + ')' : ''); }
+function isMeasurable(e){ return e.kind === 'numeric' && e.status !== 'future'; }
+function isQualitative(e){ return e.kind !== 'numeric' && e.status !== 'future'; }
+const STATUS_LEGEND = 'Verified means checked against records. Reported means Kyle stated it. Estimate means approximate. Anecdotal means an observation. Only verified items count as documented proof.';
 function isStudentStory(s){ return !!(s && (s.studentId || asStr(s.alias))); }
 function fmtMetric(f, v){
   if (f.type !== 'number') return v;
@@ -278,41 +287,63 @@ const ABG_CONTEXT = "Arts Bridging the Gap (ABG) is a Los Angeles nonprofit that
 
 function interviewPrompt({name, turns, mode, story, asked, target, memo}){
   const convo = turns.map(t => 'Q (' + t.kind + '): ' + t.q + '\nA: ' + (t.status === 'skipped' ? '[Kyle skipped this question]' : t.a)).join('\n\n');
-  const existing = story ? {summary: story.summary, timeline: (story.milestones || []).map(m => (fmtEventDate(m.date) || 'undated') + ': ' + m.label), missingMetrics: (story.missingMetrics || []).map(m => m.metric),
-    metricsCardAlreadyKnown: METRIC_FIELDS.filter(f => metricVal(story, f.id)).map(f => f.label + ': ' + metricVal(story, f.id).value)} : null;
+  const existing = story ? {summary: story.summary, timeline: (story.milestones || []).map(m => (fmtEventDate(m.date) || 'undated') + ': ' + m.label), dataGaps: (story.missingMetrics || []).map(m => m.metric),
+    metricsAlreadyKnown: METRIC_FIELDS.filter(f => metricVal(story, f.id)).map(f => f.label + ': ' + metricVal(story, f.id).value)} : null;
   return `${ABG_CONTEXT}
 
-You are a thoughtful interviewer helping Kyle tell the story of a student named ${name}. Story first, evidence second, stakeholder value third.
+You are interviewing Kyle about a student named ${name}. The consulting team uses these interviews to show donors, school administrators and grant providers what measurable difference ABG makes, so the goal is the student's story plus the concrete evidence behind it.
 ${mode === 'update' ? 'This is an UPDATE interview about a story already in the journal. Focus on what is new since it was recorded. Existing record: ' + JSON.stringify(existing) : ''}
 ${memo ? "Kyle's one-line note about " + name + ' from his student list: "' + memo + '". Treat it as a starting point he wants to cover, not as confirmed detail.' : ''}
 
 Choose the single best NEXT follow-up question.
 
-How to choose:
-- Move through these stages in order, going on once a stage is reasonably covered: narrative (missing story details, what helped, a turning point), outcomes (what specifically changed, for things Kyle mentioned), metrics (attendance, participation, program size, records that could verify a claim), long_term (what happened later), evidence (materials, who observed it, permission to share).
-- Build on something specific Kyle said, and refer to it, e.g. "You mentioned ${name} was hesitant at first. What helped?"
+HOW THE INTERVIEW FLOWS
+- The opening question collects the story: background, challenges, how ${name} got involved with ABG, and what their experience has been. If the story is still thin after it (for example, no clear sense of what changed), ask one short question to fill that gap first.
+- Once the story is established, move naturally to short, data-focused questions. Ask about the most meaningful missing information, not every possible metric.
+
+WHAT TO ASK ABOUT, most valuable first (skip anything already answered):
+1. Academic performance: grades, GPA, assignment completion, classroom participation.
+2. Attendance: school attendance or absences before and after ABG.
+3. Retention: how long ${name} has been with ABG, and whether they still take part.
+4. Program engagement: how often they attended, sessions, projects or murals completed.
+5. Personal development: confidence, communication, leadership, collaboration, and how Kyle actually saw it.
+6. Long-term outcomes: further education, career interests, mentoring, other opportunities.
+7. Community impact: changes teachers, parents or school administrators noticed.
+8. Evidence: records, report cards, attendance data, teacher feedback, photos; whether other students had similar outcomes.
+
+FOLLOW THE THREAD
+Listen for openings in what Kyle just said and ask for specifics: numbers, timelines, before-and-after comparisons, and who observed it.
+- He says the student became more confident: "How did you see that change?"
+- He mentions better attendance: "Do you know their attendance before and after?"
+- He mentions better grades: "Do you have their grades from before and after?"
+- He describes a change in general terms: "Can you put a number on that?" or "Did their teachers notice?"
+- He states an outcome: "Do you have records that show that?"
+
+NEVER ASSUME
+- Don't assume an improvement happened. Ask "Did their grades change after joining ABG?", not "How much did their grades improve?", unless Kyle already said they improved.
+- Don't assume school attendance changed because program attendance was good.
+- If Kyle doesn't know a number, accept it and move on; never press. A clear observation is still valuable.
+- Never ask for a last name, address or other identifying details.
+
+STYLE
+- One question only. Ideally under 15 words, never more than 20. Plain, direct and conversational. No preamble, no praise, and no double questions joined with "and" or "or".
+- Good: "Did their grades change after joining ABG?" "How long have they been with ABG?" "How often did they come?" "Did their teachers notice any changes?" "Do you have records that support this?"
+- Too long: "Can you elaborate on how participating in ABG may have influenced the student's overall academic engagement and performance?"
 - Never ask about something already answered, and never re-ask a skipped question.
-- Don't lead with assumed positive outcomes. Don't assume school attendance improved because program participation did. Allow uncertainty, and don't press for numbers he doesn't know.
-- Ask only for background that helps explain ABG's impact. Never ask for a last name, address, or other identifying details.
-- When choosing metric questions, think about who the story could serve: schools (attendance, classroom engagement, confidence, communication, retention, access to arts), donors (students served, reach, outcomes, continued participation, what support made possible), corporate partners (volunteer involvement and hours, completed projects), community groups (youth and family engagement, murals, partnerships), artists and volunteers (collaboration, artistic development).
-- Use ${name}'s first name naturally. Warm and conversational, not formal. One question, under 35 words, no preamble or praise.
-- Every student story gets the same metrics card: ${METRIC_FIELDS.map(f => f.label).join('; ')}. In the metrics stage, ask about one or two card items Kyle hasn't covered yet, in a natural way ("roughly", "if you know"). "I don't know" is a fine answer; never press.
+- Use ${name}'s first name now and then, naturally.
 
-Question bank to draw from (adapt to the conversation, never read it verbatim):
-${QUESTION_BANK}
-
-Follow-up questions asked so far: ${asked}. Aim for about ${target}. Set "enough" to true when the story, its outcomes and its supporting evidence are covered well enough to write a strong impact story.
+Follow-up questions asked so far: ${asked}. Aim for about ${target}. Set "enough" to true when the story, its measurable outcomes and its supporting evidence are covered well enough for a strong impact report.
 
 Conversation so far:
 ${convo}
 
-Reply with only JSON: {"question": "the question", "category": "A, B, C, D, E, F or G", "stage": "narrative | outcomes | metrics | long_term | evidence", "why": "a few words on what this adds", "enough": false}`;
+Reply with only JSON: {"question": "the question", "category": "topic in one or two words, e.g. grades, attendance, retention, engagement, development, long-term, community, evidence, story", "why": "a few words on what this adds", "enough": false}`;
 }
 
 const ANALYSIS_SHAPE = `{
   "title": "4 to 8 word title in sentence case, e.g. From hesitant painter to mural lead",
   "summary": "2 or 3 sentences for library cards",
-  "story": "the full impact story, 200 to 350 words: the student's background, initial challenges or circumstances, introduction to ABG, important experiences, a meaningful moment or turning point, observable outcomes, and long-term developments if known. Warm, engaging and authentic, for a nonprofit impact report. No generic praise, exaggeration or unsupported claims. Leave out any part the interview didn't cover.",
+  "story": "the Student Story, 200 to 350 words: a compelling narrative of the student's background, initial challenges, introduction to ABG, a meaningful moment or turning point, how they changed, and long-term developments if known. Warm, engaging and authentic. Mention key outcomes in words, but leave detailed figures to the evidence list. No generic praise, exaggeration or unsupported claims. Leave out any part the interview didn't cover.",
   "entrySummary": "1 or 2 sentences on what this specific interview adds",
   "alias": "the student's first name as given, or null",
   "overview": {"ageOrGrade": "approximate age or grade when involved, or null", "background": "1 or 2 sentences of background relevant to ABG's impact, or null", "involvementDate": "when they were involved with ABG, in Kyle's words, or null"},
@@ -326,9 +357,9 @@ const ANALYSIS_SHAPE = `{
   "structure": {"character": "text or null", "circumstances": "text or null", "involvement": "text or null", "events": "text or null", "outcomes": "text or null", "longTerm": "text or null"},
   "categories": ["category ids"],
   "themes": ["theme ids"],
-  "stakeholders": {"primary": ["up to 3 audience ids, most relevant first"], "why": "1 or 2 sentences on why this story matters to them"},
-  "evidence": [{"category": "category id", "kind": "qualitative | numeric", "statement": "what the evidence shows", "value": null, "unit": "students, sessions, hours... or null", "status": "reported | estimate | qualitative | unverified | future", "basis": "who observed or reported it, e.g. Kyle observed directly; teacher report relayed by Kyle; program records Kyle mentioned", "excerpt": "short passage copied word for word from the interview"}],
-  "missingMetrics": [{"metric": "information that would strengthen the story but isn't available yet", "why": "how it would help", "howToGet": "where it might come from"}],
+  "stakeholders": {"primary": ["up to 3 audience ids, most relevant first"], "why": "Stakeholder Value: 2 or 3 sentences on how the documented outcomes show ABG's impact and support donor funding or school partnerships. Claim only what the evidence supports, and say when outcomes are reported or estimated rather than verified."},
+  "evidence": [{"category": "category id", "kind": "numeric for measurable outcomes (numbers, counts, rates, before-and-after comparisons, durations) | qualitative for observations and testimonials", "statement": "what the evidence shows", "value": null, "unit": "students, sessions, hours, percent, years... or null", "before": "the value or situation before ABG, or null", "after": "the value or situation after, or null", "timeframe": "the period compared, e.g. fall 2023 to spring 2024, or null", "status": "reported | estimate | qualitative | unverified | future", "observer": "abg_staff | teacher | school_staff | parent | student | records | other", "basis": "who observed or reported it, e.g. Kyle observed directly; teacher told Kyle; attendance records Kyle mentioned", "excerpt": "short passage copied word for word from the interview"}],
+  "missingMetrics": [{"metric": "Data Gaps: an important metric that wasn't available in the interview but could be collected later", "why": "how it would strengthen the case for stakeholders", "howToGet": "where it might come from"}],
   "quotes": [{"text": "the words", "speaker": "first name or role, or Narrator", "kind": "exact | remembered | paraphrase"}],
   "milestones": [{"date": {"text": "when, or null", "iso": "YYYY or YYYY-MM, or null"}, "label": "what happened", "phase": "circumstances | involvement | immediate | short_term | long_term | future", "confirmed": true}],
   "materials": [{"type": "photo | artwork | video | testimonial | record | survey | other", "description": "what exists and where, as Kyle described it"}],
@@ -363,7 +394,9 @@ function analysisPrompt({mode, story, items, others, whenHint, studentName, memo
 - Don't treat a reported change (more confidence, for example) as a measured increase.
 - Every evidence item needs "excerpt": a short passage copied word for word from the entries that supports it, and "basis": who observed or reported it.
 - Evidence status: "reported" for numbers or facts Kyle states plainly; "estimate" for approximate numbers ("about", "around", "maybe"); "qualitative" for non-numeric observations; "unverified" for secondhand or uncertain claims; "future" for hoped-for or expected outcomes. Never use "verified": only ABG staff verify evidence, against records.
-- Numeric evidence: put the number in "value" only when Kyle states it.
+- Measurable outcomes are "numeric" evidence: specific numbers, counts, rates, durations and before-and-after comparisons. Put the number in "value" only when Kyle states it. Fill "before", "after" and "timeframe" only with what Kyle said.
+- Qualitative evidence: observations and testimonials from the student, parents, teachers, school staff or ABG staff. Set "observer" to who saw or said it.
+- Never present an anecdote or estimate as a proven outcome. Status separates them: documented data is only ever marked verified later by ABG staff; plain statements are "reported"; approximate numbers are "estimate"; observations are "qualitative".
 - metricsCard: the standard metrics card, filled in the same way for every student story. Fields: ${METRIC_FIELDS.map(f => f.id + ' (' + f.label + (f.type === 'number' ? ', a number only' : f.type === 'choice' ? ', one of: ' + f.options.join(' / ') : ', short text') + ')').join('; ')}. Include a field only when the entries actually say it, and leave the rest out (they show as unknown). Status "reported" when Kyle states it plainly, "estimate" when approximate ("about", "maybe", "I think"). Never "verified". Don't infer attendance from participation, or graduation from age. If the entries aren't about one student, use an empty object.
 - missingMetrics: information that would make the story more credible for stakeholders but isn't documented yet (attendance records, program size, teacher feedback...). Only ones relevant to this story.
 - Quotes: "exact" for words that appear word for word in the entries and were clearly said, including Kyle's own quotable statements (speaker "Narrator"); "remembered" when Kyle recalls what someone said; "paraphrase" for statements put in other words. Copy exact and remembered quotes exactly as they appear. Never create a quote.
@@ -397,8 +430,10 @@ function normalizeAnalysis(raw, ctx){
     const loc = locate(excerpt);
     let status = pickEnum(e.status, EVIDENCE_STATUS, 'qualitative'); if (status === 'verified') status = 'reported';
     const value = toNum(e.value);
-    return { id: uid('ev'), category: pickEnum(e.category, CATEGORIES, 'engagement'), kind: (value != null || e.kind === 'numeric') ? 'numeric' : 'qualitative',
-      statement: asStr(e.statement), value: value, unit: nul(e.unit), status: status, basis: nul(e.basis), source: {entryId: loc.entryId, excerpt: excerpt, found: loc.found, note: ''}, observed: '' };
+    const before = nul(e.before), after = nul(e.after);
+    return { id: uid('ev'), category: pickEnum(e.category, CATEGORIES, 'engagement'), kind: (value != null || /^numeric/.test(asStr(e.kind)) || (before && after)) ? 'numeric' : 'qualitative',
+      statement: asStr(e.statement), value: value, unit: nul(e.unit), before: before, after: after, timeframe: nul(e.timeframe), observer: pickEnum(e.observer, OBSERVERS, ''),
+      status: status, basis: nul(e.basis), source: {entryId: loc.entryId, excerpt: excerpt, found: loc.found, note: ''}, observed: '' };
   }).filter(e => e.statement);
   const quotes = asArr(r.quotes).slice(0, 12).map(q => {
     q = q || {};
@@ -482,7 +517,7 @@ function adaptPrompt(s, audId, fmtId){
   const record = {
     title: s.title, impactStory: s.story || s.summary, student: name || 'a student (do not use any name)', ageOrGrade: (s.overview || {}).ageOrGrade || null,
     when: fmtEventDate(s.eventDate) || null, program: s.program || null, community: needsRedaction(s) ? null : (s.community || null), takeaways: s.takeaways || [],
-    evidence: (s.evidence || []).filter(e => e.status !== 'unverified').map(e => ({statement: e.statement, number: toNum(e.value), unit: e.unit || null, status: labelOf(EVIDENCE_STATUS, e.status), basis: e.basis || null})),
+    evidence: (s.evidence || []).filter(e => e.status !== 'unverified').map(e => ({type: e.kind === 'numeric' ? 'measurable outcome' : 'qualitative', statement: e.statement, number: toNum(e.value), unit: e.unit || null, before: e.before || null, after: e.after || null, period: e.timeframe || null, status: labelOf(EVIDENCE_STATUS, e.status), observedBy: e.observer ? labelOf(OBSERVERS, e.observer) : null, basis: e.basis || null})),
     quotesYouMayUse: (s.quotes || []).filter(q => q.approved).map(q => ({text: q.text, speaker: q.speaker === s.alias && !name ? 'the student' : (q.speaker === s.alias ? name : q.speaker), kind: q.kind})),
     timeline: sortMilestones(s.milestones || []).map(m => ({when: fmtEventDate(m.date) || null, what: m.label, status: m.phase === 'future' ? 'pending, not yet documented' : (m.confirmed ? 'confirmed' : 'unconfirmed')})),
     whyItMatters: s.stakeholderWhy || null,
@@ -516,7 +551,7 @@ function reportPrompt(stories, metrics){
       ref: 'S' + (i + 1), title: s.title, student: name || 'a student (no name)', when: fmtEventDate(s.eventDate) || null, program: s.program || null,
       community: needsRedaction(s) ? null : (s.community || null), impactStory: trunc(s.story || s.summary, 1800), takeaways: s.takeaways || [],
       themes: (s.themes || []).map(t => labelOf(THEMES, t)), audiences: (s.audiences || []).map(a => labelOf(AUDIENCES, a)), whyItMatters: s.stakeholderWhy || null,
-      evidence: (s.evidence || []).map(e => ({statement: e.statement, number: toNum(e.value), unit: e.unit || null, status: e.status, basis: e.basis || null})),
+      evidence: (s.evidence || []).map(e => ({type: e.kind === 'numeric' ? 'measurable outcome' : 'qualitative', statement: e.statement, number: toNum(e.value), unit: e.unit || null, before: e.before || null, after: e.after || null, period: e.timeframe || null, status: e.status, observedBy: e.observer ? labelOf(OBSERVERS, e.observer) : null, basis: e.basis || null})),
       missingMetrics: (s.missingMetrics || []).map(m => m.metric),
       approvedQuotes: (s.quotes || []).filter(q => q.approved).map(q => ({text: q.text, speaker: q.speaker === s.alias ? (name || 'the student') : q.speaker, kind: q.kind})),
       timeline: sortMilestones(s.milestones || []).map(m => ({when: fmtEventDate(m.date) || null, what: m.label, phase: labelOf(PHASES, m.phase), status: m.phase === 'future' ? 'pending' : 'documented'})),
@@ -686,8 +721,9 @@ function evidenceCSV(stories){
   stories.forEach(s => { (s.evidence || []).forEach(e => rows.push({s, e})); (s.missingMetrics || []).forEach(m => rows.push({s, e: {id: m.id, category: '', kind: '', statement: m.metric, value: null, unit: '', status: 'missing', basis: m.howToGet ? 'Where to find it: ' + m.howToGet : '', source: {note: m.why}}})); });
   return toCSV([
     ['Story ID', r => r.s.id], ['Story title', r => r.s.title], ['Story status', r => labelOf(STATUSES, r.s.status)], ['Evidence ID', r => r.e.id], ['Category', r => r.e.category ? labelOf(CATEGORIES, r.e.category) : ''],
-    ['Type', r => r.e.status === 'missing' ? 'Missing metric' : (r.e.kind === 'numeric' ? 'Numeric' : 'Qualitative')], ['Statement', r => r.e.statement], ['Value', r => r.e.value], ['Unit', r => r.e.unit],
-    ['Verification status', r => r.e.status === 'missing' ? 'Missing' : labelOf(EVIDENCE_STATUS, r.e.status)], ['Source', r => r.e.basis], ['Source entry ID', r => r.e.source && r.e.source.entryId], ['Source passage', r => r.e.source && r.e.source.excerpt],
+    ['Type', r => r.e.status === 'missing' ? 'Data gap' : r.e.status === 'future' ? 'Expected, not documented' : (r.e.kind === 'numeric' ? 'Measurable outcome' : 'Qualitative evidence')], ['Statement', r => r.e.statement], ['Value', r => r.e.value], ['Unit', r => r.e.unit],
+    ['Before', r => r.e.before], ['After', r => r.e.after], ['Period compared', r => r.e.timeframe], ['Observed by', r => r.e.observer ? labelOf(OBSERVERS, r.e.observer) : ''],
+    ['Verification status', r => r.e.status === 'missing' ? 'Not available' : labelOf(EVIDENCE_STATUS, r.e.status)], ['Source', r => r.e.basis], ['Source entry ID', r => r.e.source && r.e.source.entryId], ['Source passage', r => r.e.source && r.e.source.excerpt],
     ['Passage found in transcript', r => r.e.source && r.e.source.excerpt ? (r.e.source.found ? 'Yes' : 'No') : ''], ['Note', r => r.e.source && r.e.source.note],
   ], rows);
 }
@@ -821,17 +857,33 @@ function approvedMarkdown(stories, audience){
     const meta = [name ? 'Student: ' + name : '', fmtEventDate(s.eventDate), s.program, needsRedaction(s) ? '' : s.community].filter(Boolean).join(' · ');
     if (meta) out.push('*' + meta + '*', '');
     if (needsRedaction(s)) out.push('_Identifying details must be removed before use._', '');
-    if (s.story || s.summary) out.push(swap(s.story || s.summary), '');
+    if (s.story || s.summary) out.push('**Student story**', '', swap(s.story || s.summary), '');
     if ((s.takeaways || []).length) { out.push('**Key impact takeaways**'); s.takeaways.forEach(t => out.push('- ' + swap(t))); out.push(''); }
-    const ev = (s.evidence || []).filter(e => e.status !== 'unverified');
-    if (ev.length) { out.push('**Supporting evidence**'); ev.forEach(e => out.push('- ' + (e.value != null ? fmtNum(e.value) + (e.unit ? ' ' + e.unit : '') + ': ' : '') + swap(e.statement) + ' (' + labelOf(EVIDENCE_STATUS, e.status) + (e.basis ? '; ' + swap(e.basis) : '') + ')')); out.push(''); }
-    if (s.stakeholderWhy) out.push('**Why it matters:** ' + swap(s.stakeholderWhy), '');
+    const meas = (s.evidence || []).filter(e => isMeasurable(e) && e.status !== 'unverified');
+    const card = isStudentStory(s) ? METRIC_FIELDS.filter(f => f.type !== 'text' && metricVal(s, f.id)) : [];
+    if (meas.length || card.length) {
+      out.push('**Measurable outcomes** (status in brackets; only Verified items are documented in records)');
+      card.forEach(f => { const m = metricVal(s, f.id); out.push('- ' + f.label + ': ' + fmtMetric(f, m.value) + ' [' + labelOf(METRIC_STATUS, m.status) + ']'); });
+      meas.forEach(e => out.push(evLine(e, swap)));
+      out.push('');
+    }
+    const qual = (s.evidence || []).filter(e => isQualitative(e) && e.status !== 'unverified');
+    if (qual.length) { out.push('**Qualitative evidence** (observations, anecdotal)'); qual.forEach(e => out.push(evLine(e, swap))); out.push(''); }
+    if ((s.missingMetrics || []).length) { out.push('**Data gaps**'); s.missingMetrics.forEach(m => out.push('- ' + swap(m.metric))); out.push(''); }
+    if (s.stakeholderWhy) out.push('**Stakeholder value:** ' + swap(s.stakeholderWhy), '');
     const q = (s.quotes || []).filter(x => x.approved);
     if (q.length) { out.push('**Approved quotes**'); q.forEach(x => out.push('> "' + swap(x.text) + '" (' + (x.speaker === s.alias ? (name || 'a student') : (x.speaker || 'unknown speaker')) + ', ' + labelOf(QUOTE_KINDS, x.kind).toLowerCase() + ')')); out.push(''); }
     const dr = (s.drafts || []).filter(x => x.approved && (!audience || x.audience === audience));
     if (dr.length) { out.push('**Approved audience versions**'); dr.forEach(x => out.push('', '*' + labelOf(FORMATS, x.format) + ', ' + labelOf(AUDIENCES, x.audience) + '*', '', x.text)); out.push(''); }
   });
   return out.join('\n');
+}
+function evLine(e, swap){
+  const sw = swap || (t => String(t || ''));
+  const num = e.value != null && e.value !== '' ? fmtNum(e.value) + (e.unit ? ' ' + e.unit : '') + ': ' : '';
+  const cmp = comparisonText(e);
+  const who = [e.observer ? labelOf(OBSERVERS, e.observer) : '', e.basis ? sw(e.basis) : ''].filter(Boolean).join('; ');
+  return '- [' + labelOf(EVIDENCE_STATUS, e.status) + '] ' + num + sw(e.statement) + (cmp ? ' (' + sw(cmp) + ')' : '') + (who ? ' (source: ' + who + ')' : '');
 }
 function storyMarkdown(s, entries){
   const ov = s.overview || {};
@@ -840,15 +892,25 @@ function storyMarkdown(s, entries){
   [['Student', s.alias], ['Age or grade', ov.ageOrGrade], ['School or community', s.community], ['Background', ov.background], ['ABG program', s.program], ['When involved', ov.involvementDate || fmtEventDate(s.eventDate)]]
     .filter(r => r[1]).forEach(r => out.push('- **' + r[0] + ':** ' + r[1]));
   out.push('');
-  if (s.story) out.push('## Impact story', '', s.story, '');
-  else if (s.summary) out.push('## Summary', '', s.summary, '');
-  if ((s.takeaways || []).length) { out.push('## Key impact takeaways'); s.takeaways.forEach(t => out.push('- ' + t)); out.push(''); }
-  if ((s.evidence || []).length) { out.push('## Supporting metrics and evidence'); s.evidence.forEach(e => out.push('- [' + labelOf(EVIDENCE_STATUS, e.status) + '] ' + labelOf(CATEGORIES, e.category) + ': ' + (e.value != null ? fmtNum(e.value) + (e.unit ? ' ' + e.unit : '') + ', ' : '') + e.statement + (e.basis ? ' (source: ' + e.basis + ')' : '') + (e.source && e.source.excerpt ? ' (passage: "' + e.source.excerpt + '")' : (e.source && e.source.note ? ' (record: ' + e.source.note + ')' : '')))); out.push(''); }
-  if ((s.missingMetrics || []).length) { out.push('## Missing metrics'); s.missingMetrics.forEach(m => out.push('- ' + m.metric + (m.why ? ': ' + m.why : '') + (m.howToGet ? ' (where to find it: ' + m.howToGet + ')' : ''))); out.push(''); }
-  if ((s.audiences || []).length) out.push('## Stakeholder relevance', '', '**Primary audiences:** ' + s.audiences.map(a => labelOf(AUDIENCES, a)).join(', '), '', s.stakeholderWhy ? '**Why this story matters:** ' + s.stakeholderWhy : '', '');
+  const withPassage = e => evLine(e) + (e.source && e.source.excerpt ? ' (passage: "' + e.source.excerpt + '")' : (e.source && e.source.note ? ' (record: ' + e.source.note + ')' : ''));
+  out.push('## Student story', '', s.story || s.summary || 'Not written yet.', '');
+  if ((s.takeaways || []).length) { out.push('**Key impact takeaways**'); s.takeaways.forEach(t => out.push('- ' + t)); out.push(''); }
+  out.push('## Measurable outcomes', '', '_' + STATUS_LEGEND + '_', '');
+  if (isStudentStory(s)) { out.push('**Student metrics card**'); METRIC_FIELDS.forEach(f => { const m = metricVal(s, f.id); out.push('- ' + f.label + ': ' + (m ? fmtMetric(f, m.value) + ' [' + labelOf(METRIC_STATUS, m.status) + ']' : 'Unknown')); }); out.push(''); }
+  const meas = (s.evidence || []).filter(isMeasurable), qual = (s.evidence || []).filter(isQualitative), fut = (s.evidence || []).filter(e => e.status === 'future');
+  if (meas.length) { out.push('**Numbers and comparisons**'); meas.forEach(e => out.push(withPassage(e))); out.push(''); } else out.push('No numbers or comparisons recorded yet.', '');
+  out.push('## Qualitative evidence', '');
+  if (qual.length) { qual.forEach(e => out.push(withPassage(e))); out.push(''); } else out.push('None recorded.', '');
+  if ((s.quotes || []).length) { out.push('**Quotes**'); s.quotes.forEach(q => out.push('> "' + q.text + '" (' + (q.speaker || 'unknown') + ', ' + labelOf(QUOTE_KINDS, q.kind).toLowerCase() + (q.approved ? ', approved' : '') + ')')); out.push(''); }
+  out.push('## Data gaps', '');
+  (s.missingMetrics || []).forEach(m => out.push('- ' + m.metric + (m.why ? ': ' + m.why : '') + (m.howToGet ? ' (where to find it: ' + m.howToGet + ')' : '')));
+  if (isStudentStory(s)) { const unk = METRIC_FIELDS.filter(f => !metricVal(s, f.id)); if (unk.length) out.push('- Unknown on the metrics card: ' + unk.map(f => f.short).join(', ')); }
+  fut.forEach(e => out.push('- Expected, not yet documented: ' + e.statement));
+  out.push('');
+  out.push('## Stakeholder value', '', s.stakeholderWhy || 'Not written yet.', '');
+  if ((s.audiences || []).length) out.push('**Most useful for:** ' + s.audiences.map(a => labelOf(AUDIENCES, a)).join(', '), '');
   if ((s.followUps || []).length) { out.push('## Recommended follow-up'); s.followUps.forEach(f => out.push('- ' + f.question + ' [' + f.status + ']' + (f.answer ? ': ' + f.answer : ''))); out.push(''); }
   if ((s.milestones || []).length) { out.push('## Student impact timeline'); sortMilestones(s.milestones).forEach(m => out.push('- ' + labelOf(PHASES, m.phase) + ' · ' + (fmtEventDate(m.date) || 'Date unknown') + ': ' + m.label + (m.phase === 'future' ? ' (pending)' : ''))); out.push(''); }
-  if ((s.quotes || []).length) { out.push('## Quotes'); s.quotes.forEach(q => out.push('> "' + q.text + '" (' + (q.speaker || 'unknown') + ', ' + labelOf(QUOTE_KINDS, q.kind).toLowerCase() + (q.approved ? ', approved' : '') + ')')); out.push(''); }
   if ((s.materials || []).length) { out.push('## Supporting materials'); s.materials.forEach(m => out.push('- ' + labelOf(MATERIAL_TYPES, m.type) + ': ' + m.description)); out.push(''); }
   (entries || []).forEach((e, i) => {
     out.push('## ' + (i === 0 ? 'Original interview' : 'Story update') + ' (recorded ' + fmtDate(e.recordedAt) + ')', '');
@@ -1524,7 +1586,7 @@ function InterviewView({params}){
   const [turns, setTurns] = useState(I.turns || []);
   const [current, setCurrent] = useState(I.current || null);
   const [answer, setAnswer] = useState(I.answer || '');
-  const [target, setTarget] = useState(I.target || (mode === 'update' ? 2 : 4));
+  const [target, setTarget] = useState(I.target || (mode === 'update' ? 3 : 5));
   const [phase, setPhase] = useState(I.phase || 'asking');
   const [student, setStudent] = useState(I.student || null);
   const [clips, setClips] = useState(I.clips || []);
@@ -1646,7 +1708,7 @@ function InterviewView({params}){
     setBusy(null);
     if (sid) { lsDel(draftKey); showToast('Interview saved'); nav('story', {id: sid}); }
   }
-  function startOver(){ lsDel(draftKey); setClips([]); setStep(mode === 'update' ? 'interview' : 'name'); setTurns([]); setAnswer(''); setPhase('asking'); setErr(''); setTarget(mode === 'update' ? 2 : 4); setStudent(null); setFirst(''); setPick(''); setNote(''); setWhen('');
+  function startOver(){ lsDel(draftKey); setClips([]); setStep(mode === 'update' ? 'interview' : 'name'); setTurns([]); setAnswer(''); setPhase('asking'); setErr(''); setTarget(mode === 'update' ? 3 : 5); setStudent(null); setFirst(''); setPick(''); setNote(''); setWhen('');
     setCurrent(mode === 'update' ? {q: params.prompt || UPDATE_OPENING_Q(name), kind: 'opening'} : null); }
   const back = () => story ? nav('story', {id: story.id}) : nav('home');
 
@@ -1766,6 +1828,7 @@ function PrivacyPanel({value, onChange, disabled, live}){
 }
 function EvidenceEdit({ev, onChange, onRemove, onShow}){
   const src = ev.source || {};
+  const numeric = ev.kind === 'numeric';
   return html`<div className=${'ev-edit' + (ev._new ? ' is-new' : '')}>
     <div className="ev-edit-top">
       <select className="select select-sm" aria-label="Impact category" value=${ev.category} onChange=${e => onChange({category: e.target.value})}>${CATEGORIES.map(c => html`<option key=${c.id} value=${c.id}>${c.label}</option>`)}</select>
@@ -1773,11 +1836,19 @@ function EvidenceEdit({ev, onChange, onRemove, onShow}){
       <button type="button" className="icon-btn" aria-label="Remove evidence" onClick=${onRemove}><${Icon} name="trash" size=${18} /></button>
     </div>
     <textarea className="textarea" rows="2" aria-label="What the evidence shows" placeholder="What does this show?" value=${ev.statement} onChange=${e => onChange({statement: e.target.value})}></textarea>
-    <div className="row">
+    ${numeric ? html`<div className="row">
       <${Field} label="Number, if one was given"><input className="input" inputMode="decimal" value=${ev.value == null ? '' : ev.value} onChange=${e => onChange({value: e.target.value})} /><//>
-      <${Field} label="Unit"><input className="input" placeholder="students, sessions, hours" value=${ev.unit || ''} onChange=${e => onChange({unit: e.target.value})} /><//>
+      <${Field} label="Unit"><input className="input" placeholder="percent, sessions, years" value=${ev.unit || ''} onChange=${e => onChange({unit: e.target.value})} /><//>
     </div>
-    <${Field} label="Source" hint="Who observed or reported it"><input className="input" placeholder="e.g. Kyle observed directly; teacher report" value=${ev.basis || ''} onChange=${e => onChange({basis: e.target.value})} /><//>
+    <div className="row">
+      <${Field} label="Before"><input className="input" placeholder="Unknown" value=${ev.before || ''} onChange=${e => onChange({before: e.target.value})} /><//>
+      <${Field} label="After"><input className="input" placeholder="Unknown" value=${ev.after || ''} onChange=${e => onChange({after: e.target.value})} /><//>
+      <${Field} label="Period compared"><input className="input" placeholder="e.g. 2024 to 2025" value=${ev.timeframe || ''} onChange=${e => onChange({timeframe: e.target.value})} /><//>
+    </div>` : null}
+    <div className="row">
+      <${Field} label="Observed or reported by"><select className="select" value=${ev.observer || ''} onChange=${e => onChange({observer: e.target.value})}><option value="">Not recorded</option>${OBSERVERS.map(o => html`<option key=${o.id} value=${o.id}>${o.label}</option>`)}</select><//>
+      <${Field} label="Source" hint="How it's known"><input className="input" placeholder="e.g. Kyle observed directly; teacher told Kyle" value=${ev.basis || ''} onChange=${e => onChange({basis: e.target.value})} /><//>
+    </div>
     ${src.excerpt
       ? html`<div className=${'excerpt' + (src.found ? '' : ' missing')}><span>“${src.excerpt}”</span>${!src.found ? html`<span className="warn-note"> Not found word for word in the transcript. Check it before relying on it.</span>` : null}${onShow ? html` <button type="button" className="btn btn-quiet btn-sm" onClick=${onShow}>Show in transcript</button>` : null}</div>`
       : html`<${Field} label="Supporting record" hint="e.g. attendance sheet or school report"><input className="input" value=${src.note || ''} onChange=${e => onChange({source: Object.assign({}, src, {note: e.target.value})})} /><//>`}
@@ -1809,7 +1880,7 @@ function StoryEditor({draft, setDraft, items, mode}){
       <p className="small muted">The original transcript is kept exactly as recorded. You can correct it later from the story page, and the original stays on file.</p>
     <//>` : null}
 
-    <${Sec} title="Impact story" open=${true}>
+    <${Sec} title="Student story" open=${true}>
       <${Field} label="Title"><input id="ed-title" className="input" value=${draft.title} onChange=${val((n, v) => { n.title = v; })} /><//>
       <${Field} label=${'Full impact story (' + words(draft.story) + ' words)'} hint="Aim for 200 to 350 words."><textarea id="ed-story" className="textarea" rows="14" value=${draft.story || ''} onChange=${val((n, v) => { n.story = v; })}></textarea><//>
       <${Field} label="Short summary" hint="Shown on library cards."><textarea id="ed-summary" className="textarea" rows="3" value=${draft.summary} onChange=${val((n, v) => { n.summary = v; })}></textarea><//>
@@ -1844,35 +1915,65 @@ function StoryEditor({draft, setDraft, items, mode}){
       <datalist id="dl-communities">${communities.map(p => html`<option key=${p} value=${p}></option>`)}</datalist>
     <//>
 
-    ${isStudentStory(draft) ? html`<${Sec} title="Student metrics card" count=${metricsKnown(draft) + ' of ' + METRIC_FIELDS.length + ' known'} open=${true}>
-      <p className="small muted">The same measurable fields on every student story, so they can be added up across students. Claude filled in what the interview said. Leave a field blank if it's unknown, and mark a value Verified only after checking it against a record.${mode === 'update' ? ' Values this update changed have an orange edge.' : ''}</p>
-      <${MetricsCardEdit} metrics=${draft.metrics} onChange=${m => upd(n => { n.metrics = m; })} />
-    <//>` : null}
-
-    <${Sec} title="Supporting metrics and evidence" count=${(draft.evidence || []).length} open=${true}>
-      <p className="small muted">Each item shows its source and the words it came from. Mark something Verified only after checking it against documentation.</p>
-      ${(draft.evidence || []).length === 0 ? html`<p className="empty-note">No evidence found in this interview.</p>` : null}
-      ${(draft.evidence || []).map((ev, i) => html`<${EvidenceEdit} key=${ev.id} ev=${ev}
-          onChange=${patch => upd(n => { Object.assign(n.evidence[i], patch); })}
-          onRemove=${() => upd(n => { n.evidence.splice(i, 1); })}
-          onShow=${hasTr && ev.source && ev.source.found ? () => showIn(ev.source.excerpt) : null} />`)}
-      ${addBtn('Add evidence', n => { n.evidence = (n.evidence || []).concat([{id: uid('ev'), category: 'reach', kind: 'numeric', statement: '', value: '', unit: '', status: 'reported', basis: '', source: {entryId: null, excerpt: '', found: false, note: ''}, observed: '', _new: mode === 'update'}]); })}
-      <div className="field" style=${{marginTop: '8px'}}><span className="field-label">Missing metrics</span>
-        <p className="small muted">Information that would strengthen the story but isn't available yet.</p>
-        ${(draft.missingMetrics || []).map((m, i) => html`<div className=${'ms-edit' + (m._new ? ' is-new' : '')} key=${m.id}>
-          <div className="list-row"><input className="input" aria-label="Missing metric" value=${m.metric} onChange=${val((n, v) => { n.missingMetrics[i].metric = v; })} />${trash('Remove missing metric', n => { n.missingMetrics.splice(i, 1); })}</div>
-          <div className="row">
-            <${Field} label="Why it matters"><input className="input" value=${m.why || ''} onChange=${val((n, v) => { n.missingMetrics[i].why = v; })} /><//>
-            <${Field} label="Where to find it"><input className="input" value=${m.howToGet || ''} onChange=${val((n, v) => { n.missingMetrics[i].howToGet = v; })} /><//>
-          </div>
-        </div>`)}
-        ${addBtn('Add missing metric', n => { n.missingMetrics = (n.missingMetrics || []).concat([{id: uid('mm'), metric: '', why: '', howToGet: ''}]); })}
+    <${Sec} title="Measurable outcomes" count=${(draft.evidence || []).filter(isMeasurable).length + ' items'} open=${true}>
+      <p className="small muted">Specific metrics and before-and-after comparisons. ${STATUS_LEGEND} Mark something Verified only after checking it against a record.</p>
+      ${isStudentStory(draft) ? html`<div className="field"><span className="field-label">Student metrics card <span className="muted">(${metricsKnown(draft)} of ${METRIC_FIELDS.length} known)</span></span>
+        <p className="small muted">The same fields on every student story, so they add up across students. Leave a field blank if it's unknown.${mode === 'update' ? ' Values this update changed have an orange edge.' : ''}</p>
+        <${MetricsCardEdit} metrics=${draft.metrics} onChange=${m => upd(n => { n.metrics = m; })} />
+      </div>` : null}
+      <div className="field"><span className="field-label">Numbers and comparisons from the interview</span>
+        ${(draft.evidence || []).filter(isMeasurable).length === 0 ? html`<p className="empty-note">None found in this interview.</p>` : null}
+        ${(draft.evidence || []).map((ev, i) => isMeasurable(ev) ? html`<${EvidenceEdit} key=${ev.id} ev=${ev}
+            onChange=${patch => upd(n => { Object.assign(n.evidence[i], patch); })}
+            onRemove=${() => upd(n => { n.evidence.splice(i, 1); })}
+            onShow=${hasTr && ev.source && ev.source.found ? () => showIn(ev.source.excerpt) : null} />` : null)}
+        ${addBtn('Add measurable outcome', n => { n.evidence = (n.evidence || []).concat([{id: uid('ev'), category: 'reach', kind: 'numeric', statement: '', value: '', unit: '', before: '', after: '', timeframe: '', observer: '', status: 'reported', basis: '', source: {entryId: null, excerpt: '', found: false, note: ''}, observed: '', _new: mode === 'update'}]); })}
       </div>
     <//>
 
-    <${Sec} title="Stakeholder relevance" open=${true}>
+    <${Sec} title="Qualitative evidence" count=${(draft.evidence || []).filter(isQualitative).length + (draft.quotes || []).length} open=${true}>
+      <p className="small muted">Observations and testimonials from the student, parents, teachers, school staff, or ABG staff. Anecdotal unless backed by a record.</p>
+      ${(draft.evidence || []).filter(isQualitative).length === 0 ? html`<p className="empty-note">None found in this interview.</p>` : null}
+      ${(draft.evidence || []).map((ev, i) => isQualitative(ev) ? html`<${EvidenceEdit} key=${ev.id} ev=${ev}
+          onChange=${patch => upd(n => { Object.assign(n.evidence[i], patch); })}
+          onRemove=${() => upd(n => { n.evidence.splice(i, 1); })}
+          onShow=${hasTr && ev.source && ev.source.found ? () => showIn(ev.source.excerpt) : null} />` : null)}
+      ${addBtn('Add observation', n => { n.evidence = (n.evidence || []).concat([{id: uid('ev'), category: 'personal', kind: 'qualitative', statement: '', value: '', unit: '', observer: '', status: 'qualitative', basis: '', source: {entryId: null, excerpt: '', found: false, note: ''}, observed: '', _new: mode === 'update'}]); })}
+      <div className="field" style=${{marginTop: '8px'}}><span className="field-label">Quotes</span>
+        <p className="small muted">Exact words appear word for word in the transcript. Remembered quotes are what Kyle recalls someone saying. Paraphrased statements can't be used as quotes.</p>
+        ${(draft.quotes || []).length === 0 ? html`<p className="empty-note">No quotes found.</p>` : null}
+        ${(draft.quotes || []).map((q, i) => html`<div className=${'quote-edit' + (q._new ? ' is-new' : '')} key=${q.id}>
+          <textarea className="textarea" rows="2" aria-label="Quote" value=${q.text} onChange=${val((n, v) => { n.quotes[i].text = v; if (hasTr) n.quotes[i].found = recheck(v); })}></textarea>
+          <div className="row">
+            <${Field} label="Who said it"><input className="input" value=${q.speaker || ''} onChange=${val((n, v) => { n.quotes[i].speaker = v; })} /><//>
+            <${Field} label="Kind"><select className="select" value=${q.kind} onChange=${val((n, v) => { n.quotes[i].kind = v; })}>${QUOTE_KINDS.map(k => html`<option key=${k.id} value=${k.id}>${k.label}</option>`)}</select><//>
+          </div>
+          <div className="row-between">
+            ${q.kind !== 'paraphrase' && !q.found ? html`<p className="warn-note small">Not found word for word in the transcript. Mark it Paraphrased or fix the wording.</p>` : html`<span></span>`}
+            ${trash('Remove quote', n => { n.quotes.splice(i, 1); })}
+          </div>
+        </div>`)}
+      </div>
+    <//>
+
+    <${Sec} title="Data gaps" count=${(draft.missingMetrics || []).length} open=${true}>
+      <p className="small muted">Important metrics that weren't available in the interview but could be collected later.</p>
+      ${(draft.missingMetrics || []).map((m, i) => html`<div className=${'ms-edit' + (m._new ? ' is-new' : '')} key=${m.id}>
+        <div className="list-row"><input className="input" aria-label="Data gap" value=${m.metric} onChange=${val((n, v) => { n.missingMetrics[i].metric = v; })} />${trash('Remove data gap', n => { n.missingMetrics.splice(i, 1); })}</div>
+        <div className="row">
+          <${Field} label="Why it matters"><input className="input" value=${m.why || ''} onChange=${val((n, v) => { n.missingMetrics[i].why = v; })} /><//>
+          <${Field} label="Where to find it"><input className="input" value=${m.howToGet || ''} onChange=${val((n, v) => { n.missingMetrics[i].howToGet = v; })} /><//>
+        </div>
+      </div>`)}
+      ${(draft.evidence || []).some(e => e.status === 'future') ? html`<div className="field"><span className="field-label">Expected but not yet documented</span>
+        ${(draft.evidence || []).map((ev, i) => ev.status === 'future' ? html`<${EvidenceEdit} key=${ev.id} ev=${ev} onChange=${patch => upd(n => { Object.assign(n.evidence[i], patch); })} onRemove=${() => upd(n => { n.evidence.splice(i, 1); })} onShow=${null} />` : null)}
+      </div>` : null}
+      ${addBtn('Add data gap', n => { n.missingMetrics = (n.missingMetrics || []).concat([{id: uid('mm'), metric: '', why: '', howToGet: ''}]); })}
+    <//>
+
+    <${Sec} title="Stakeholder value" open=${true}>
+      <${Field} label="How these outcomes show ABG's impact" hint="How the documented outcomes support donor funding or school partnerships. Claim only what the evidence supports."><textarea id="ed-why" className="textarea" rows="3" value=${draft.stakeholderWhy || ''} onChange=${val((n, v) => { n.stakeholderWhy = v; })}></textarea><//>
       <div className="field"><span className="field-label">Most useful for</span><${ChipGroup} options=${AUDIENCES} value=${draft.audiences} label="Most useful for" onChange=${v => upd(n => { n.audiences = v; })} /></div>
-      <${Field} label="Why this story matters to them"><textarea id="ed-why" className="textarea" rows="2" value=${draft.stakeholderWhy || ''} onChange=${val((n, v) => { n.stakeholderWhy = v; })}></textarea><//>
       <div className="field"><span className="field-label">Impact categories</span><${ChipGroup} options=${CATEGORIES} value=${draft.categories} label="Impact categories" onChange=${v => upd(n => { n.categories = v; })} /></div>
       <div className="field"><span className="field-label">Impact themes</span><${ChipGroup} options=${THEMES} value=${draft.themes} label="Impact themes" onChange=${v => upd(n => { n.themes = v; })} /></div>
     <//>
@@ -1892,22 +1993,6 @@ function StoryEditor({draft, setDraft, items, mode}){
         </div>
       </div>`)}
       ${addBtn('Add milestone', n => { n.milestones = (n.milestones || []).concat([{id: uid('m'), date: {text: '', iso: ''}, label: '', phase: 'immediate', confirmed: true, entryId: null, _new: mode === 'update'}]); })}
-    <//>
-
-    <${Sec} title="Quotes" count=${(draft.quotes || []).length}>
-      <p className="small muted">Exact words appear word for word in the transcript. Remembered quotes are what Kyle recalls someone saying. Paraphrased statements can't be used as quotes.</p>
-      ${(draft.quotes || []).length === 0 ? html`<p className="empty-note">No quotes found.</p>` : null}
-      ${(draft.quotes || []).map((q, i) => html`<div className=${'quote-edit' + (q._new ? ' is-new' : '')} key=${q.id}>
-        <textarea className="textarea" rows="2" aria-label="Quote" value=${q.text} onChange=${val((n, v) => { n.quotes[i].text = v; if (hasTr) n.quotes[i].found = recheck(v); })}></textarea>
-        <div className="row">
-          <${Field} label="Who said it"><input className="input" value=${q.speaker || ''} onChange=${val((n, v) => { n.quotes[i].speaker = v; })} /><//>
-          <${Field} label="Kind"><select className="select" value=${q.kind} onChange=${val((n, v) => { n.quotes[i].kind = v; })}>${QUOTE_KINDS.map(k => html`<option key=${k.id} value=${k.id}>${k.label}</option>`)}</select><//>
-        </div>
-        <div className="row-between">
-          ${q.kind !== 'paraphrase' && !q.found ? html`<p className="warn-note small">Not found word for word in the transcript. Mark it Paraphrased or fix the wording.</p>` : html`<span></span>`}
-          ${trash('Remove quote', n => { n.quotes.splice(i, 1); })}
-        </div>
-      </div>`)}
     <//>
 
     <${Sec} title="Supporting materials" count=${(draft.materials || []).length}>
@@ -2132,27 +2217,34 @@ function AdaptSheet({storyId, close}){
     ${text && !busy ? html`<div className="row-btns end"><${CopyButton} text=${text} /><button className="btn btn-ghost btn-sm" onClick=${saveDraft}>Save draft to story</button></div>` : null}
   </div>`;
 }
-function AddEvidenceSheet({storyId, close}){
+function AddEvidenceSheet({storyId, close, kind}){
   const {caps, stories, safeWrite, showToast} = useApp();
-  const [f, setF] = useState({statement: '', category: 'reach', value: '', unit: '', status: 'verified', note: ''});
+  const numeric = kind !== 'qualitative';
+  const [f, setF] = useState({statement: '', category: numeric ? 'reach' : 'personal', value: '', unit: '', before: '', after: '', timeframe: '', observer: numeric ? 'records' : 'teacher', status: numeric ? 'verified' : 'qualitative', note: ''});
   const set = (k, v) => setF(x => Object.assign({}, x, {[k]: v}));
   async function save(){
     const story = stories.find(s => s.id === storyId);
     if (!story || !asStr(f.statement)) return;
     const v = toNum(f.value);
     const ev = clone(story.evidence || []);
-    ev.push({id: uid('ev'), category: f.category, kind: v != null ? 'numeric' : 'qualitative', statement: asStr(f.statement), value: v, unit: asStr(f.unit), status: f.status, source: {entryId: null, excerpt: '', found: false, note: asStr(f.note)}, observed: todayLocal()});
+    ev.push({id: uid('ev'), category: f.category, kind: numeric ? 'numeric' : 'qualitative', statement: asStr(f.statement), value: v, unit: asStr(f.unit), before: asStr(f.before), after: asStr(f.after), timeframe: asStr(f.timeframe), observer: f.observer, status: f.status, source: {entryId: null, excerpt: '', found: false, note: asStr(f.note)}, observed: todayLocal()});
     const ok = await safeWrite(() => caps.db.collection('stories').doc(storyId).update({evidence: ev, updatedAt: nowISO()}));
     if (ok) { showToast('Evidence added'); close(); }
   }
   return html`<div className="view" style=${{gap: '12px'}}>
-    <${SheetHead} title="Add evidence" close=${close} />
-    <p className="small muted">For facts from a record, such as an attendance sheet, a school report, or a volunteer log.</p>
+    <${SheetHead} title=${numeric ? 'Add a measurable outcome' : 'Add qualitative evidence'} close=${close} />
+    <p className="small muted">${numeric ? 'For numbers and before-and-after comparisons, ideally from a record such as an attendance sheet, report card, or program log.' : 'For an observation or testimonial, such as something a teacher or parent noticed.'}</p>
     <${Field} label="What it shows"><textarea id="ae-statement" className="textarea" rows="2" value=${f.statement} onChange=${e => set('statement', e.target.value)}></textarea><//>
-    <div className="row">
+    ${numeric ? html`<div className="row">
       <${Field} label="Number (optional)"><input id="ae-value" className="input" inputMode="decimal" value=${f.value} onChange=${e => set('value', e.target.value)} /><//>
-      <${Field} label="Unit"><input id="ae-unit" className="input" placeholder="students, hours" value=${f.unit} onChange=${e => set('unit', e.target.value)} /><//>
+      <${Field} label="Unit"><input id="ae-unit" className="input" placeholder="percent, sessions, years" value=${f.unit} onChange=${e => set('unit', e.target.value)} /><//>
     </div>
+    <div className="row">
+      <${Field} label="Before (optional)"><input id="ae-before" className="input" placeholder="e.g. 78% attendance" value=${f.before} onChange=${e => set('before', e.target.value)} /><//>
+      <${Field} label="After (optional)"><input id="ae-after" className="input" placeholder="e.g. 93% attendance" value=${f.after} onChange=${e => set('after', e.target.value)} /><//>
+    </div>
+    <${Field} label="Period compared (optional)"><input id="ae-time" className="input" placeholder="e.g. fall 2025 to spring 2026" value=${f.timeframe} onChange=${e => set('timeframe', e.target.value)} /><//>` : null}
+    <${Field} label="Observed or reported by"><select id="ae-observer" className="select" value=${f.observer} onChange=${e => set('observer', e.target.value)}>${OBSERVERS.map(o => html`<option key=${o.id} value=${o.id}>${o.label}</option>`)}</select><//>
     <div className="row">
       <${Field} label="Category"><select id="ae-cat" className="select" value=${f.category} onChange=${e => set('category', e.target.value)}>${CATEGORIES.map(c => html`<option key=${c.id} value=${c.id}>${c.label}</option>`)}</select><//>
       <${Field} label="Status"><select id="ae-status" className="select" value=${f.status} onChange=${e => set('status', e.target.value)}>${EVIDENCE_STATUS.map(s => html`<option key=${s.id} value=${s.id}>${s.label}</option>`)}</select><//>
@@ -2214,7 +2306,8 @@ function EvidenceRow({ev, entries, onStatus, readOnly}){
       <p className="ev-statement">${ev.value != null && ev.value !== '' ? html`<span className="ev-num tnum">${fmtNum(ev.value)}${ev.unit ? ' ' + ev.unit : ''}</span>` : null}${ev.statement}</p>
       ${readOnly ? html`<${EvPill} status=${ev.status} />` : html`<select className=${'status-select tone-' + tone} aria-label="Verification status" value=${ev.status} onChange=${e => onStatus(e.target.value)}>${EVIDENCE_STATUS.map(s => html`<option key=${s.id} value=${s.id}>${s.label}</option>`)}</select>`}
     </div>
-    <p className="small muted">Source: ${ev.basis || (src.note ? src.note : (src.excerpt ? "Kyle's account" : 'not recorded'))}</p>
+    ${comparisonText(ev) ? html`<p className="ev-compare small tnum">${comparisonText(ev)}</p>` : null}
+    <p className="small muted">${ev.observer ? 'Observed by: ' + labelOf(OBSERVERS, ev.observer) + ' · ' : ''}Source: ${ev.basis || (src.note ? src.note : (src.excerpt ? "Kyle's account" : 'not recorded'))}</p>
     ${src.excerpt ? html`<button type="button" className="btn btn-quiet btn-sm src-toggle" aria-expanded=${open} onClick=${() => setOpen(o => !o)}>${open ? 'Hide passage' : 'Show passage'}</button>` : null}
     ${open ? html`<div className=${'excerpt' + (!src.found ? ' missing' : '')}>
       <span>“${src.excerpt}”</span>
@@ -2281,12 +2374,13 @@ function StoryView({id}){
   const linked = (story.links || []).map(l => Object.assign({}, l, {other: stories.find(s => s.id === l.storyId)})).filter(l => l.other);
   const items = (entries || []).map(e => ({id: e.id, text: e.transcript || '', alt: e.transcriptEdited || '', recordedAt: e.recordedAt}));
   const evAll = (story.evidence || []).map((e, i) => ({e, i}));
-  const groups = [
-    {id: 'verified', label: 'Verified metrics', hint: 'Supported by reliable documentation.', rows: evAll.filter(x => x.e.status === 'verified')},
-    {id: 'reported', label: 'Reported metrics', hint: 'Numbers from the interview that still need verification.', rows: evAll.filter(x => x.e.status !== 'verified' && x.e.status !== 'future' && x.e.kind === 'numeric')},
-    {id: 'qual', label: 'Qualitative evidence', hint: 'Observed changes, experiences, and testimonials.', rows: evAll.filter(x => x.e.status !== 'verified' && x.e.status !== 'future' && x.e.kind !== 'numeric')},
-    {id: 'future', label: 'Not yet documented', hint: 'Expected or hoped-for outcomes. Not accomplishments.', rows: evAll.filter(x => x.e.status === 'future')},
-  ];
+  const RANK = {verified: 0, reported: 1, estimate: 2, unverified: 3, qualitative: 1};
+  const byRank = (a, b) => (RANK[a.e.status] || 0) - (RANK[b.e.status] || 0);
+  const measurable = evAll.filter(x => isMeasurable(x.e)).sort(byRank);
+  const qualitative = evAll.filter(x => isQualitative(x.e)).sort(byRank);
+  const expected = evAll.filter(x => x.e.status === 'future');
+  const unknownCard = METRIC_FIELDS.filter(f => !metricVal(story, f.id));
+  const editStory = () => nav('review', {mode: 'edit', storyId: id, items, returnTo: {name: 'story', params: {id}}});
   const ms = sortMilestones(story.milestones || []);
   const ov = story.overview || {};
   const ev = fmtEventDate(story.eventDate);
@@ -2378,37 +2472,57 @@ function StoryView({id}){
       ${siblings.length ? html`<p className="small muted">Other stories about this student: ${siblings.map((s, i) => html`<button key=${s.id} className="btn btn-quiet btn-sm" onClick=${() => nav('story', {id: s.id})}>${s.title}</button>`)}</p>` : null}
     </section>
 
-    ${isStudentStory(story) ? html`<${MetricsCardView} story=${story} readOnly=${readOnly} onEdit=${() => nav('review', {mode: 'edit', storyId: id, items, returnTo: {name: 'story', params: {id}}})} />` : null}
-
     <section className="card prose">
-      <h2>Impact story</h2>
+      <h2>Student story</h2>
       ${story.story ? story.story.split(/\n{2,}/).map((p, i) => html`<p key=${i}>${p}</p>`) : story.summary ? html`<p>${story.summary}</p>` : html`<p className="muted">No story written yet.</p>`}
       ${(story.takeaways || []).length > 0 ? html`<h3>Key impact takeaways</h3><ul className="takeaways">${story.takeaways.map((t, i) => html`<li key=${i}>${t}</li>`)}</ul>` : null}
       ${(story.themes || []).length > 0 ? html`<div className="chips">${story.themes.map(c => html`<span key=${c} className="chip static">${labelOf(THEMES, c)}</span>`)}</div>` : null}
     </section>
 
     <section className="card">
-      <div className="sec-head"><h2>Supporting metrics and evidence</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddEvidenceSheet} storyId=${id} close=${close} />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
-      ${groups.map(g => (g.rows.length || g.id !== 'future') ? html`<div className="ev-group" key=${g.id}>
-        <div className="ev-group-head"><h3>${g.label}</h3><span className="count">${g.rows.length}</span></div>
-        <p className="small muted">${g.hint}</p>
-        ${g.rows.length === 0 ? html`<p className="empty-note small">${g.id === 'verified' ? 'None yet. Mark evidence Verified once it is checked against a record, or add verified evidence.' : 'None recorded.'}</p>` : g.rows.map(r => html`<${EvidenceRow} key=${r.e.id} ev=${r.e} entries=${entries} readOnly=${readOnly} onStatus=${v => setEvStatus(r.i, v)} />`)}
-      </div>` : null)}
+      <div className="sec-head"><h2>Measurable outcomes</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddEvidenceSheet} storyId=${id} close=${close} kind="numeric" />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
+      <p className="small muted">Specific metrics, before-and-after comparisons, and numbers. ${STATUS_LEGEND}</p>
+      ${isStudentStory(story) ? html`<${MetricsCardView} story=${story} readOnly=${readOnly} embedded=${true} onEdit=${editStory} />` : null}
       <div className="ev-group">
-        <div className="ev-group-head"><h3>Missing metrics</h3><span className="count">${(story.missingMetrics || []).length}</span></div>
-        <p className="small muted">Information that would strengthen the story but isn't available yet.</p>
-        ${(story.missingMetrics || []).length === 0 ? html`<p className="empty-note small">None identified.</p>` : story.missingMetrics.map(m => html`<div className="ev" key=${m.id}>
-          <div className="ev-head"><p className="ev-statement"><strong>${m.metric}</strong></p>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => removeMissing(m.id)}>Found or not needed</button>` : null}</div>
-          ${m.why ? html`<p className="small">${m.why}</p>` : null}
-          ${m.howToGet ? html`<p className="small muted">Where to find it: ${m.howToGet}</p>` : null}
-        </div>`)}
+        <div className="ev-group-head"><h3>Numbers and comparisons from the interview</h3><span className="count">${measurable.length}</span></div>
+        ${measurable.length === 0 ? html`<p className="empty-note small">No measurable outcomes recorded yet. They often come from records, report cards, or a teacher.</p>` : measurable.map(r => html`<${EvidenceRow} key=${r.e.id} ev=${r.e} entries=${entries} readOnly=${readOnly} onStatus=${v => setEvStatus(r.i, v)} />`)}
       </div>
     </section>
 
     <section className="card">
-      <h2>Stakeholder relevance</h2>
-      ${primaryAud.length ? html`<p><strong>Primary audiences:</strong> ${primaryAud.map(a => labelOf(AUDIENCES, a)).join(' and ')}</p>` : html`<p className="muted">No audiences chosen yet.</p>`}
-      ${story.stakeholderWhy ? html`<p><strong>Why this story matters:</strong> ${story.stakeholderWhy}</p>` : null}
+      <div className="sec-head"><h2>Qualitative evidence</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddEvidenceSheet} storyId=${id} close=${close} kind="qualitative" />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
+      <p className="small muted">Observations and testimonials from the student, parents, teachers, school staff, or ABG staff. Valuable, but anecdotal unless backed by a record.</p>
+      ${qualitative.length === 0 ? html`<p className="empty-note small">None recorded.</p>` : qualitative.map(r => html`<${EvidenceRow} key=${r.e.id} ev=${r.e} entries=${entries} readOnly=${readOnly} onStatus=${v => setEvStatus(r.i, v)} />`)}
+      ${(story.quotes || []).length > 0 ? html`<div className="ev-group">
+        <div className="ev-group-head"><h3>Quotes</h3><span className="count">${story.quotes.length}</span></div>
+        ${story.quotes.map((q, i) => { const usable = q.kind !== 'paraphrase' && q.found; return html`<figure className="quote" key=${q.id}>
+          <blockquote>“${q.text}”</blockquote>
+          <figcaption className="small muted">${q.speaker || 'Unknown speaker'} · ${labelOf(QUOTE_KINDS, q.kind)}${q.kind !== 'paraphrase' && !q.found ? ' · not found word for word in the transcript' : ''}</figcaption>
+          ${!readOnly ? html`<label className="check small"><input type="checkbox" checked=${!!q.approved} disabled=${!usable && !q.approved} onChange=${e => setQuote(i, e.target.checked)} /> Approved for external use${!usable ? ' (only exact or remembered quotes found in the transcript)' : ''}</label>` : (q.approved ? html`<${Pill} tone="good">Approved<//>` : null)}
+        </figure>`; })}
+      </div>` : null}
+    </section>
+
+    <section className="card">
+      <h2>Data gaps</h2>
+      <p className="small muted">Important information that wasn't available in the interview but could be collected later.</p>
+      ${(story.missingMetrics || []).length === 0 ? html`<p className="empty-note small">None identified.</p>` : story.missingMetrics.map(m => html`<div className="ev" key=${m.id}>
+        <div className="ev-head"><p className="ev-statement"><strong>${m.metric}</strong></p>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => removeMissing(m.id)}>Found or not needed</button>` : null}</div>
+        ${m.why ? html`<p className="small">${m.why}</p>` : null}
+        ${m.howToGet ? html`<p className="small muted">Where to find it: ${m.howToGet}</p>` : null}
+      </div>`)}
+      ${isStudentStory(story) && unknownCard.length ? html`<p className="small muted"><strong>Unknown on the metrics card:</strong> ${unknownCard.map(f => f.short).join(', ')}.</p>` : null}
+      ${expected.length ? html`<div className="ev-group">
+        <div className="ev-group-head"><h3>Expected but not yet documented</h3><span className="count">${expected.length}</span></div>
+        <p className="small muted">Hoped-for outcomes. Not accomplishments.</p>
+        ${expected.map(r => html`<${EvidenceRow} key=${r.e.id} ev=${r.e} entries=${entries} readOnly=${readOnly} onStatus=${v => setEvStatus(r.i, v)} />`)}
+      </div>` : null}
+    </section>
+
+    <section className="card">
+      <h2>Stakeholder value</h2>
+      ${story.stakeholderWhy ? html`<p>${story.stakeholderWhy}</p>` : html`<p className="muted">Not written yet.</p>`}
+      ${primaryAud.length ? html`<p className="small"><strong>Most useful for:</strong> ${primaryAud.map(a => labelOf(AUDIENCES, a)).join(', ')}</p>` : null}
       ${!readOnly ? html`<div><button className="btn btn-ghost btn-sm" onClick=${adapt}><${Icon} name="spark" size=${16} /> Adapt story for audience</button></div>` : null}
     </section>
 
@@ -2429,14 +2543,6 @@ function StoryView({id}){
       <${Timeline} milestones=${ms} />
     </section>
 
-    ${(story.quotes || []).length > 0 ? html`<section className="card">
-      <h2>Quotes</h2>
-      ${story.quotes.map((q, i) => { const usable = q.kind !== 'paraphrase' && q.found; return html`<figure className="quote" key=${q.id}>
-        <blockquote>“${q.text}”</blockquote>
-        <figcaption className="small muted">${q.speaker || 'Unknown speaker'} · ${labelOf(QUOTE_KINDS, q.kind)}${q.kind !== 'paraphrase' && !q.found ? ' · not found word for word in the transcript' : ''}</figcaption>
-        ${!readOnly ? html`<label className="check small"><input type="checkbox" checked=${!!q.approved} disabled=${!usable && !q.approved} onChange=${e => setQuote(i, e.target.checked)} /> Approved for external use${!usable ? ' (only exact or remembered quotes found in the transcript)' : ''}</label>` : (q.approved ? html`<${Pill} tone="good">Approved<//>` : null)}
-      </figure>`; })}
-    </section>` : null}
 
     <section className="card">
       <div className="sec-head"><h2>Supporting materials</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${MaterialSheet} storyId=${id} close=${close} />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
@@ -2527,11 +2633,11 @@ function MetricsCardEdit({metrics, onChange}){
       </div>
     </div>`; })}</div>`;
 }
-function MetricsCardView({story, readOnly, onEdit}){
+function MetricsCardView({story, readOnly, onEdit, embedded}){
   const rows = METRIC_FIELDS.map(f => ({f, m: metricVal(story, f.id)}));
   const n = rows.filter(r => r.m).length;
-  return html`<section className="card">
-    <div className="sec-head"><h2>Student metrics card</h2><div className="row-btns"><span className="small muted tnum">${n} of ${METRIC_FIELDS.length} known</span>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${onEdit}><${Icon} name="edit" size=${16} /> Fill in</button>` : null}</div></div>
+  return html`<section className=${embedded ? 'ev-group mc-embedded' : 'card'}>
+    <div className="sec-head">${embedded ? html`<h3>Student metrics card</h3>` : html`<h2>Student metrics card</h2>`}<div className="row-btns"><span className="small muted tnum">${n} of ${METRIC_FIELDS.length} known</span>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${onEdit}><${Icon} name="edit" size=${16} /> Fill in</button>` : null}</div></div>
     <p className="small muted">The same measurable fields on every student story. Unknown fields are worth asking about in the next update.</p>
     <dl className="mc-view">${rows.map(r => html`<div key=${r.f.id} className=${r.m ? '' : 'is-unknown'}><dt>${r.f.label}</dt><dd>${r.m ? html`<span>${fmtMetric(r.f, r.m.value)}</span> <${MetricPill} status=${r.m.status} />` : html`<span className="muted">Unknown</span>`}</dd></div>`)}</dl>
   </section>`;
@@ -3004,7 +3110,7 @@ function ReportsView(){
         ${row('Approved stories', 'Summaries, takeaways, evidence with status, approved quotes, and approved audience drafts. Markdown pastes cleanly into Google Docs and Word.', html`<select id="exp-aud" className="select select-sm" aria-label="Audience" value=${aud} onChange=${e => setAud(e.target.value)}><option value="">All audiences</option>${AUDIENCES.map(a => html`<option key=${a.id} value=${a.id}>${a.short}</option>`)}</select><${CopyButton} text=${approvedMarkdown(stories, aud)} />${dlBtn(() => dl('abg-approved-stories' + (aud ? '-' + aud : '') + '.md', approvedMarkdown(stories, aud)))}`)}
         ${row('Student outcomes for the consulting team (CSV, names removed)', 'One row per student: the metrics card with how certain each value is, themes, audiences, evidence counts, approval status, and summaries. First names are replaced with codes (Student 01, Student 02…). Program and school names stay in, so read the summaries for other identifying details before sharing.', dlBtn(() => dl('abg-student-outcomes-team.csv', teamCSV(stories, students))))}
         ${row('Stories (CSV)', 'Every story with status, dates, program, themes, audiences, and privacy fields. Internal.', dlBtn(() => dl('abg-stories.csv', storiesCSV(stories))))}
-        ${row('Supporting metrics and evidence (CSV)', 'Each piece of evidence with its source, verification status, and transcript passage, plus missing metrics.', dlBtn(() => dl('abg-evidence.csv', evidenceCSV(stories))))}
+        ${row('Measurable outcomes, evidence and data gaps (CSV)', 'Each measurable outcome and observation with before and after values, who observed it, its verification status, and the transcript passage, plus data gaps.', dlBtn(() => dl('abg-evidence.csv', evidenceCSV(stories))))}
         ${row('Verified program metrics (CSV)', 'Numbers entered from verified sources, with their sources.', dlBtn(() => dl('abg-verified-metrics.csv', metricsCSV(metrics, stories))))}
         ${row('Approved quotes (CSV)', 'Quotes marked approved, from approved stories only.', dlBtn(() => dl('abg-approved-quotes.csv', quotesCSV(stories))))}
         ${row('Student impact timelines (CSV)', 'Every milestone by stage, from initial circumstances to long-term outcomes, with pending items marked.', dlBtn(() => dl('abg-timelines.csv', timelineCSV(stories))))}
