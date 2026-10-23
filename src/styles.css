@@ -509,3 +509,12 @@ code{font-size:.9em;background:var(--surface-2);padding:1px 5px;border-radius:5p
 .cat{display:grid;gap:4px;align-content:start;padding:14px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface-2)}
 .cat h3{font-size:1rem;margin-bottom:2px}
 .cat p{margin:0}
+.ms-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.ms-list li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}
+.ms-check{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--teal-soft);color:var(--teal);font-weight:700;font-size:.8rem}
+.ms-dash{display:grid;gap:2px}
+.ms-row{display:grid;grid-template-columns:3rem minmax(0,1fr);gap:12px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.ms-row:first-child{border-top:0}
+.ms-n{font-family:var(--font-display);font-size:1.5rem;font-weight:700;text-align:right;color:var(--teal)}
+.ms-row.is-zero .ms-n{color:var(--ink-3)}
+.ms-text{display:grid;gap:2px;min-width:0}
