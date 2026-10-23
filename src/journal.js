@@ -1219,7 +1219,7 @@ const VOICE = (() => {
   let audio = null; try { audio = new Audio(); audio.preload = 'auto'; } catch (e) {}
   const canNatural = () => !!(audio && window.__platform && window.__platform.speech);
   const cache = new Map();
-  let seq = 0, naturalState = 'unknown';
+  let seq = 0, naturalState = 'unknown', limitedUntil = 0;
   const settings = () => ({engine: lsGet('abg-voice-engine') === 'device' ? 'device' : 'natural', name: naturalVoiceName()});
   function stop(){ seq++; stopDevice(); if (audio) { audio.onended = null; try { audio.pause(); } catch (e) {} } }
   /* plays the clips one after another; resolves once the first one starts */
@@ -1234,7 +1234,7 @@ const VOICE = (() => {
     if (!text) return 'none';
     stop(); const my = seq;
     const pref = settings();
-    if (pref.engine === 'natural' && canNatural() && naturalState !== 'off') {
+    if (pref.engine === 'natural' && canNatural() && naturalState !== 'off' && Date.now() >= limitedUntil) {
       try {
         const k = pref.name + '|' + text;
         let urls = cache.get(k);
@@ -1251,6 +1251,8 @@ const VOICE = (() => {
         if (my !== seq) return 'none';
         if (e && e.name === 'NotAllowedError') return 'blocked';
         if (e && e.code === 'tts_not_configured') naturalState = 'off';
+        /* Groq's free plan has a daily limit; rest the natural voice for a while instead of retrying every question */
+        if (e && e.code === 'rate_limited') { limitedUntil = Date.now() + 30 * 60 * 1000; naturalState = 'limited'; }
       }
     }
     if (my !== seq || !supported) return 'none';
@@ -3464,7 +3466,7 @@ function SettingsView(){
   async function sample(){
     setSampleNote('');
     const used = await VOICE.say("Hi Kyle. Can you walk me through how you first met this student, and what stood out to you?");
-    if (engine === 'natural' && used === 'device') setSampleNote(VOICE.naturalState() === 'off' ? "The natural voice isn't set up yet, so this device's voice was used." : "The natural voice couldn't be reached just now, so this device's voice was used.");
+    if (engine === 'natural' && used === 'device') setSampleNote(VOICE.naturalState() === 'off' ? "The natural voice isn't set up yet, so this device's voice was used." : VOICE.naturalState() === 'limited' ? "The natural voice reached Groq's free daily limit, so this device's voice is being used for now. It frees up again within a day." : "The natural voice couldn't be reached just now, so this device's voice was used.");
     else if (used === 'blocked') setSampleNote('Tap the button again to hear it.');
   }
   return html`<div className="view settings">

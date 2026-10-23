@@ -69,13 +69,22 @@ function toBase64(buf: ArrayBuffer): string {
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(bin);
 }
+/* spoken pieces are cached in private storage, so repeated wording never costs Groq tokens twice */
+const CACHE_BUCKET = 'recordings';
+async function cacheKey(model: string, voice: string, input: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(model + '|' + voice + '|' + input));
+  return 'tts-cache/' + voice + '/' + Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('') + '.wav';
+}
 async function groq(text: string, asked: string) {
   const key = (Deno.env.get('GROQ_API_KEY') || '').trim();
   if (!key) return json({error: 'GROQ_API_KEY is not set in Edge Function secrets', code: 'tts_not_configured'}, 500);
   const voice = GROQ_VOICES.has(asked) ? asked : (Deno.env.get('GROQ_TTS_VOICE') || 'hannah');
   const model = Deno.env.get('GROQ_TTS_MODEL') || 'canopylabs/orpheus-v1-english';
+  const store = createClient(Deno.env.get('SUPABASE_URL')!, serverKey(), {auth: {persistSession: false}}).storage.from(CACHE_BUCKET);
   const audios: string[] = [];
   for (const input of pieces(text)) {
+    const path = await cacheKey(model, voice, input);
+    try { const {data: hit} = await store.download(path); if (hit && hit.size > 100) { audios.push(toBase64(await hit.arrayBuffer())); continue; } } catch { /* not cached yet */ }
     const res = await fetch('https://api.groq.com/openai/v1/audio/speech', {
       method: 'POST',
       headers: {Authorization: `Bearer ${key}`, 'Content-Type': 'application/json'},
@@ -88,7 +97,9 @@ async function groq(text: string, asked: string) {
       const code = res.status === 429 ? 'rate_limited' : /terms/i.test(msg) ? 'tts_terms' : 'tts_error';
       return json({error: msg, code}, res.status === 429 ? 429 : 502);
     }
-    audios.push(toBase64(await res.arrayBuffer()));
+    const buf = await res.arrayBuffer();
+    audios.push(toBase64(buf));
+    try { await store.upload(path, new Blob([buf], {type: 'audio/wav'}), {upsert: true, contentType: 'audio/wav'}); } catch { /* caching is best effort */ }
   }
   return json({audios, type: 'audio/wav', voice});
 }
