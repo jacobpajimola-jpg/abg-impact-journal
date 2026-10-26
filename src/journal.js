@@ -1307,6 +1307,11 @@ const ICONS = {
   cap: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2.5 9 2.5 12 0v-5"/><path d="M22 9v6"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   bars: '<path d="M6 20v-6M12 20V9M18 20V4" stroke-width="3.4"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
+  shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
   users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.2 5 2.6 5 5.8"/>',
 };
 function Icon({name, size}){ const s = size || 20; return html`<svg className="ic" width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{__html: ICONS[name] || ''}}></svg>`; }
@@ -1418,11 +1423,15 @@ function Sidebar(){
       ${NAV.filter(n => !(readOnly && n.id === 'interview')).map(n => html`<button key=${n.id} className="side-link" aria-current=${isCurrent(route, n.id) ? 'page' : undefined} onClick=${() => nav(n.id)}><${Icon} name=${n.icon} /><span>${n.label}</span>${n.id === 'library' && due > 0 ? html`<span className="badge" title=${due + ' follow-ups due'}>${due}</span>` : null}</button>`)}
     </nav>
     <div className="side-bottom">
-      <div className="side-user"><span className="avatar tone-teal">${initialsOf(shown)}</span><span className="side-user-text"><strong>${shown}</strong><small>${me.role || (window.__platform && window.__platform.email) || ''}</small></span></div>
-      <button className="side-link side-small" aria-current=${route.name === 'settings' ? 'page' : undefined} onClick=${() => nav('settings')}><${Icon} name="gear" size=${18} /><span>Settings</span></button>
+      <button className="side-link" aria-current=${route.name === 'settings' ? 'page' : undefined} onClick=${() => nav('settings')}><${Icon} name="gear" /><span>Settings</span></button>
+      <div className="side-user"><${Avatar} name=${shown} photo=${me.photo} /><span className="side-user-text"><strong>${shown}</strong><small>${me.role || (window.__platform && window.__platform.email) || ''}</small></span></div>
       ${window.__platform ? html`<button className="side-link side-small" onClick=${() => window.__platform.signOut()}><${Icon} name="logout" size=${18} /><span>Log out</span></button>` : null}
     </div>
   </aside>`;
+}
+function Avatar({name, photo, big}){
+  const cls = 'avatar ' + (big ? 'avatar-xl tone-peach' : 'tone-teal');
+  return photo ? html`<img className=${cls + ' avatar-img'} src=${photo} alt="" />` : html`<span className=${cls} aria-hidden="true">${initialsOf(name) || '?'}</span>`;
 }
 function TopBar(){
   const {nav} = useApp();
@@ -1474,6 +1483,27 @@ const INSIGHT_OUTCOMES = [
   {id:'returned', label:'Returned to ABG as a mentor or instructor', short:'Returned to ABG', domains:['returned', 'leadership_abg'], color:'#8D6E63', tone:'orange'},
   {id:'arts', label:'Continued art or creative pursuits', short:'Continued Art', domains:['arts_continued'], color:'#EC6FB5', tone:'purple'},
 ];
+/* outcome categories: the defaults above, adjusted in Settings (renamed, recolored, hidden) plus custom ones */
+const OUTCOME_DESC = {confidence: 'More self-confidence, self-expression or creative risk-taking', academic: 'Higher grades or academic growth', community: 'Stronger friendships, leadership or community involvement', attendance: 'More consistent attendance or reduced absenteeism', higher_ed: 'Enrolled in or applied to college, trade school or training', graduation: 'Graduated high school or earned a GED', engagement: 'More motivated and participating in class or school life', career: 'A job, internship or clear career direction', returned: 'Came back to ABG as a mentor, instructor or volunteer', arts: 'Kept making art or pursuing creative work'};
+INSIGHT_OUTCOMES.forEach(o => { o.desc = OUTCOME_DESC[o.id] || ''; });
+const SWATCHES = ['#1F7A6D', '#2ED3B4', '#8B3F98', '#A653C9', '#2B9FE0', '#5C6BC0', '#F26B6B', '#EC6FB5', '#F59A3C', '#F4C542', '#8D6E63', '#607D8B'];
+let ACTIVE_OUTCOMES = INSIGHT_OUTCOMES;
+function mergeOutcomes(saved){
+  const over = new Map(asArr(saved).filter(o => o && o.id).map(o => [o.id, o]));
+  const out = [];
+  INSIGHT_OUTCOMES.forEach(b => {
+    const o = over.get(b.id);
+    if (!o) { out.push(b); return; }
+    if (o.hidden) return;
+    const label = asStr(o.label) || b.label, color = o.color || b.color;
+    out.push(Object.assign({}, b, {label, short: label !== b.label ? label : b.short, desc: o.desc != null ? String(o.desc) : b.desc, color, tone: color !== b.color ? '' : b.tone}));
+  });
+  over.forEach(o => { if (o.custom && !o.hidden && asStr(o.label)) out.push({id: o.id, label: asStr(o.label), short: asStr(o.label), desc: asStr(o.desc), color: o.color || '#607D8B', tone: '', domains: [], words: asArr(o.words).map(asStr).filter(Boolean), custom: true}); });
+  return out;
+}
+/* tag colors: the built-in tone, or a tint of the chosen color */
+function outcomePill(o){ return o.tone ? {className: 'pill tone-' + o.tone, style: undefined} : {className: 'pill pill-custom', style: {'--pc': o.color}}; }
+function programColor(settings, name, i){ const info = ((settings && settings.programInfo) || {})[name]; return (info && info.color) || ['#2ED3B4', '#A653C9', '#2B9FE0', '#F59A3C', '#F4C542', '#5C6BC0'][i % 6]; }
 const GRADE_BUCKETS = [{id:'elem', label:'Elementary (K–5)'}, {id:'middle', label:'Middle school (6–8)'}, {id:'high', label:'High school (9–12)'}, {id:'post', label:'College or older'}, {id:'none', label:'Not specified'}];
 const RANGES = [{id:'30d', label:'Last 30 days', days:30}, {id:'3m', label:'Last 3 months', days:92}, {id:'12m', label:'Last 12 months', days:366}, {id:'all', label:'All time', days:0}];
 function gradeBucket(s){
@@ -1494,7 +1524,7 @@ function gradeBucket(s){
 /* outcomes a story mentions: positive or unclear evidence in a matching area, plus metrics-card answers */
 function storyOutcomes(s){
   const set = new Set();
-  (s.evidence || []).forEach(e => { if (e.status === 'future' || ['declined', 'same'].includes(e.direction)) return; const d = domainOf(e); INSIGHT_OUTCOMES.forEach(o => { if (o.domains.includes(d)) set.add(o.id); }); });
+  (s.evidence || []).forEach(e => { if (e.status === 'future' || ['declined', 'same'].includes(e.direction)) return; const d = domainOf(e); ACTIVE_OUTCOMES.forEach(o => { if (o.domains.includes(d)) set.add(o.id); }); });
   const v = id => { const m = metricVal(s, id); return m ? m.value : ''; };
   if (v('grades') === 'Improved') set.add('academic');
   if (v('schoolAttendance') === 'Improved') set.add('attendance');
@@ -1502,7 +1532,13 @@ function storyOutcomes(s){
   if (v('returnedToAbg') === 'Yes') set.add('returned');
   if (v('continuedArt') === 'Yes') set.add('arts');
   if (/college|university|degree|vocational|trade/i.test(v('nextStep'))) set.add('higher_ed');
-  return set;
+  const customs = ACTIVE_OUTCOMES.filter(o => o.custom && o.words && o.words.length);
+  if (customs.length) {
+    const text = ' ' + norm([].concat((s.evidence || []).filter(e => e.status !== 'future' && !['declined', 'same'].includes(e.direction)).map(e => [e.metric, e.after, e.basis].join(' ')), s.takeaways || []).join(' ')) + ' ';
+    customs.forEach(o => { if (o.words.some(w => { const k = norm(w); return k && text.includes(' ' + k); })) set.add(o.id); });
+  }
+  const live = new Set(ACTIVE_OUTCOMES.map(o => o.id));
+  return new Set(Array.from(set).filter(id => live.has(id)));
 }
 function storyArt(id){
   let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
@@ -1529,18 +1565,17 @@ function Donut({rows, total}){
   </svg>`;
 }
 function InsightsOverview({list, filterBar}){
-  const {nav, storiesLoaded} = useApp();
+  const {nav, storiesLoaded, settings} = useApp();
   const profiles = useMemo(() => studentProfiles(list), [list]);
   const outcomesN = list.reduce((t, s) => t + outcomeCount(s), 0);
   const places = uniq(list.map(s => asStr(s.program)).concat(list.map(s => asStr(s.community))).map(x => x.toLowerCase())).length;
-  const outs = INSIGHT_OUTCOMES.map(o => ({o, n: list.filter(s => storyOutcomes(s).has(o.id)).length})).filter(x => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 6);
+  const outs = ACTIVE_OUTCOMES.map(o => ({o, n: list.filter(s => storyOutcomes(s).has(o.id)).length})).filter(x => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 6);
   const byProgram = {};
   profiles.forEach(p => { const k = asStr(p.latest.program) || 'Other / Not specified'; byProgram[k] = (byProgram[k] || 0) + 1; });
   const progRows = Object.entries(byProgram).filter(([k]) => k !== 'Other / Not specified').sort((a, b) => b[1] - a[1]);
-  const colors = ['#2ED3B4', '#A653C9', '#2B9FE0', '#F59A3C', '#F4C542'];
-  let donut = progRows.slice(0, 4).map(([label, n], i) => ({label, n, color: colors[i]}));
+  let donut = progRows.slice(0, 4).map(([label, n], i) => ({label, n, color: programColor(settings, label, i)}));
   const other = progRows.slice(4).reduce((t, r) => t + r[1], 0) + (byProgram['Other / Not specified'] || 0);
-  if (other) donut.push({label: 'Other / Not specified', n: other, color: colors[4]});
+  if (other) donut.push({label: 'Other / Not specified', n: other, color: '#B9B2A6'});
   const featured = list.slice().sort((a, b) => ((b.status === 'approved') - (a.status === 'approved')) || (outcomeCount(b) - outcomeCount(a)) || (b.createdAt || '').localeCompare(a.createdAt || '')).filter(isStudentStory).slice(0, 3);
   const stat = (icon, tone, value, label, sub) => html`<div className="stat-card ins-stat"><span className=${'stat-ic tone-' + tone}><${Icon} name=${icon} size=${26} /></span><span className="stat-text"><b className="tnum">${storiesLoaded ? value : '–'}</b><span className="stat-label">${label}</span><small className="muted">${sub}</small></span></div>`;
   return html`<div className="view ins-body">
@@ -1571,10 +1606,10 @@ function InsightsOverview({list, filterBar}){
     ${filterBar}
     <section className="card ins-card">
       <div className="sec-head"><div><h2>Featured Stories</h2><p className="small muted">Real student experiences that highlight the impact of ABG's work.</p></div><button className="btn btn-quiet btn-sm view-all" onClick=${() => nav('library')}>View all stories <span aria-hidden="true">→</span></button></div>
-      ${featured.length === 0 ? html`<p className="empty-note">No student stories in this view yet.</p>` : html`<div className="fs-grid">${featured.map(st => { const ov = st.overview || {}; const tags = INSIGHT_OUTCOMES.filter(o => storyOutcomes(st).has(o.id)).slice(0, 2); return html`<button className="fs-card" key=${st.id} onClick=${() => nav('story', {id: st.id})}>
+      ${featured.length === 0 ? html`<p className="empty-note">No student stories in this view yet.</p>` : html`<div className="fs-grid">${featured.map(st => { const ov = st.overview || {}; const tags = ACTIVE_OUTCOMES.filter(o => storyOutcomes(st).has(o.id)).slice(0, 2); return html`<button className="fs-card" key=${st.id} onClick=${() => nav('story', {id: st.id})}>
         ${storyArt(st.id)}
         <span className="fs-main"><strong>${st.alias || st.title}</strong><small className="muted">${[st.program, ov.ageOrGrade || ov.demographics].filter(Boolean).join(' · ')}</small><span className="fs-sum">${st.summary || st.title}</span></span>
-        ${tags.length ? html`<span className="fs-tags">${tags.map(o => html`<span className=${'pill tone-' + o.tone} key=${o.id}>${o.short}</span>`)}</span>` : null}
+        ${tags.length ? html`<span className="fs-tags">${tags.map(o => { const pp = outcomePill(o); return html`<span className=${pp.className} style=${pp.style} key=${o.id}>${o.short}</span>`; })}</span>` : null}
       </button>`; })}</div>`}
     </section>
   </div>`;
@@ -1611,7 +1646,7 @@ function DashboardView({tab: initial}){
       ${sel('program', 'Program', programs.map(p => [p, p]))}
       ${sel('grade', 'Grade level', GRADE_BUCKETS.map(g => [g.id, g.label]))}
       ${sel('school', 'School', schools.map(p => [p, p]))}
-      ${sel('outcome', 'Outcome', INSIGHT_OUTCOMES.map(o => [o.id, o.label]))}
+      ${sel('outcome', 'Outcome', ACTIVE_OUTCOMES.map(o => [o.id, o.label]))}
       ${active ? html`<button className="btn btn-quiet btn-sm" onClick=${() => setF({program: '', grade: '', school: '', outcome: ''})}>Clear</button>` : null}
     </div>`} />
     <details className="sec ins-more"><summary><span>Evidence details: milestones, impact by category, evidence quality<span className="count">All stories</span></span><${Icon} name="chev" size=${18} /></summary>
@@ -3648,15 +3683,148 @@ function ListEditor({title, hint, items, onChange, placeholder, disabled, id}){
     ${!disabled ? html`<form className="add-row" onSubmit=${e => { e.preventDefault(); add(); }}><input id=${id} className="input" aria-label=${'Add to ' + title} placeholder=${placeholder} value=${v} onChange=${e => setV(e.target.value)} /><button className="btn btn-ghost" type="submit">Add</button></form>` : null}
   </section>`;
 }
+/* ---------- Settings ---------- */
+const SETTINGS_SECTIONS = [
+  {id: 'profile', label: 'Profile', icon: 'user'},
+  {id: 'programs', label: 'Programs', icon: 'book'},
+  {id: 'outcomes', label: 'Outcome Categories', icon: 'list'},
+  {id: 'voice', label: 'Interview Voice', icon: 'volume'},
+  {id: 'privacy', label: 'Data & Privacy', icon: 'shield'},
+  {id: 'display', label: 'Display', icon: 'monitor'},
+  {id: 'team', label: 'Team Access', icon: 'users'},
+];
+const ROLES = ['Program Director', 'Program Coordinator', 'Executive Director', 'Teaching Artist', 'Staff', 'Volunteer', 'Consultant'];
+const THEME_OPTS = [{id: 'light', label: 'Light', hint: 'The standard cream look.'}, {id: 'auto', label: 'Match this device', hint: 'Light or dark, following your phone or computer.'}, {id: 'dark', label: 'Dark', hint: 'Easier on the eyes at night.'}];
+function applyTheme(t){
+  try { const el = document.documentElement; if (t === 'auto' || t === 'dark') el.setAttribute('data-theme', t); else el.removeAttribute('data-theme'); } catch (e) {}
+}
+/* a profile photo is cropped to a small square and stored with the member record */
+function resizePhoto(file){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = () => {
+      const S = 160, c = document.createElement('canvas'); c.width = c.height = S;
+      const k = Math.max(S / img.width, S / img.height), w = img.width * k, h = img.height * k;
+      c.getContext('2d').drawImage(img, (S - w) / 2, (S - h) / 2, w, h);
+      URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That file could not be read as an image.')); };
+    img.src = url;
+  });
+}
+function ItemForm({kind, init, onSave, onCancel, withWords, taken}){
+  const [name, setName] = useState(init.name || '');
+  const [desc, setDesc] = useState(init.desc || '');
+  const [color, setColor] = useState(init.color || SWATCHES[0]);
+  const [words, setWords] = useState(asArr(init.words).join(', '));
+  const clash = !!(taken && asStr(name) && taken(asStr(name)));
+  const submit = e => { e.preventDefault(); if (!asStr(name) || clash) return; onSave({name: asStr(name), desc: asStr(desc), color, words: words.split(',').map(asStr).filter(Boolean)}); };
+  return html`<form className="item-form" onSubmit=${submit}>
+    <div className="item-form-grid">
+      <${Field} label=${kind + ' name'}><input className="input" value=${name} onChange=${e => setName(e.target.value)} autoFocus=${true} /><//>
+      <${Field} label="Description"><input className="input" value=${desc} onChange=${e => setDesc(e.target.value)} placeholder="One short line" /><//>
+    </div>
+    ${withWords ? html`<${Field} label="Words that signal this outcome" hint="Separate with commas. A story counts toward this outcome when its evidence or takeaways mention one of these words."><input className="input" value=${words} onChange=${e => setWords(e.target.value)} placeholder="e.g. mentor, mentoring, tutor" /><//>` : null}
+    <div className="field"><span className="field-label">Color</span>
+      <div className="swatches" role="radiogroup" aria-label="Color">${SWATCHES.map(c => html`<button type="button" key=${c} role="radio" aria-checked=${c === color} aria-label=${'Color ' + c} className="swatch" style=${{background: c}} onClick=${() => setColor(c)}></button>`)}</div>
+    </div>
+    ${clash ? html`<p className="small warn-note">That name is already in the list.</p>` : null}
+    <div className="row-btns"><button className="btn btn-primary btn-sm" type="submit" disabled=${!asStr(name) || clash}>Save</button><button type="button" className="btn btn-ghost btn-sm" onClick=${onCancel}>Cancel</button></div>
+  </form>`;
+}
+function ItemRow({color, name, desc, onEdit, onDelete, readOnly, deleteLabel}){
+  return html`<div className="item-row">
+    <span className="item-dot" style=${{background: color}}></span>
+    <strong className="item-name">${name}</strong>
+    <span className="item-desc">${desc || ''}</span>
+    ${readOnly ? html`<span></span>` : html`<span className="item-actions">
+      <button type="button" className="btn btn-ghost btn-xs" onClick=${onEdit} aria-label=${'Edit ' + name}>Edit</button>
+      <button type="button" className="icon-btn icon-btn-box" onClick=${onDelete} aria-label=${(deleteLabel || 'Delete') + ' ' + name}><${Icon} name="trash" size=${17} /></button>
+    </span>`}
+  </div>`;
+}
 function SettingsView(){
-  const {caps, settings, safeWrite, readOnly, updateMe} = useApp();
+  const {caps, settings, stories, safeWrite, readOnly, updateMe, openSheet, showToast} = useApp();
   const me = caps.me || {};
-  const save = patch => safeWrite(() => caps.db.doc('config/settings').set(Object.assign({programs: settings.programs || [], communities: settings.communities || []}, patch, {updatedAt: nowISO()})));
-  const access = readOnly ? 'View only' : (me.canEdit ? 'Editor' : 'Contributor');
-  const [pName, setPName] = useState(me.name || '');
-  const [pRole, setPRole] = useState(me.role || '');
+  /* saves build on the latest written values, so quick edits in a row never overwrite each other */
+  const latest = useRef(settings);
+  useEffect(() => { latest.current = settings; }, [settings]);
+  const cur = () => latest.current || {};
+  const save = patch => { const next = Object.assign({}, cur(), patch, {updatedAt: nowISO()}); latest.current = next; return safeWrite(() => caps.db.doc('config/settings').set(next)); };
+
+  /* section navigation: jump to a section, and highlight the one in view */
+  const [active, setActive] = useState('profile');
+  const jumping = useRef(0);
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(es => { if (Date.now() < jumping.current) return; es.forEach(e => { if (e.isIntersecting) setActive(e.target.getAttribute('data-sec')); }); }, {rootMargin: '-25% 0px -65% 0px'});
+    document.querySelectorAll('.set-sec[data-sec]').forEach(el => io.observe(el));
+    return () => io.disconnect();
+  }, []);
+  /* while a jump scrolls past other sections, keep the chosen one highlighted */
+  const jump = id => {
+    setActive(id); jumping.current = Date.now() + 2500;
+    const done = () => { jumping.current = 0; setActive(id); };
+    try { window.addEventListener('scrollend', done, {once: true}); } catch (e) {}
+    const el = document.getElementById('sec-' + id); if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+  };
+
+  /* profile */
+  const parts = asStr(me.name).split(/\s+/);
+  const [first, setFirst] = useState(me.firstName || parts[0] || '');
+  const [last, setLast] = useState(me.lastName != null && me.firstName ? me.lastName : parts.slice(1).join(' '));
+  const [role, setRole] = useState(me.role || '');
+  const [phone, setPhone] = useState(me.phone || '');
   const [pSaved, setPSaved] = useState(false);
-  async function saveProfile(){ const ok = await safeWrite(() => caps.db.doc('members/' + me.id).update({name: asStr(pName), role: asStr(pRole)})); if (ok) { updateMe({name: asStr(pName), role: asStr(pRole)}); setPSaved(true); setTimeout(() => setPSaved(false), 2000); } }
+  const email = (window.__platform && window.__platform.email) || me.email || '';
+  const fullName = [asStr(first), asStr(last)].filter(Boolean).join(' ');
+  async function saveProfile(){
+    const patch = {name: fullName, firstName: asStr(first), lastName: asStr(last), role: asStr(role), phone: asStr(phone)};
+    const ok = await safeWrite(() => caps.db.doc('members/' + me.id).update(patch));
+    if (ok) { updateMe(patch); setPSaved(true); setTimeout(() => setPSaved(false), 2000); }
+  }
+  async function pickPhoto(e){
+    const file = e.target.files && e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    let photo; try { photo = await resizePhoto(file); } catch (x) { showToast(x.message); return; }
+    if (await safeWrite(() => caps.db.doc('members/' + me.id).update({photo}))) { updateMe({photo}); showToast('Photo updated'); }
+  }
+  async function removePhoto(){ if (await safeWrite(() => caps.db.doc('members/' + me.id).update({photo: ''}))) updateMe({photo: ''}); }
+  const roles = ROLES.includes(asStr(me.role)) || !asStr(me.role) ? ROLES : [asStr(me.role)].concat(ROLES);
+
+  /* programs */
+  const programs = settings.programs || [];
+  const info = settings.programInfo || {};
+  const [editP, setEditP] = useState(null);
+  async function saveProgram(old, v){
+    const programs = asArr(cur().programs), info = cur().programInfo || {};
+    const nextInfo = Object.assign({}, info); if (old) delete nextInfo[old]; nextInfo[v.name] = {desc: v.desc, color: v.color};
+    const next = old ? programs.map(p => p === old ? v.name : p) : programs.concat([v.name]);
+    if (!(await save({programs: next, programInfo: nextInfo}))) return;
+    setEditP(null);
+    if (old && old !== v.name) {
+      const tagged = stories.filter(s => s.program === old);
+      if (tagged.length && await safeWrite(async () => { for (const s of tagged) await caps.db.collection('stories').doc(s.id).update({program: v.name}); })) showToast('Renamed on ' + tagged.length + ' stor' + (tagged.length === 1 ? 'y' : 'ies'));
+    }
+  }
+  const deleteProgram = p => openSheet(close => html`<${ConfirmSheet} close=${close} title=${'Remove ' + p + '?'} body="It will no longer be suggested on new stories. Stories already tagged with this program keep it." confirmLabel="Remove program" onConfirm=${async () => { const ni = Object.assign({}, cur().programInfo || {}); delete ni[p]; await save({programs: asArr(cur().programs).filter(x => x !== p), programInfo: ni}); }} />`);
+
+  /* outcome categories */
+  const saved = asArr(settings.outcomes);
+  const outcomes = mergeOutcomes(saved);
+  const hiddenN = saved.filter(o => o.hidden && !o.custom).length;
+  const changed = saved.some(o => !o.custom);
+  const [editO, setEditO] = useState(null);
+  const upsert = (id, fields) => { const all = asArr(cur().outcomes); const prev = all.find(o => o.id === id) || {id}; return all.filter(o => o.id !== id).concat([Object.assign({}, prev, fields)]); };
+  async function saveOutcome(o, v){
+    const fields = {label: v.name, desc: v.desc, color: v.color};
+    const next = !o ? asArr(cur().outcomes).concat([Object.assign({id: uid('oc'), custom: true, words: v.words}, fields)]) : upsert(o.id, o.custom ? Object.assign(fields, {words: v.words}) : fields);
+    if (await save({outcomes: next})) setEditO(null);
+  }
+  const deleteOutcome = o => openSheet(close => html`<${ConfirmSheet} close=${close} title=${(o.custom ? 'Delete ' : 'Hide ') + o.label + '?'} body=${'It will no longer appear in Impact Insights charts, filters or story tags. Stories and their evidence are not changed.' + (o.custom ? '' : ' You can bring it back with Restore defaults.')} confirmLabel=${o.custom ? 'Delete outcome' : 'Hide outcome'} onConfirm=${async () => { await save({outcomes: o.custom ? asArr(cur().outcomes).filter(x => x.id !== o.id) : upsert(o.id, {hidden: true})}); }} />`);
+  const restoreOutcomes = () => save({outcomes: asArr(cur().outcomes).filter(o => o.custom)});
+
+  /* interview voice (saved on this device) */
   const [voiceOn, setVoiceOn] = useState(() => lsGet('abg-voice') !== 'off');
   const setVoice = on => { setVoiceOn(on); lsSet('abg-voice', on ? 'on' : 'off'); if (!on) VOICE.stop(); };
   const [engine, setEngine] = useState(() => lsGet('abg-voice-engine') === 'device' ? 'device' : 'natural');
@@ -3666,58 +3834,138 @@ function SettingsView(){
   const chooseName = n => { setVname(n); lsSet('abg-voice-name', n); setSampleNote(''); };
   async function sample(){
     setSampleNote('');
-    const used = await VOICE.say("Hi Kyle. Can you walk me through how you first met this student, and what stood out to you?");
+    const used = await VOICE.say('Hi ' + (asStr(first) || 'there') + '. Can you walk me through how you first met this student, and what stood out to you?');
     if (engine === 'natural' && used === 'device') setSampleNote(VOICE.naturalState() === 'off' ? "The natural voice isn't set up yet, so this device's voice was used." : VOICE.naturalState() === 'limited' ? "The natural voice reached Groq's free daily limit, so this device's voice is being used for now. It frees up again within a day." : "The natural voice couldn't be reached just now, so this device's voice was used.");
     else if (used === 'blocked') setSampleNote('Tap the button again to hear it.');
   }
-  return html`<div className="view settings">
-    <header className="page-head"><h1>Settings</h1><p className="muted">Lists that make filling in stories faster, plus how privacy works here.</p></header>
-    <${ListEditor} id="set-programs" title="Programs and projects" hint="Offered as suggestions on every story, and used as Story Library filters." items=${settings.programs || []} disabled=${readOnly} placeholder="e.g. School mural program" onChange=${v => save({programs: v})} />
-    <${ListEditor} id="set-communities" title="Schools and communities" hint="Partner schools, neighborhoods, and community organizations." items=${settings.communities || []} disabled=${readOnly} placeholder="e.g. a partner school or neighborhood" onChange=${v => save({communities: v})} />
-    <section className="card">
-      <h2>Your profile</h2>
-      <p className="small muted">Shown in the sidebar. The greeting uses your first name.</p>
-      <div className="row">
-        <${Field} label="Your name"><input id="set-name" className="input" value=${pName} onChange=${e => setPName(e.target.value)} placeholder="e.g. Kyle Martinez" /><//>
-        <${Field} label="Role"><input id="set-role" className="input" value=${pRole} onChange=${e => setPRole(e.target.value)} placeholder="e.g. Program Director" /><//>
+
+  /* display (saved on this device) */
+  const [theme, setTheme] = useState(() => { const t = lsGet('abg-theme'); return t === 'auto' || t === 'dark' ? t : 'light'; });
+  const chooseTheme = t => { setTheme(t); lsSet('abg-theme', t); applyTheme(t); };
+
+  /* team: everyone who has signed in at least once */
+  const [members, setMembers] = useState(null);
+  useEffect(() => {
+    const un = caps.db.collection('members').onSnapshot(snap => setMembers(snap.docs.map(d => Object.assign({id: d.id}, d.data())).sort((a, b) => (b.lastSeen || '').localeCompare(a.lastSeen || ''))), () => setMembers([]));
+    return () => { try { un(); } catch (e) {} };
+  }, []);
+  const access = readOnly ? 'View only' : 'Editor';
+
+  const head = (title, sub, action) => html`<div className="set-card-head"><div><h2>${title}</h2>${sub ? html`<p className="small muted">${sub}</p>` : null}</div>${action || null}</div>`;
+  const addBtn = (label, onClick) => readOnly ? null : html`<button type="button" className="btn btn-ghost btn-sm" onClick=${onClick}><${Icon} name="plus" size=${16} /> ${label}</button>`;
+
+  return html`<div className="view settings2">
+    <header className="ins-hello set-head"><p className="eyebrow">Settings</p><h1>Settings</h1><p className="lede">Manage your profile, program details, interview voice, and how your journal data is organized and used.</p></header>
+    <div className="set-layout">
+      <nav className="set-nav" aria-label="Settings sections">${SETTINGS_SECTIONS.map(s => html`<button key=${s.id} type="button" className="set-link" aria-current=${active === s.id ? 'true' : undefined} onClick=${() => jump(s.id)}><${Icon} name=${s.icon} /><span>${s.label}</span></button>`)}</nav>
+      <div className="set-main">
+
+        <div className="set-sec" id="sec-profile" data-sec="profile"><section className="card set-card">
+          <div className="set-card-head with-rule">
+            <div><h2>Your Profile</h2><p className="small muted">Update your information and role.</p></div>
+            <div className="prof-id"><${Avatar} name=${fullName || me.name} photo=${me.photo} big=${true} /><span className="prof-text"><strong>${fullName || me.name || 'Your name'}</strong><small className="muted">${asStr(role) || 'Add your role'}</small></span></div>
+            <div className="photo-btns">
+              <label className="btn btn-ghost btn-sm photo-btn"><${Icon} name="camera" size=${17} /> ${me.photo ? 'Change photo' : 'Add photo'}<input type="file" accept="image/*" className="sr-only" onChange=${pickPhoto} /></label>
+              ${me.photo ? html`<button type="button" className="btn btn-quiet btn-sm" onClick=${removePhoto}>Remove</button>` : null}
+            </div>
+          </div>
+          <div className="prof-grid">
+            <${Field} label="First name"><input id="set-first" className="input" value=${first} onChange=${e => setFirst(e.target.value)} autoComplete="given-name" /><//>
+            <${Field} label="Last name"><input id="set-last" className="input" value=${last} onChange=${e => setLast(e.target.value)} autoComplete="family-name" /><//>
+            <${Field} label="Email"><input className="input" value=${email} readOnly=${true} aria-readonly="true" title="Your sign-in email" /><//>
+            <${Field} label="Role"><select id="set-role" className="select" value=${role} onChange=${e => setRole(e.target.value)}><option value="">Choose a role</option>${roles.map(r => html`<option key=${r} value=${r}>${r}</option>`)}</select><//>
+            <${Field} label=${html`Phone <span className="opt">(optional)</span>`}><input id="set-phone" className="input" type="tel" value=${phone} onChange=${e => setPhone(e.target.value)} placeholder="(213) 555-1234" autoComplete="tel" /><//>
+            <div className="prof-save"><button className="btn btn-primary" disabled=${!asStr(first)} onClick=${saveProfile}>${pSaved ? 'Saved' : 'Save changes'}</button></div>
+          </div>
+          <p className="tiny muted">Your name and role appear in the sidebar, and the greeting uses your first name. Your photo and phone number are visible to the team.</p>
+        </section></div>
+
+        <div className="set-sec" id="sec-programs" data-sec="programs">
+          <section className="card set-card">
+            ${head('Programs', 'Manage the ABG programs and activities that appear in the journal.', addBtn('Add program', () => setEditP('__new')))}
+            <div className="item-list">
+              ${editP === '__new' ? html`<${ItemForm} kind="Program" init=${{color: SWATCHES[programs.length % SWATCHES.length]}} taken=${n => programs.some(p => p.toLowerCase() === n.toLowerCase())} onCancel=${() => setEditP(null)} onSave=${v => saveProgram(null, v)} />` : null}
+              ${programs.map((p, i) => editP === p
+                ? html`<${ItemForm} key=${p} kind="Program" init=${{name: p, desc: (info[p] || {}).desc, color: programColor(settings, p, i)}} taken=${n => n.toLowerCase() !== p.toLowerCase() && programs.some(x => x.toLowerCase() === n.toLowerCase())} onCancel=${() => setEditP(null)} onSave=${v => saveProgram(p, v)} />`
+                : html`<${ItemRow} key=${p} color=${programColor(settings, p, i)} name=${p} desc=${(info[p] || {}).desc} readOnly=${readOnly} onEdit=${() => setEditP(p)} onDelete=${() => deleteProgram(p)} deleteLabel="Remove" />`)}
+              ${!programs.length && editP !== '__new' ? html`<p className="empty-note">No programs yet. Programs you add are suggested on every story, used as filters, and colored in Impact Insights.</p>` : null}
+            </div>
+          </section>
+          <${ListEditor} id="set-communities" title="Schools and communities" hint="Partner schools, neighborhoods, and community organizations, suggested on every story." items=${settings.communities || []} disabled=${readOnly} placeholder="e.g. a partner school or neighborhood" onChange=${v => save({communities: v})} />
+        </div>
+
+        <div className="set-sec" id="sec-outcomes" data-sec="outcomes"><section className="card set-card">
+          ${head('Outcome Categories', 'Customize the outcomes used in Impact Insights charts, filters and story tags.', addBtn('Add outcome', () => setEditO('__new')))}
+          <div className="item-list">
+            ${editO === '__new' ? html`<${ItemForm} kind="Outcome" withWords=${true} init=${{color: SWATCHES[(outcomes.length + 3) % SWATCHES.length]}} taken=${n => outcomes.some(o => o.label.toLowerCase() === n.toLowerCase())} onCancel=${() => setEditO(null)} onSave=${v => saveOutcome(null, v)} />` : null}
+            ${outcomes.map(o => editO === o.id
+              ? html`<${ItemForm} key=${o.id} kind="Outcome" withWords=${!!o.custom} init=${{name: o.label, desc: o.desc, color: o.color, words: o.words}} taken=${n => n.toLowerCase() !== o.label.toLowerCase() && outcomes.some(x => x.label.toLowerCase() === n.toLowerCase())} onCancel=${() => setEditO(null)} onSave=${v => saveOutcome(o, v)} />`
+              : html`<${ItemRow} key=${o.id} color=${o.color} name=${o.label} desc=${o.desc + (o.custom && o.words && o.words.length ? ' · Matches: ' + o.words.join(', ') : '')} readOnly=${readOnly} onEdit=${() => setEditO(o.id)} onDelete=${() => deleteOutcome(o)} deleteLabel=${o.custom ? 'Delete' : 'Hide'} />`)}
+          </div>
+          <p className="tiny muted">The standard outcomes are matched automatically from each story's evidence and metrics card.${hiddenN ? ' ' + hiddenN + ' hidden.' : ''} ${changed && !readOnly ? html`<button type="button" className="link-btn" onClick=${restoreOutcomes}>Restore defaults</button>` : null}</p>
+        </section></div>
+
+        <div className="set-sec" id="sec-voice" data-sec="voice">
+          <section className="card set-card">
+            ${head('Interview Voice', 'Read each interview question aloud so the interview feels like a conversation. Saved on this device.')}
+            ${VOICE.supported ? html`<label className="switch-row"><span><strong>Read interview questions aloud</strong><br /><span className="small muted">Only the question is read, and the voice stops when you press Record. You can also turn it off with the Voice button on any question.</span></span><input id="set-voice" type="checkbox" className="switch" checked=${voiceOn} onChange=${e => setVoice(e.target.checked)} /></label>
+              ${voiceOn ? html`<div className="voice-grid">
+                <div className="field"><span className="field-label">Voice type</span>
+                  <div className="pick-list">
+                    <label className=${'pick' + (engine === 'natural' ? ' on' : '')}><input type="radio" name="set-engine" checked=${engine === 'natural'} onChange=${() => chooseEngine('natural')} /><span><strong>Natural voice</strong> (Groq)<br /><span className="small muted">Sounds like a real person. Takes a moment to load each question. Only the question text is sent to Groq to be spoken.</span></span></label>
+                    <label className=${'pick' + (engine === 'device' ? ' on' : '')}><input type="radio" name="set-engine" checked=${engine === 'device'} onChange=${() => chooseEngine('device')} /><span><strong>This device's voice</strong><br /><span className="small muted">Instant and works offline. Sounds more robotic on some devices.</span></span></label>
+                  </div>
+                </div>
+                <div className="voice-side">
+                  ${engine === 'natural' ? html`<${Field} label="Natural voice"><select id="set-voice-name" className="select" value=${vname} onChange=${e => chooseName(e.target.value)}>${NATURAL_VOICES.map(v => html`<option key=${v.id} value=${v.id}>${v.label}</option>`)}</select><//>` : null}
+                  <div><button type="button" className="btn btn-ghost btn-sm" onClick=${sample}><${Icon} name="volume" size=${16} /> Hear a sample</button></div>
+                  ${sampleNote ? html`<p className="small warn-note">${sampleNote}</p>` : null}
+                </div>
+              </div>` : null}`
+            : html`<p className="small muted">This browser can't read questions aloud.</p>`}
+          </section>
+          <section className="card set-card">
+            ${head('Shortcut to a new interview')}
+            <p className="small">Add <strong>#record</strong> to the end of this app's link and save it to your phone's home screen (Share, then Add to Home Screen on iPhone). It opens straight to a new interview.</p>
+          </section>
+        </div>
+
+        <div className="set-sec" id="sec-privacy" data-sec="privacy"><section className="card set-card">
+          ${head('Data & Privacy', 'How student information is stored, shared and used.')}
+          <ul className="priv-list small">
+            <li>Students are recorded by first name or pseudonym only. The journal never asks for a student's last name. Students who share a first name get separate records.</li>
+            <li>A first name with a school or event can still identify someone. External exports and audience versions use the first name only when publication permission is documented; otherwise they use the story's public alias or "a student".</li>
+            <li>Sensitive experiences, such as gang involvement, stay out of external material unless consent is documented.</li>
+            <li>Only people invited to this app can sign in. Stories, transcripts, and recordings are stored privately in ABG's Supabase project.</li>
+            <li>Recordings are sent to Groq to be transcribed. Story text is sent to Anthropic's Claude API to choose interview questions, write impact stories, find evidence, answer searches, and draft audience versions.</li>
+            <li>AI summaries and drafts are never approved automatically. Only approved stories appear in external exports and reports.</li>
+            <li>Original transcripts are never overwritten. Corrections are saved alongside them.</li>
+            <li>With the natural interview voice, only the question text is sent to Groq to be spoken. With this device's voice, nothing is sent anywhere.</li>
+          </ul>
+        </section></div>
+
+        <div className="set-sec" id="sec-display" data-sec="display"><section className="card set-card">
+          ${head('Display', 'How the journal looks on this device.')}
+          <div className="field"><span className="field-label">Theme</span>
+            <div className="theme-picks" role="radiogroup" aria-label="Theme">${THEME_OPTS.map(t => html`<label key=${t.id} className=${'pick' + (theme === t.id ? ' on' : '')}><input type="radio" name="set-theme" checked=${theme === t.id} onChange=${() => chooseTheme(t.id)} /><span><strong>${t.label}</strong><br /><span className="small muted">${t.hint}</span></span></label>`)}</div>
+          </div>
+        </section></div>
+
+        <div className="set-sec" id="sec-team" data-sec="team"><section className="card set-card">
+          ${head('Team Access', 'People who have signed in to this journal. Everyone signed in can record, edit and export stories.')}
+          <div className="item-list">
+            ${members == null ? html`<p className="small muted">Loading…</p>` : members.map(m => html`<div className="member-row" key=${m.id}>
+              <${Avatar} name=${m.name || m.email} photo=${m.photo} />
+              <span className="member-main"><strong>${m.name || m.email || 'Team member'}${m.id === me.id ? html` <span className="pill tone-teal">You</span>` : null}</strong><small className="muted">${[m.role, m.email].filter(Boolean).join(' · ')}</small></span>
+              <small className="muted member-seen">${m.lastSeen ? 'Last active ' + fmtDate(m.lastSeen) : ''}</small>
+            </div>`)}
+          </div>
+          <p className="small muted">New people are invited by email from ABG's Supabase project (Authentication, then Users, then Invite user). They appear here after their first sign-in.</p>
+          <div className="acct-row"><span className="small">Signed in as <strong>${email || me.name}</strong> · ${access}</span>${window.__platform ? html`<button className="btn btn-ghost btn-sm" onClick=${() => window.__platform.signOut()}><${Icon} name="logout" size=${16} /> Log out</button>` : null}</div>
+        </section></div>
+
       </div>
-      <div className="row-btns"><button className="btn btn-primary btn-sm" disabled=${!asStr(pName)} onClick=${saveProfile}>${pSaved ? 'Saved' : 'Save profile'}</button></div>
-    </section>
-    <section className="card">
-      <h2>Interview voice</h2>
-      ${VOICE.supported ? html`<label className="check voice-setting"><input id="set-voice" type="checkbox" checked=${voiceOn} onChange=${e => setVoice(e.target.checked)} /> <span><strong>Read interview questions aloud</strong><br /><span className="small muted">A voice asks each question as it appears, so the interview feels like a conversation. Only the question is read, and the voice stops when you press Record. These settings are saved on this device.</span></span></label>
-        ${voiceOn ? html`<div className="field"><span className="field-label">Voice</span>
-          <div className="pick-list">
-            <label className=${'pick' + (engine === 'natural' ? ' on' : '')}><input type="radio" name="set-engine" checked=${engine === 'natural'} onChange=${() => chooseEngine('natural')} /><span><strong>Natural voice</strong> (Groq)<br /><span className="small muted">Sounds like a real person. Takes a moment to load each question. Only the question text is sent to Groq to be spoken.</span></span></label>
-            <label className=${'pick' + (engine === 'device' ? ' on' : '')}><input type="radio" name="set-engine" checked=${engine === 'device'} onChange=${() => chooseEngine('device')} /><span><strong>This device's voice</strong><br /><span className="small muted">Instant and works offline. Sounds more robotic on some devices.</span></span></label>
-          </div></div>
-          ${engine === 'natural' ? html`<${Field} label="Natural voice"><select id="set-voice-name" className="select" value=${vname} onChange=${e => chooseName(e.target.value)}>${NATURAL_VOICES.map(v => html`<option key=${v.id} value=${v.id}>${v.label}</option>`)}</select><//>` : null}
-          <div className="row-btns"><button type="button" className="btn btn-ghost btn-sm" onClick=${sample}><${Icon} name="volume" size=${16} /> Hear a sample</button></div>
-          ${sampleNote ? html`<p className="small warn-note">${sampleNote}</p>` : null}` : null}`
-      : html`<p className="small muted">This browser can't read questions aloud.</p>`}
-    </section>
-    <section className="card">
-      <h2>Privacy and AI</h2>
-      <ul className="small" style=${{display: 'grid', gap: '8px'}}>
-        <li>Students are recorded by first name or pseudonym only. The journal never asks for a last name. Students who share a first name get separate records.</li>
-        <li>A first name with a school or event can still identify someone. External exports and audience versions use the first name only when publication permission is documented; otherwise they use the story's public alias or "a student".</li>
-        <li>Only people invited to this app can sign in. Stories, transcripts, and recordings are stored privately in ABG's Supabase project.</li>
-        <li>Recordings are sent to Groq to be transcribed. Story text is sent to Anthropic's Claude API to choose interview questions, write impact stories, find evidence, answer searches, and draft audience versions, </li>
-        <li>AI summaries and drafts are never approved automatically. Only approved stories appear in external exports and reports.</li>
-        <li>Original transcripts are never overwritten. Corrections are saved alongside them.</li>
-        <li>Interview questions can be read aloud. With the natural voice, only the question text is sent to Groq to be spoken; with this device's voice, nothing is sent anywhere. Turn it on or off under Interview voice, or with the Voice button on each question.</li>
-      </ul>
-    </section>
-    <section className="card">
-      <h2>Quick start</h2>
-      <p className="small">To open straight to a new interview, add <strong>#record</strong> to the end of this app's link and save it to your phone's home screen (Share, then Add to Home Screen on iPhone).</p>
-    </section>
-    <section className="card">
-      <h2>Your account</h2>
-      <p className="small">${window.__platform && window.__platform.email ? 'Signed in as ' + window.__platform.email + '.' : (me.name ? 'Signed in as ' + me.name + '.' : '')}</p>
-      <p className="small muted">To add a team member, invite their email from the Supabase dashboard (Authentication, then Users, then Invite user).</p>
-      ${window.__platform ? html`<div><button className="btn btn-ghost btn-sm" onClick=${() => window.__platform.signOut()}>Sign out</button></div>` : null}
-    </section>
+    </div>
   </div>`;
 }
 
@@ -3740,13 +3988,14 @@ function App(){
   const [students, setStudents] = useState([]);
   const [backlog, setBacklog] = useState([]);
   const [backlogLoaded, setBacklogLoaded] = useState(false);
-  const [settings, setSettings] = useState({programs: [], communities: []});
+  const [settings, setSettings] = useState({programs: [], communities: [], programInfo: {}, outcomes: []});
   const [route, setRoute] = useState(initialRoute);
   const [sheet, setSheet] = useState(null);
   const [toast, setToast] = useState(null);
   const [readOnly, setReadOnly] = useState(false);
 
   const showToast = useCallback(msg => setToast({msg, k: Date.now()}), []);
+  useEffect(() => { applyTheme(lsGet('abg-theme')); }, []);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 3400); return () => clearTimeout(t); }, [toast]);
 
   useEffect(() => {
@@ -3772,7 +4021,7 @@ function App(){
     const u1 = db.collection('stories').onSnapshot(snap => { setStories(snap.docs.map(d => Object.assign({id: d.id}, d.data()))); setStoriesLoaded(true); }, err => { setStoriesLoaded(true); showToast(dbErrorMessage(err)); });
     const u2 = db.collection('metrics').onSnapshot(snap => setMetrics(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
     const u4 = db.collection('students').onSnapshot(snap => setStudents(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
-    const u3 = db.doc('config/settings').onSnapshot(snap => { const d = snap.exists ? (snap.data() || {}) : {}; setSettings({programs: asArr(d.programs), communities: asArr(d.communities)}); }, () => {});
+    const u3 = db.doc('config/settings').onSnapshot(snap => { const d = snap.exists ? (snap.data() || {}) : {}; ACTIVE_OUTCOMES = mergeOutcomes(d.outcomes); setSettings({programs: asArr(d.programs), communities: asArr(d.communities), programInfo: d.programInfo && typeof d.programInfo === 'object' ? d.programInfo : {}, outcomes: asArr(d.outcomes)}); }, () => {});
     const u5 = db.collection('backlog').onSnapshot(snap => { setBacklog(snap.docs.map(d => Object.assign({id: d.id}, d.data()))); setBacklogLoaded(true); }, () => setBacklogLoaded(true));
     return () => { u1(); u2(); u3(); u4(); u5(); };
   }, [caps.status]);
