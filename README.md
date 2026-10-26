@@ -53,7 +53,11 @@ For each function: **Edge Functions** > **Deploy a new function** > **Via Editor
 
 ### 7. Invite people
 1. **Authentication** > **Users** > **Invite user**. Invite yourself first, then Kyle.
-2. Open the Cloudflare link, enter your email, and click the sign-in link you receive.
+2. The invited person opens the email and taps the link. Tip for phones: long-press the link, copy it, and open it in Safari or Chrome. Email apps often open links in their own built-in browser, which doesn't share sign-ins with your regular browser.
+3. On that first visit the journal asks them to create a password. After that:
+   - The same browser stays signed in; just open the journal link.
+   - On any other browser, phone or computer, they sign in with email and password, which the phone or browser can save and fill in.
+   - Forgot the password, or skipped it? **Email me a sign-in link** on the sign-in page still works, and a password can be set or changed any time in **Settings > Profile > Password**.
 
 Supabase's built-in email sender allows only a few sign-in emails per hour. That's enough for a small team. If someone gets a "too many emails" message, wait a few minutes.
 

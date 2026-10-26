@@ -734,3 +734,11 @@ h1{font-weight:800}
 /* the logo has dark lettering, so it sits on a cream tile in dark mode */
 :root[data-theme="dark"] .brand-logo{background:#FBF8F3;border-radius:12px;padding:6px 8px}
 @media (prefers-color-scheme: dark){:root[data-theme="auto"] .brand-logo{background:#FBF8F3;border-radius:12px;padding:6px 8px}}
+/* sign-in */
+.pw-wrap{position:relative;display:block}
+.pw-wrap .input{width:100%;padding-right:72px}
+.pw-wrap .btn{position:absolute;right:4px;top:50%;transform:translateY(-50%)}
+.pw-form{display:grid;gap:12px;max-width:440px}
+.login-brand{flex-direction:column;align-items:flex-start;gap:6px}
+.login-brand .brand-text{font-family:var(--font-display);font-weight:700;color:var(--ink-2)}
+.login-alt{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding-top:12px;border-top:1px solid var(--line)}

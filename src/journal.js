@@ -3683,6 +3683,41 @@ function ListEditor({title, hint, items, onChange, placeholder, disabled, id}){
     ${!disabled ? html`<form className="add-row" onSubmit=${e => { e.preventDefault(); add(); }}><input id=${id} className="input" aria-label=${'Add to ' + title} placeholder=${placeholder} value=${v} onChange=${e => setV(e.target.value)} /><button className="btn btn-ghost" type="submit">Add</button></form>` : null}
   </section>`;
 }
+/* ---------- password: lets people sign in from any browser or device without an emailed link ---------- */
+function PasswordForm({onDone, label, cta}){
+  const {showToast} = useApp();
+  const [pw, setPw] = useState('');
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const email = (window.__platform && window.__platform.email) || '';
+  async function submit(e){
+    e.preventDefault(); setErr('');
+    if (pw.length < 8) { setErr('Use at least 8 characters.'); return; }
+    setBusy(true); const r = await window.__platform.setPassword(pw); setBusy(false);
+    if (r.error) { setErr(r.error); return; }
+    setPw(''); showToast('Password saved. Your browser can remember it for next time.'); if (onDone) onDone();
+  }
+  return html`<form className="pw-form" onSubmit=${submit}>
+    <input type="email" name="email" autoComplete="username" value=${email} readOnly=${true} className="sr-only" tabIndex="-1" aria-hidden="true" />
+    <label className="field"><span>${label || 'New password'}</span><span className="pw-wrap"><input id="pw-new" className="input" type=${show ? 'text' : 'password'} name="new-password" autoComplete="new-password" value=${pw} onChange=${e => setPw(e.target.value)} placeholder="At least 8 characters" /><button type="button" className="btn btn-quiet btn-sm" onClick=${() => setShow(!show)} aria-label=${show ? 'Hide password' : 'Show password'}>${show ? 'Hide' : 'Show'}</button></span></label>
+    ${err ? html`<p className="error" role="alert">${err}</p>` : null}
+    <div className="row-btns"><button className="btn btn-primary" type="submit" disabled=${busy || !pw}>${busy ? 'Saving…' : (cta || 'Save password')}</button></div>
+  </form>`;
+}
+function PasswordSheet({close}){
+  const p = window.__platform || {};
+  const fresh = p.arrivedFrom === 'invite' || p.arrivedFrom === 'signup';
+  const skip = () => { lsSet('abg-pw-prompt', 'skip'); close(); };
+  return html`<div className="view" style=${{gap: '14px'}}>
+    <${SheetHead} title=${fresh ? 'Welcome to the ABG Impact Journal' : 'Make signing in easier'} close=${skip} />
+    <p>${fresh ? "You're signed in on this browser and will stay signed in here. " : ''}Create a password so you can open the journal from any browser, phone or computer without waiting for an email link. Your phone or browser can save it and fill it in for you.</p>
+    <p className="small muted">Signing in to ${p.email || 'your account'}.</p>
+    <${PasswordForm} onDone=${close} cta="Save password" />
+    <button type="button" className="btn btn-quiet btn-sm" onClick=${skip}>Not now</button>
+  </div>`;
+}
+
 /* ---------- Settings ---------- */
 const SETTINGS_SECTIONS = [
   {id: 'profile', label: 'Profile', icon: 'user'},
@@ -3790,6 +3825,7 @@ function SettingsView(){
     if (await safeWrite(() => caps.db.doc('members/' + me.id).update({photo}))) { updateMe({photo}); showToast('Photo updated'); }
   }
   async function removePhoto(){ if (await safeWrite(() => caps.db.doc('members/' + me.id).update({photo: ''}))) updateMe({photo: ''}); }
+  const [hasPw, setHasPw] = useState(() => !!(window.__platform && window.__platform.hasPassword));
   const roles = ROLES.includes(asStr(me.role)) || !asStr(me.role) ? ROLES : [asStr(me.role)].concat(ROLES);
 
   /* programs */
@@ -3878,7 +3914,11 @@ function SettingsView(){
             <div className="prof-save"><button className="btn btn-primary" disabled=${!asStr(first)} onClick=${saveProfile}>${pSaved ? 'Saved' : 'Save changes'}</button></div>
           </div>
           <p className="tiny muted">Your name and role appear in the sidebar, and the greeting uses your first name. Your photo and phone number are visible to the team.</p>
-        </section></div>
+        </section>
+        ${window.__platform && window.__platform.setPassword ? html`<section className="card set-card">
+          ${head('Password', hasPw ? 'You can sign in with your email and password from any browser or device. Change it here if you need to.' : 'Set a password to sign in from any browser or device without waiting for an email link. You stay signed in on this browser either way.')}
+          <${PasswordForm} label=${hasPw ? 'New password' : 'Create a password'} cta=${hasPw ? 'Change password' : 'Save password'} onDone=${() => setHasPw(true)} />
+        </section>` : null}</div>
 
         <div className="set-sec" id="sec-programs" data-sec="programs">
           <section className="card set-card">
@@ -4038,6 +4078,13 @@ function App(){
     }
   }, [caps.canWrite, showToast]);
 
+  useEffect(() => {
+    const p = window.__platform;
+    if (caps.status !== 'ready' || !p || !p.setPassword || p.hasPassword) return;
+    if (p.arrivedFrom !== 'invite' && lsGet('abg-pw-prompt') === 'skip') return;
+    const t = setTimeout(() => setSheet({render: close => html`<${PasswordSheet} close=${close} />`}), 600);
+    return () => clearTimeout(t);
+  }, [caps.status]);
   const updateMe = useCallback(patch => setCaps(c => Object.assign({}, c, {me: Object.assign({}, c.me, patch)})), []);
   const ctx = {caps, updateMe, stories, students, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite, readOnly};
   const focus = caps.status === 'ready' && (route.name === 'record' || route.name === 'review' || route.name === 'interview');
