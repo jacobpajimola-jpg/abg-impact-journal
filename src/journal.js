@@ -1,4 +1,4 @@
-import { DEMO_STORIES } from './demoData.js';
+import { DEMO_STORIES, DEMO_VERSION } from './demoData.js';
 (function(){
 'use strict';
 if (!window.React || !window.ReactDOM || !window.htm) {
@@ -82,7 +82,9 @@ const DOMAINS = [
   {id:'returned', label:'Returned to ABG as mentor, volunteer or instructor', group:'longterm', milestone:true},
   {id:'arts_continued', label:'Continued art or creative pursuits', group:'longterm', milestone:true},
   {id:'risk', label:'Reduced risky behavior', group:'personal', change:true, sensitive:true},
-  {id:'social', label:'Peer groups and relationships', group:'personal', change:true},
+  {id:'social', label:'Positive relationships and peer groups', group:'personal', change:true},
+  {id:'wellbeing', label:'Emotional well-being and sense of belonging', group:'personal', change:true},
+  {id:'community_involvement', label:'Community involvement', group:'personal', change:true},
   {id:'activities', label:'Productive after-school activities', group:'personal', change:true},
   {id:'confidence', label:'Confidence, leadership and communication', group:'personal', change:true},
   {id:'aspirations', label:'Decision-making and future aspirations', group:'personal', change:true},
@@ -119,6 +121,39 @@ const EVIDENCE_LABELS = [
   {id:'unverified', label:'Unverified', tone:'bad'},
   {id:'expected', label:'Expected, not yet documented', tone:'outline'},
 ];
+/* four evidence types used in reporting. Derived from status and observer, so older records classify too.
+   Kyle's confident account never makes something "verified": only a staff member checking documentation does. */
+const EVIDENCE_CLASSES = [
+  {id:'verified', label:'Verified by documentation', short:'Verified', tone:'good', color:'#2F8F5B'},
+  {id:'observed', label:'Directly observed by staff', short:'Staff-observed', tone:'blue', color:'#3D7FC1'},
+  {id:'reported', label:'Reported by student or third party', short:'Reported', tone:'teal', color:'#2EB8A0'},
+  {id:'unconfirmed', label:'Unconfirmed or inferred', short:'Unconfirmed', tone:'warn', color:'#E3A33B'},
+];
+const CLASS_RANK = {verified: 4, observed: 3, reported: 2, unconfirmed: 1};
+function evidenceClass(e){
+  if (!e) return 'unconfirmed';
+  if (e.status === 'future') return 'planned';
+  if (e.status === 'verified') return 'verified';
+  if (e.status === 'unverified' || e.inferred) return 'unconfirmed';
+  if (e.observer === 'abg_staff' || e.observer === 'records') return 'observed';
+  if (['student', 'teacher', 'parent', 'school_staff', 'other'].includes(e.observer)) return 'reported';
+  return 'unconfirmed';
+}
+/* changing the evidence type in review keeps status and observer consistent with it */
+function classPatch(e, cls){
+  const plain = e.kind === 'numeric' ? 'reported' : 'qualitative';
+  const unsure = ['verified', 'unverified'].includes(e.status);
+  if (cls === 'verified') return {status: 'verified', inferred: false};
+  if (cls === 'unconfirmed') return {status: 'unverified'};
+  if (cls === 'observed') return {observer: 'abg_staff', inferred: false, status: unsure ? plain : e.status};
+  return {observer: ['student', 'teacher', 'parent', 'school_staff', 'other'].includes(e.observer) ? e.observer : 'other', inferred: false, status: unsure ? plain : e.status};
+}
+function classLabel(e){
+  const c = evidenceClass(e);
+  if (c === 'planned') return 'Expected, not yet happened';
+  if (c === 'reported' && e.observer && e.observer !== 'other') return 'Reported by ' + ({student: 'student', teacher: 'teacher', parent: 'parent or family', school_staff: 'school staff'}[e.observer] || 'someone else');
+  return (byId(EVIDENCE_CLASSES, c) || {}).label || '';
+}
 function evidenceLabelId(e){
   if (!e) return 'staff';
   if (e.status === 'verified') return 'verified';
@@ -144,6 +179,8 @@ function domainOf(e){
   if (/session|workshop|weeks|months|years|returned|continued|retention|enrolled|program/.test(t)) return 'participation';
   if (/participat|engag|motivat|classroom|interest in school/.test(t)) return 'engagement';
   if (/access|first time|never had|no art|otherwise/.test(t)) return 'access';
+  if (/belong|lonel|isolat|anxi|well being|emotional|resilien|cope|coping|stress/.test(t)) return 'wellbeing';
+  if (/community (event|project|service|garden|clean)|neighborhood (event|project)|volunteer(ed|s)? (in|at|for) (the|a|her|his|their) (community|neighborhood)/.test(t)) return 'community_involvement';
   if (/friend|peer|teamwork|collaborat/.test(t)) return 'social';
   if (/behavior|behaviour|discipline|suspension|referral/.test(t)) return 'behavior';
   if (/college|career|university|design school/.test(t)) return 'pathways';
@@ -388,61 +425,75 @@ function dbErrorMessage(e){
 /* ================= AI prompts ================= */
 const ABG_CONTEXT = "Arts Bridging the Gap (ABG) is a Los Angeles nonprofit that serves youth from under-resourced communities through arts education, creative programming and community art projects. Kyle is its Executive Director.";
 
-const INTERVIEW_NOTES_SHAPE = {facts: [], outcomes: {}, strongestClaim: '', askedAbout: []};
+/* the five interview stages: Kyle tells the story first, then focused follow-ups fill the evidence gaps */
+const INTERVIEW_STAGES = [
+  {id: 1, label: 'Background and ABG involvement'},
+  {id: 2, label: 'Most meaningful changes'},
+  {id: 3, label: 'Supporting evidence'},
+  {id: 4, label: "ABG's contribution"},
+  {id: 5, label: 'Current progress and follow-up'},
+];
+/* outcome areas the interviewer listens for (mapped to impact domains in the analysis) */
+const LISTEN_FOR = ['school attendance', 'academic performance', 'high school graduation', 'higher education', 'confidence and creativity', 'emotional well-being and sense of belonging', 'community involvement', 'positive relationships', 'leadership and mentorship', 'career aspirations and opportunities'];
+const INTERVIEW_NOTES_SHAPE = {facts: [], outcomes: [], askedAbout: [], stage: 1};
 function interviewPrompt({name, turns, mode, story, asked, target, memo, info, notes, avoid}){
   const convo = turns.map(t => 'Q (' + t.kind + '): ' + t.q + '\nA: ' + (t.status === 'skipped' ? '[Kyle skipped this question]' : t.a)).join('\n\n');
-  const existing = story ? {summary: story.summary, timeline: (story.milestones || []).map(m => (fmtEventDate(m.date) || 'undated') + ': ' + m.label), missingData: (story.missingMetrics || []).map(m => m.metric),
-    evidenceOnFile: (story.evidence || []).slice(0, 12).map(e => labelOf(DOMAINS, domainOf(e)) + ': ' + e.statement + (hasComparison(e) ? ' (' + e.before + ' to ' + e.after + ')' : '') + ' [' + labelOf(EVIDENCE_LABELS, evidenceLabelId(e)) + ']')} : null;
+  const existing = story ? {summary: story.summary, timeline: (story.milestones || []).map(m => (fmtEventDate(m.date) || 'undated') + ': ' + m.label + (m.phase === 'future' ? ' (planned, not yet happened)' : '')), missingData: (story.missingMetrics || []).map(m => m.metric),
+    evidenceOnFile: (story.evidence || []).slice(0, 12).map(e => labelOf(DOMAINS, domainOf(e)) + ': ' + e.statement + (hasComparison(e) ? ' (' + e.before + ' to ' + e.after + ')' : '') + ' [' + labelOf(EVIDENCE_CLASSES, evidenceClass(e)) + ']'),
+    openQuestions: (story.followUps || []).filter(f => f.status === 'open').map(f => f.question)} : null;
   return `${ABG_CONTEXT}
 
-You are interviewing Kyle about a student named ${name}. The goal is a compelling success story and the meaningful, long-term outcomes behind it, especially graduation, higher education, careers, avoiding risky activities, school engagement and personal growth. These matter to donors, grant providers and school administrators.
-${mode === 'update' ? 'This is an UPDATE interview about a story already in the journal. Focus on what is new since it was recorded. Existing record: ' + JSON.stringify(existing) : ''}
+You are interviewing Kyle about a student named ${name}. The goal is a story that keeps ${name}'s humanity AND credible evidence of the meaningful changes behind it, for donors, grant providers and school administrators.
+${mode === 'update' ? 'This is an UPDATE interview about a story already in the journal. Focus on what is new since it was recorded: progress on earlier outcomes, planned milestones that happened (or didn\'t), and anything new. Existing record: ' + JSON.stringify(existing) : ''}
 ${memo ? "Kyle's one-line note about " + name + ' from his student list: "' + memo + '". A starting point, not confirmed detail.' : ''}
 ${studentInfoText(info) ? 'Already entered about ' + name + ' (never ask for these): ' + studentInfoText(info) + '.' : ''}
 
-YOUR JOB EACH TURN
-1. Update your interview notes from the whole conversation (previous notes are below).
-2. Choose the single most valuable next question.
-
 WHO YOU'RE TALKING TO
-Kyle is ABG's Program Director. He works directly with students and knows them personally, often over years: their backgrounds, challenges, growth and what happened to them later. He does NOT have school records: no attendance percentages, GPAs or transcripts. Talk to him like a colleague who knows the student, not like an analyst with a database.
-- Never ask for records, documentation, exact percentages or GPAs, and never ask him to verify something.
-- Not every valuable outcome is a number. "She graduated and is at UCLA", "first in his family to go to college", "he came back as an instructor" are strong outcomes as they stand.
-- If he mentions a number naturally, keep it. If he doesn't know one, accept his description and move on.
+Kyle is ABG's Program Director. He knows students personally, often over years. He does NOT have school records: no attendance percentages, GPAs or transcripts. Talk to him like a colleague who knows the student, not an analyst.
+- Never ask for records, documents, exact percentages or GPAs, and never ask him to verify something.
+- Not every outcome is a number. "She graduated and is at UCLA" is a strong outcome as it stands. If he mentions a number naturally, keep it.
 
-OUTCOMES TO LISTEN FOR (only the ones this story points to; never run through a checklist)
-- Academic progress: better school attendance, better grades, more motivation for school, high school graduation, college, university or vocational programs.
-- Community and personal development: positive changes in friends and peer groups, productive after-school activities, confidence, leadership, communication, better decisions, future goals, and less involvement in risky behavior such as gangs.
-- Long-term success: graduating, first in the family to attend college, a degree or career, jobs or internships, returning to ABG as a mentor, volunteer or instructor, continuing with art.
-- Program engagement: staying with ABG, relationships with mentors, joining more than one program, leadership roles at ABG.
+THE FIVE STAGES (Kyle has already told the story in his own words; your follow-ups move through what is still missing)
+1. Student background and ABG involvement (who, where they started, which ABG program, when).
+2. The most meaningful changes Kyle saw.
+3. Specific supporting evidence and measurable outcomes for those changes.
+4. ABG's contribution: what about ABG may have helped (a person, a project, a role), in Kyle's words.
+5. Current progress, lasting impact, and what to follow up on later.
+Skip any stage Kyle's story already covered. Stages are a guide, not a script.
 
-PRIORITY when choosing what to ask
-1. Meaningful milestones (graduated, college, career, came back to ABG).
-2. Observable changes in behavior and development.
-3. Academic and educational achievements.
-4. Long-term outcomes: what they're doing today.
-5. Continued participation and engagement with ABG.
-6. Numbers, only when readily available (how long they were in the program, how many sessions or projects).
+OUTCOMES TO LISTEN FOR (only ones this story points to; never run through a checklist)
+${LISTEN_FOR.join(', ')}.
 
-HOW TO FOLLOW UP
-When Kyle mentions a positive change, ask one natural next question that follows the student's path forward or clarifies the outcome. Examples:
-- "Her grades started improving." -> "Did she eventually graduate high school?" -> "Yes, and she's in college now." -> "Do you know what she's studying?"
-- "He was involved with gangs before joining." -> "Did that change after he joined ABG?" -> "He stopped." -> "Did he ever share how ABG played into that?"
-- "She's doing really well now." -> "What is she doing today?" -> "Studying graphic design." -> "Did ABG influence that interest?"
-Also note where each outcome came from: something Kyle saw himself, or something the student, family or a teacher told him. If that's unclear for an important outcome, a quick "Did she tell you that, or did you see it?" is fine.
+FOR EACH MEANINGFUL OUTCOME, the evidence slots are:
+- initial: what it was like before
+- change: what changed
+- when: roughly when it changed
+- howKnown: how Kyle knows (he saw it himself, or the student, a parent or a teacher told him)
+- abgRole: how ABG may have contributed, in Kyle's words
+Track these in notes.outcomes. Ask about the most important EMPTY slot of the most meaningful outcome. Never ask about a slot that's filled or that Kyle said he doesn't know.
+
+YOUR JOB EACH TURN
+1. Update the notes from the whole conversation (previous notes are below).
+2. Choose the single most valuable next question: the one that most improves the story or its evidence. Prefer missing evidence over more of the same.
+
+FOLLOW-UP EXAMPLES
+- "Her grades started improving." -> "Did she eventually graduate high school?"
+- "He's more confident now." -> "What did you see him do that showed that?"
+- "She started showing up every day." -> "How do you know? Did you see it, or did a teacher tell you?"
+- "He's doing great now." -> "What is he doing today?"
+- "The mural changed her." -> "What about the mural do you think made the difference?"
 
 SENSITIVE TOPICS
-Ask about gang involvement, family circumstances, the justice system or other sensitive experiences ONLY if Kyle brings them up first. Never assume a student was involved in gangs or risky behavior because of their background, school or neighborhood.
+Ask about gang involvement, family circumstances, mental health, the justice system or other sensitive experiences ONLY if Kyle brings them up first, and then only what's needed. Never assume risky behavior from a student's background, school or neighborhood. Never ask for a diagnosis.
 
 RULES
-- Never ask about anything in notes.facts or notes.askedAbout, or anything Kyle already answered, even partly. If he said "I don't know" or skipped, that topic is closed.
-- Don't assume an outcome happened or that ABG caused it. Ask "Did their grades change?", not "How much did they improve?".
-- Never ask for a last name or other identifying details.
-- One question, ideally under 12 words, never more than 18. Plain and natural. No preamble, no praise, no "and/or" double questions, no "could you elaborate", "tell me more" or "share details".
-- Good: "Did they eventually graduate high school?" "Did they go on to college?" "What are they doing today?" "Did you notice their school attendance improve?" "Did their grades improve?" "Did they develop any career interests through ABG?" "Are they still involved with ABG?" "Have they come back to mentor younger students?"
+- Never invent or assume statistics, diagnoses, outcomes or causes. Ask "Did their grades change?", not "How much did they improve?". Don't assume ABG caused a change.
+- Never repeat a question or ask about anything in notes.facts or notes.askedAbout, even partly answered. "I don't know" or a skip closes the topic.
+- Never ask for a last name or identifying details.
+- One question, ideally under 12 words, never more than 18. Plain and natural. No preamble, no praise, no double questions, no "tell me more" or "could you elaborate".
 ${avoid ? '- Your last suggestion repeated an earlier question ("' + avoid + '"). Choose a different gap.' : ''}
 
-Follow-up questions asked so far: ${asked}. Aim for about ${target}. Set "enough" to true when the story and the most important relevant evidence are covered, or the remaining gaps are things Kyle doesn't know.
+Follow-up questions asked so far: ${asked}. Aim for about ${target} (usually 4 to 6). Set "enough" to true only when the most meaningful outcomes have their key slots filled or Kyle doesn't know the rest.
 
 PREVIOUS NOTES (empty at the start):
 ${JSON.stringify(notes || INTERVIEW_NOTES_SHAPE)}
@@ -451,8 +502,9 @@ CONVERSATION SO FAR:
 ${convo}
 
 Reply with only JSON:
-{"notes": {"facts": ["short facts already captured, under 10 words each"], "outcomes": {"academic": "what is known so far, or not discussed", "personal": "...", "longTerm": "...", "program": "..."}, "strongestClaim": "the most meaningful outcome so far, and whether Kyle saw it or was told", "askedAbout": ["topics already asked about, including skipped or don't know"]},
- "question": "the next question", "target": "which domain or claim it targets", "why": "a few words on what this adds", "enough": false}`;
+{"notes": {"facts": ["short facts already captured, under 10 words each"], "outcomes": [{"outcome": "short name", "area": "one of the outcome areas above", "initial": "or null", "change": "or null", "when": "or null", "howKnown": "or null", "abgRole": "or null"}], "askedAbout": ["topics already asked about, including skipped or don't know"], "stage": 1},
+ "stage": "1 to 5: the stage your question belongs to",
+ "question": "the next question", "target": "which outcome and slot it fills", "why": "a few words on what this adds", "enough": false}`;
 }
 /* rough word-overlap check so the interviewer doesn't repeat itself */
 function questionOverlap(a, b){
@@ -481,7 +533,7 @@ const ANALYSIS_SHAPE = `{
   "categories": ["category ids"],
   "themes": ["theme ids"],
   "stakeholders": {"primary": ["up to 3 audience ids, most relevant first"], "schools": "one sentence: how this student's documented or reported outcomes answer 'How does ABG benefit students at our school?', or null if nothing relevant", "donors": "one sentence answering 'What difference is our contribution making?', or null", "grants": "one sentence answering 'Can ABG demonstrate outcomes that justify continued funding?', naming the evidence level, or null", "why": "Stakeholder value: 2 or 3 sentences on how the documented outcomes show ABG's impact and support donor funding or school partnerships. Claim only what the evidence supports, and say when outcomes are reported or estimated rather than verified."},
-  "evidence": [{"metric": "short name of the outcome, e.g. High school graduation, College enrollment, Field of study, Current job, Returned as instructor, School attendance, Leadership role at ABG, Sessions attended", "domain": "${DOMAINS.map(d => d.id).join(' | ')}", "direction": "achieved (a milestone such as graduating or enrolling) | improved | same | declined | mixed | unclear (only what Kyle said)", "level": "1 personal observation | 2 observable improvement | 3 documented metric (give the number)", "category": "category id", "kind": "numeric for measurable outcomes (numbers, counts, rates, before-and-after comparisons, durations) | qualitative for observations and testimonials", "statement": "what the evidence shows", "value": null, "unit": "students, sessions, hours, percent, years... or null", "before": "the value or situation before ABG, or null", "after": "the value or situation after, or null", "timeframe": "the period compared, e.g. fall 2023 to spring 2024, or null", "status": "reported | estimate | qualitative | unverified | future", "observer": "abg_staff | teacher | school_staff | parent | student | records | other", "basis": "who observed or reported it, e.g. Kyle observed directly; teacher told Kyle; attendance records Kyle mentioned", "excerpt": "short passage copied word for word from the interview"}],
+  "evidence": [{"metric": "short name of the outcome, e.g. High school graduation, College enrollment, Field of study, Current job, Returned as instructor, School attendance, Leadership role at ABG, Sessions attended", "domain": "${DOMAINS.map(d => d.id).join(' | ')}", "direction": "achieved (a milestone such as graduating or enrolling) | improved | same | declined | mixed | unclear (only what Kyle said)", "level": "1 personal observation | 2 observable improvement | 3 documented metric (give the number)", "category": "category id", "kind": "numeric for measurable outcomes (numbers, counts, rates, before-and-after comparisons, durations) | qualitative for observations and testimonials", "statement": "what the evidence shows", "value": null, "unit": "students, sessions, hours, percent, years... or null", "before": "the value or situation before ABG, or null", "after": "the value or situation after, or null", "timeframe": "the period compared, e.g. fall 2023 to spring 2024, or null", "status": "reported | estimate | qualitative | unverified | future", "observer": "abg_staff | teacher | school_staff | parent | student | records | other", "basis": "who observed or reported it, e.g. Kyle observed directly; teacher told Kyle; attendance records Kyle mentioned", "observation": "the concrete thing seen or heard that supports it, or null", "activity": "the ABG program or activity involved, or null", "contribution": "how ABG may have contributed, only as Kyle described it, or null (never assume)", "openQuestion": "what is still unknown or should be followed up about this outcome, or null", "inferred": "true only if this outcome is your inference rather than something Kyle stated", "excerpt": "short passage copied word for word from the interview"}],
   "missingMetrics": [{"metric": "Missing data: an outcome that was mentioned but not quantified or confirmed, or a relevant core metric the interview didn't cover. Kyle has no school records, so phrase record-based items as things ABG or the consulting team could request (e.g. School attendance records could be requested from the school; A teacher statement could confirm the change Kyle observed)", "why": "how it would strengthen the case for stakeholders", "howToGet": "where it might come from"}],
   "quotes": [{"text": "the words", "speaker": "first name or role, or Narrator", "kind": "exact | remembered | paraphrase"}],
   "milestones": [{"date": {"text": "when, or null", "iso": "YYYY or YYYY-MM, or null"}, "label": "what happened", "phase": "circumstances | involvement | immediate | short_term | long_term | future", "confirmed": true}],
@@ -511,7 +563,11 @@ function analysisPrompt({mode, story, items, others, whenHint, studentName, memo
     memo ? "Kyle's one-line note from his student list (context only, not a source for evidence excerpts): " + memo : '',
     studentInfoText(studentInfo) ? "Student details Kyle entered on the form (treat as given; don't repeat demographics in the story unless they matter to it): " + studentInfoText(studentInfo) : '',
     `RULES
-- Story first, evidence second, stakeholder value third. Preserve the human element; don't reduce the story to statistics.
+- Story first, evidence second, stakeholder value third. Preserve the student's humanity; the story is about a person, not a checklist of positive outcomes. Cover, where the interview does: background, initial challenges, how they became involved with ABG, a meaningful experience, the progress Kyle observed, and where they are now.
+- The evidence list is the Structured Impact Record: one item per outcome. For each, fill the outcome description (statement), initial condition (before), current condition (after), supporting observation, evidence source (observer and basis), timeframe, the ABG program or activity, ABG's possible contribution, and any open question. Use null for anything the interview doesn't say. Never fill a field by guessing.
+- Evidence types: a staff member's own observation (observer abg_staff); something the student, a parent, teacher or other person reported (that observer); unconfirmed or inferred (status "unverified", or "inferred": true when the outcome is your reading rather than Kyle's words). Never mark anything verified just because Kyle said it confidently.
+- Outcome domains to use: attendance, academics, engagement, graduation, higher_ed, confidence (confidence and creativity), wellbeing (emotional well-being and sense of belonging), social (positive relationships), community_involvement, leadership_abg and mentorship (leadership and mentoring), career and pathways (career aspirations and opportunities), arts_continued, participation, and risk (only if Kyle raises it).
+- Never invent statistics, diagnoses, outcomes or causal relationships.
 - Use only what the entries${mode === 'update' ? ' and existing record' : ''} say. Never invent names, numbers, dates, outcomes, percentages, survey results or quotes. Use null or an empty list when information isn't there.
 - Never add a last name or other identifying details.
 - Describe outcomes as observed or reported. Don't say ABG caused an outcome unless Kyle says so. Don't infer attendance changes from participation.
@@ -566,7 +622,8 @@ function normalizeAnalysis(raw, ctx){
     return { id: uid('ev'), category: pickEnum(e.category, CATEGORIES, 'engagement'), kind: (value != null || /^numeric/.test(asStr(e.kind)) || (before && after)) ? 'numeric' : 'qualitative',
       metric: nul(e.metric), domain: pickEnum(e.domain, DOMAINS, ''), direction: pickEnum(asStr(e.direction).split(/\s/)[0], DIRECTIONS, 'unclear'), level: [1, 2, 3].includes(lvl) ? lvl : (before && after ? 2 : 1),
       statement: asStr(e.statement), value: value, unit: nul(e.unit), before: before, after: after, timeframe: nul(e.timeframe), observer: pickEnum(e.observer, OBSERVERS, ''),
-      status: status, basis: nul(e.basis), source: {entryId: loc.entryId, excerpt: excerpt, found: loc.found, note: ''}, observed: '' };
+      status: status, basis: nul(e.basis), observation: nul(e.observation), activity: nul(e.activity), contribution: nul(e.contribution), openQuestion: nul(e.openQuestion), inferred: e.inferred === true || e.inferred === 'true',
+      source: {entryId: loc.entryId, excerpt: excerpt, found: loc.found, note: ''}, observed: '' };
   }).filter(e => e.statement);
   const quotes = asArr(r.quotes).slice(0, 12).map(q => {
     q = q || {};
@@ -829,6 +886,9 @@ function finalizeStory(d, me){
   s.evidence = s.evidence.map(e => { const v = toNum(e.value); return Object.assign({}, e, {value: v, kind: v != null ? 'numeric' : (e.kind || 'qualitative')}); });
   s.milestones = s.milestones.map(m => Object.assign({}, m, {date: {text: (m.date && m.date.text) || '', iso: cleanIso(m.date && m.date.iso)}}));
   s.followUps = s.followUps.filter(f => asStr(f.question));
+  /* planned outcomes are tracked as follow-up reminders, never counted as results */
+  const haveQ = new Set(s.followUps.map(f => norm(f.question)));
+  s.evidence.filter(e => e.status === 'future' && asStr(e.statement)).forEach(e => { const q = 'Check on: ' + asStr(e.statement); if (!haveQ.has(norm(q))) { haveQ.add(norm(q)); s.followUps.push({id: uid('f'), kind: 'task', question: q, due: '', status: 'open', answer: '', entryId: null, suggested: true}); } });
   s.missingMetrics = s.missingMetrics.filter(m => asStr(m.metric));
   s.materials = s.materials.filter(m => asStr(m.description));
   s.takeaways = (s.takeaways || []).map(t => asStr(t)).filter(Boolean);
@@ -867,6 +927,26 @@ function storiesCSV(stories){
     ['Recorded', s => s.createdAt], ['Last updated', s => s.updatedAt],
   ], stories);
 }
+/* the outcome category an outcome record counts toward */
+function outcomeCategoryOf(e){ const d = domainOf(e); return ACTIVE_OUTCOMES.find(o => o.domains.includes(d)) || null; }
+function outcomeCategoryLabel(e){ const o = outcomeCategoryOf(e); return o ? o.label : labelOf(DOMAINS, domainOf(e)); }
+/* Structured Impact Records: one per story, every field present, null when not known */
+function impactRecords(stories){
+  const n = v => { const t = v == null ? '' : String(v).trim(); return t ? t : null; };
+  return stories.map(s => ({
+    storyId: s.id, demo: !!s.demo, student: n(s.alias), studentRecordId: n(s.studentId), title: n(s.title), status: labelOf(STATUSES, s.status),
+    program: n(s.program), schoolOrCommunity: n(s.community), when: n(fmtEventDate(s.eventDate)), recorded: n(s.createdAt), lastUpdated: n(s.updatedAt),
+    outcomes: (s.evidence || []).map(e => ({
+      outcomeCategory: e.status === 'future' ? null : outcomeCategoryLabel(e), impactArea: labelOf(DOMAINS, domainOf(e)), outcomeDescription: n(e.statement), change: e.direction ? labelOf(DIRECTIONS, e.direction) : null,
+      initialCondition: n(e.before), currentCondition: n(e.after), supportingObservation: n(e.observation) || n(e.source && e.source.excerpt),
+      evidenceSource: n([e.observer ? labelOf(OBSERVERS, e.observer) : '', e.basis].filter(Boolean).join(': ')), evidenceType: classLabel(e), verificationStatus: labelOf(EVIDENCE_STATUS, e.status),
+      value: e.value == null || e.value === '' ? null : toNum(e.value), unit: n(e.unit), timeframe: n(e.timeframe), abgProgramOrActivity: n(e.activity) || n(s.program),
+      abgPossibleContribution: n(e.contribution), outstandingQuestions: n(e.openQuestion),
+    })),
+    missingData: (s.missingMetrics || []).map(m => m.metric),
+    openFollowUps: (s.followUps || []).filter(f => f.status === 'open').map(f => f.question),
+  }));
+}
 function evidenceCSV(stories){
   const rows = [];
   stories.forEach(s => { (s.evidence || []).forEach(e => rows.push({s, e})); (s.missingMetrics || []).forEach(m => rows.push({s, e: {id: m.id, category: '', kind: '', statement: m.metric, value: null, unit: '', status: 'missing', basis: m.howToGet ? 'Where to find it: ' + m.howToGet : '', source: {note: m.why}}})); });
@@ -874,7 +954,8 @@ function evidenceCSV(stories){
     ['Story ID', r => r.s.id], ['Story title', r => r.s.title], ['Story status', r => labelOf(STATUSES, r.s.status)], ['Evidence ID', r => r.e.id], ['Category', r => r.e.category ? labelOf(CATEGORIES, r.e.category) : ''],
     ['Type', r => r.e.status === 'missing' ? 'Data gap' : r.e.status === 'future' ? 'Expected, not documented' : (r.e.kind === 'numeric' ? 'Measurable outcome' : 'Qualitative evidence')], ['Statement', r => r.e.statement], ['Value', r => r.e.value], ['Unit', r => r.e.unit],
     ['Metric', r => r.e.metric], ['Impact area', r => r.e.status === 'missing' ? '' : labelOf(DOMAINS, domainOf(r.e))], ['Change', r => r.e.direction ? labelOf(DIRECTIONS, r.e.direction) : ''], ['Evidence level', r => r.e.level || ''],
-    ['Before ABG', r => r.e.before], ['After ABG', r => r.e.after], ['Period compared', r => r.e.timeframe], ['Observed by', r => r.e.observer ? labelOf(OBSERVERS, r.e.observer) : ''], ['Evidence label', r => r.e.status === 'missing' ? 'Missing data' : labelOf(EVIDENCE_LABELS, evidenceLabelId(r.e))],
+    ['Outcome category', r => r.e.status === 'missing' ? '' : outcomeCategoryLabel(r.e)], ['Initial condition', r => r.e.before], ['Current condition', r => r.e.after], ['Timeframe', r => r.e.timeframe], ['Supporting observation', r => r.e.observation], ['ABG program or activity', r => r.e.activity], ["ABG's possible contribution", r => r.e.contribution], ['Still unknown', r => r.e.openQuestion],
+    ['Observed by', r => r.e.observer ? labelOf(OBSERVERS, r.e.observer) : ''], ['Evidence type', r => r.e.status === 'missing' ? 'Missing data' : classLabel(r.e)],
     ['Verification status', r => r.e.status === 'missing' ? 'Not available' : labelOf(EVIDENCE_STATUS, r.e.status)], ['Source', r => r.e.basis], ['Source entry ID', r => r.e.source && r.e.source.entryId], ['Source passage', r => r.e.source && r.e.source.excerpt],
     ['Passage found in transcript', r => r.e.source && r.e.source.excerpt ? (r.e.source.found ? 'Yes' : 'No') : ''], ['Note', r => r.e.source && r.e.source.note],
   ], rows);
@@ -1055,7 +1136,7 @@ function teamCSV(stories, students){
   MILESTONES.forEach(mi => cols.push([mi.label, r => { const x = studentMilestones(r.p)[mi.id]; return x ? 'Yes (' + [x.observed ? 'Kyle observed' : '', x.reported ? 'reported to Kyle' : '', x.card ? 'metrics card' : ''].filter(Boolean).join(', ') + ')' : ''; }]));
   DOMAINS.filter(d => d.change || d.milestone).forEach(d => {
     /* sensitive outcomes: direction and source only, never the details */
-    cols.push([d.label + ' outcome', r => r.sc(r.ev.filter(e => e.status !== 'future' && domainOf(e) === d.id).map(e => d.sensitive ? (labelOf(DIRECTIONS, e.direction || 'unclear') + ' [' + labelOf(EVIDENCE_LABELS, evidenceLabelId(e)) + ']') : ((e.metric || e.statement) + (hasComparison(e) ? ': ' + e.before + ' to ' + e.after : (e.after ? ': ' + e.after : '')) + (e.direction && e.direction !== 'unclear' ? ' (' + labelOf(DIRECTIONS, e.direction).toLowerCase() + ')' : '') + ' [' + labelOf(EVIDENCE_LABELS, evidenceLabelId(e)) + ']')).join(' | '))]);
+    cols.push([d.label + ' outcome', r => r.sc(r.ev.filter(e => e.status !== 'future' && domainOf(e) === d.id).map(e => d.sensitive ? (labelOf(DIRECTIONS, e.direction || 'unclear') + ' [' + classLabel(e) + ']') : ((e.metric || e.statement) + (hasComparison(e) ? ': ' + e.before + ' to ' + e.after : (e.after ? ': ' + e.after : '')) + (e.direction && e.direction !== 'unclear' ? ' (' + labelOf(DIRECTIONS, e.direction).toLowerCase() + ')' : '') + ' [' + classLabel(e) + ']')).join(' | '))]);
   });
   cols.push(
     ['Themes', r => lbls(THEMES, r.all('themes'))], ['Impact categories', r => lbls(CATEGORIES, r.all('categories'))], ['Useful for', r => lbls(AUDIENCES, r.all('audiences'))],
@@ -1086,11 +1167,11 @@ function approvedMarkdown(stories, audience){
     const cmp = live.filter(hasComparison);
     if (cmp.length) {
       out.push('**Measurable outcomes**', '', '| Metric | Before ABG | After ABG | Evidence |', '|---|---|---|---|');
-      cmp.forEach(e => out.push('| ' + [swap(e.metric || e.statement), swap(e.before), swap(e.after), labelOf(EVIDENCE_LABELS, evidenceLabelId(e))].map(x => String(x || '').replace(/\|/g, '/')).join(' | ') + ' |'));
+      cmp.forEach(e => out.push('| ' + [swap(e.metric || e.statement), swap(e.before), swap(e.after), classLabel(e)].map(x => String(x || '').replace(/\|/g, '/')).join(' | ') + ' |'));
       out.push('');
     }
     const rest = live.filter(e => !hasComparison(e));
-    if (rest.length) { out.push('**Supporting evidence**'); rest.forEach(e => out.push(evLine(e, swap) + ' [' + labelOf(EVIDENCE_LABELS, evidenceLabelId(e)) + ']')); out.push(''); }
+    if (rest.length) { out.push('**Supporting evidence**'); rest.forEach(e => out.push(evLine(e, swap) + ' [' + classLabel(e) + ']')); out.push(''); }
     const q = (s.quotes || []).filter(x => x.approved);
     if (q.length) { out.push('**Approved quotes**'); q.forEach(x => out.push('> "' + swap(x.text) + '" (' + (x.speaker === s.alias ? (name || 'a student') : (x.speaker || 'unknown speaker')) + ', ' + labelOf(QUOTE_KINDS, x.kind).toLowerCase() + ')')); out.push(''); }
     if ((s.missingMetrics || []).length) { out.push('**Missing data**'); s.missingMetrics.forEach(m => out.push('- ' + swap(m.metric))); out.push(''); }
@@ -1123,12 +1204,12 @@ function storyMarkdown(s, entries){
   if ((s.takeaways || []).length) { out.push('**Key impact takeaways**'); s.takeaways.forEach(t => out.push('- ' + t)); out.push(''); }
   out.push('## B. Measurable outcomes', '');
   const msi = storyMilestoneItems(s);
-  if (msi.length) { out.push('**Key milestones**'); msi.forEach(x => out.push('- ' + x.label + (x.detail ? ': ' + x.detail : '') + ' [' + (x.e ? labelOf(EVIDENCE_LABELS, evidenceLabelId(x.e)) : labelOf(METRIC_STATUS, x.status)) + ']')); out.push(''); }
-  if (cmp.length) { out.push('| Metric | Before ABG | After ABG | Evidence |', '|---|---|---|---|'); cmp.forEach(e => out.push('| ' + [e.metric || e.statement, e.before, e.after, labelOf(EVIDENCE_LABELS, evidenceLabelId(e))].map(x => String(x || '').replace(/\|/g, '/')).join(' | ') + ' |')); out.push(''); }
+  if (msi.length) { out.push('**Key milestones**'); msi.forEach(x => out.push('- ' + x.label + (x.detail ? ': ' + x.detail : '') + ' [' + (x.e ? classLabel(x.e) : labelOf(METRIC_STATUS, x.status)) + ']')); out.push(''); }
+  if (cmp.length) { out.push('| Metric | Before ABG | After ABG | Evidence |', '|---|---|---|---|'); cmp.forEach(e => out.push('| ' + [e.metric || e.statement, e.before, e.after, classLabel(e)].map(x => String(x || '').replace(/\|/g, '/')).join(' | ') + ' |')); out.push(''); }
   else out.push('No before-and-after comparisons recorded yet.', '');
   if (isStudentStory(s)) { out.push('**Student metrics card**'); METRIC_FIELDS.forEach(f => { const m = metricVal(s, f.id); out.push('- ' + f.label + ': ' + (m ? fmtMetric(f, m.value) + ' [' + labelOf(METRIC_STATUS, m.status) + ']' : 'Unknown')); }); out.push(''); }
   out.push('## C. Supporting evidence', '');
-  live.forEach(e => out.push(withPassage(e) + ' [' + labelOf(EVIDENCE_LABELS, evidenceLabelId(e)) + '; ' + labelOf(DOMAINS, domainOf(e)) + (e.level ? '; level ' + e.level : '') + ']'));
+  live.forEach(e => out.push(withPassage(e) + ' [' + classLabel(e) + '; ' + labelOf(DOMAINS, domainOf(e)) + (e.level ? '; level ' + e.level : '') + ']'));
   if (live.length) out.push('');
   if ((s.quotes || []).length) { out.push('**Quotes**'); s.quotes.forEach(q => out.push('> "' + q.text + '" (' + (q.speaker || 'unknown') + ', ' + labelOf(QUOTE_KINDS, q.kind).toLowerCase() + (q.approved ? ', approved' : '') + ')')); out.push(''); }
   if ((s.materials || []).length) { out.push('**Photos, records and other materials**'); s.materials.forEach(m => out.push('- ' + labelOf(MATERIAL_TYPES, m.type) + ': ' + m.description)); out.push(''); }
@@ -1339,7 +1420,7 @@ function storyMilestoneItems(story){
   card('stillParticipating', 'participation', 'Still participating in ABG');
   return out;
 }
-function EvLabel({e}){ const l = byId(EVIDENCE_LABELS, evidenceLabelId(e)) || EVIDENCE_LABELS[2]; return html`<${Pill} tone=${l.tone}>${l.label}<//>`; }
+function EvLabel({e}){ const c = evidenceClass(e); const tone = c === 'planned' ? 'outline' : (byId(EVIDENCE_CLASSES, c) || {}).tone || 'neutral'; return html`<${Pill} tone=${tone}>${classLabel(e)}<//>`; }
 function OutcomeTable({rows}){
   if (!rows.length) return null;
   return html`<div className="otable" role="table" aria-label="Before and after outcomes">
@@ -1472,20 +1553,18 @@ function StoriesView({tab: initial}){
   </div>`;
 }
 /* ---------- Impact Insights overview ---------- */
+/* outcome categories used in Impact Insights, reports and story tags (renamable, recolorable and extendable in Settings) */
 const INSIGHT_OUTCOMES = [
-  {id:'confidence', label:'Increased confidence or creativity', short:'Confidence & Creativity', domains:['confidence', 'artistic'], color:'#2ED3B4', tone:'teal'},
-  {id:'academic', label:'Improved academic performance', short:'Academic Performance', domains:['academics'], color:'#A653C9', tone:'purple'},
-  {id:'community', label:'Positive community engagement', short:'Community Engagement', domains:['social', 'activities', 'risk', 'behavior'], color:'#F26B6B', tone:'coral'},
-  {id:'attendance', label:'Improved school attendance', short:'School Attendance', domains:['attendance'], color:'#2B9FE0', tone:'blue'},
-  {id:'higher_ed', label:'Pursued higher education', short:'Higher Education', domains:['higher_ed'], color:'#F59A3C', tone:'orange'},
-  {id:'graduation', label:'Graduated high school', short:'Graduated', domains:['graduation'], color:'#F4C542', tone:'yellow'},
-  {id:'engagement', label:'More motivated and engaged in school', short:'School Engagement', domains:['engagement'], color:'#4DB6AC', tone:'teal'},
-  {id:'career', label:'Career, job or internship', short:'Career', domains:['career', 'pathways'], color:'#5C6BC0', tone:'blue'},
-  {id:'returned', label:'Returned to ABG as a mentor or instructor', short:'Returned to ABG', domains:['returned', 'leadership_abg'], color:'#8D6E63', tone:'orange'},
-  {id:'arts', label:'Continued art or creative pursuits', short:'Continued Art', domains:['arts_continued'], color:'#EC6FB5', tone:'purple'},
+  {id:'academic', label:'Academic improvement', short:'Academic Improvement', domains:['academics'], color:'#A653C9', tone:'purple'},
+  {id:'attendance', label:'Attendance and engagement', short:'Attendance & Engagement', domains:['attendance', 'engagement'], color:'#2B9FE0', tone:'blue'},
+  {id:'confidence', label:'Confidence and creativity', short:'Confidence & Creativity', domains:['confidence', 'artistic', 'arts_continued'], color:'#2ED3B4', tone:'teal'},
+  {id:'belonging', label:'Belonging and emotional development', short:'Belonging', domains:['wellbeing', 'social'], color:'#EC6FB5', tone:'purple'},
+  {id:'leadership', label:'Leadership and community involvement', short:'Leadership & Community', domains:['leadership_abg', 'returned', 'mentorship', 'community_involvement', 'activities'], color:'#F26B6B', tone:'coral'},
+  {id:'graduation', label:'Graduation and higher education', short:'Graduation & Higher Ed', domains:['graduation', 'higher_ed'], color:'#F59A3C', tone:'orange'},
+  {id:'career', label:'Career aspirations and opportunities', short:'Career', domains:['career', 'pathways', 'aspirations'], color:'#5C6BC0', tone:'blue'},
 ];
 /* outcome categories: the defaults above, adjusted in Settings (renamed, recolored, hidden) plus custom ones */
-const OUTCOME_DESC = {confidence: 'More self-confidence, self-expression or creative risk-taking', academic: 'Higher grades or academic growth', community: 'Stronger friendships, leadership or community involvement', attendance: 'More consistent attendance or reduced absenteeism', higher_ed: 'Enrolled in or applied to college, trade school or training', graduation: 'Graduated high school or earned a GED', engagement: 'More motivated and participating in class or school life', career: 'A job, internship or clear career direction', returned: 'Came back to ABG as a mentor, instructor or volunteer', arts: 'Kept making art or pursuing creative work'};
+const OUTCOME_DESC = {academic: 'Better grades, passing classes or academic growth', attendance: 'More consistent attendance, motivation and participation in school', confidence: 'More confidence, self-expression, creative skill or continued art-making', belonging: 'Stronger relationships, a sense of belonging, or emotional growth and resilience', leadership: 'Leadership or mentoring roles, returning to ABG, or community involvement', graduation: 'Graduated high school, or enrolled in college or further education', career: 'Career interests, internships, jobs or creative work'};
 INSIGHT_OUTCOMES.forEach(o => { o.desc = OUTCOME_DESC[o.id] || ''; });
 const SWATCHES = ['#1F7A6D', '#2ED3B4', '#8B3F98', '#A653C9', '#2B9FE0', '#5C6BC0', '#F26B6B', '#EC6FB5', '#F59A3C', '#F4C542', '#8D6E63', '#607D8B'];
 let ACTIVE_OUTCOMES = INSIGHT_OUTCOMES;
@@ -1523,24 +1602,6 @@ function gradeBucket(s){
   return g <= 5 ? 'elem' : g <= 8 ? 'middle' : g <= 12 ? 'high' : 'post';
 }
 /* outcomes a story mentions: positive or unclear evidence in a matching area, plus metrics-card answers */
-function storyOutcomes(s){
-  const set = new Set();
-  (s.evidence || []).forEach(e => { if (e.status === 'future' || ['declined', 'same'].includes(e.direction)) return; const d = domainOf(e); ACTIVE_OUTCOMES.forEach(o => { if (o.domains.includes(d)) set.add(o.id); }); });
-  const v = id => { const m = metricVal(s, id); return m ? m.value : ''; };
-  if (v('grades') === 'Improved') set.add('academic');
-  if (v('schoolAttendance') === 'Improved') set.add('attendance');
-  if (v('graduated') === 'Yes') set.add('graduation');
-  if (v('returnedToAbg') === 'Yes') set.add('returned');
-  if (v('continuedArt') === 'Yes') set.add('arts');
-  if (/college|university|degree|vocational|trade/i.test(v('nextStep'))) set.add('higher_ed');
-  const customs = ACTIVE_OUTCOMES.filter(o => o.custom && o.words && o.words.length);
-  if (customs.length) {
-    const text = ' ' + norm([].concat((s.evidence || []).filter(e => e.status !== 'future' && !['declined', 'same'].includes(e.direction)).map(e => [e.metric, e.after, e.basis].join(' ')), s.takeaways || []).join(' ')) + ' ';
-    customs.forEach(o => { if (o.words.some(w => { const k = norm(w); return k && text.includes(' ' + k); })) set.add(o.id); });
-  }
-  const live = new Set(ACTIVE_OUTCOMES.map(o => o.id));
-  return new Set(Array.from(set).filter(id => live.has(id)));
-}
 function storyArt(id){
   let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   const pal = ['#2ED3B4', '#A653C9', '#F26B6B', '#2B9FE0', '#F59A3C', '#F4C542', '#EC6FB5', '#5C6BC0'];
@@ -1565,54 +1626,199 @@ function Donut({rows, total}){
     <text x="70" y="88" textAnchor="middle" className="donut-l">${total === 1 ? 'Student' : 'Students'}</text>
   </svg>`;
 }
-function InsightsOverview({list, filterBar}){
-  const {nav, storiesLoaded, settings} = useApp();
-  const profiles = useMemo(() => studentProfiles(list), [list]);
-  const outcomesN = list.reduce((t, s) => t + outcomeCount(s), 0);
-  const places = uniq(list.map(s => asStr(s.program)).concat(list.map(s => asStr(s.community))).map(x => x.toLowerCase())).length;
-  const outs = ACTIVE_OUTCOMES.map(o => ({o, n: list.filter(s => storyOutcomes(s).has(o.id)).length})).filter(x => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 6);
+/* ---------- Impact Insights: shared counting rules ----------
+   Students are deduplicated by student record (a story without one counts once under its first name).
+   An outcome record counts toward an area when it shows achievement, improvement, a mixed change or an
+   unspecified positive change. No-change and declines are shown separately; planned outcomes never count.
+   For each student and area, the strongest evidence type on file is used. */
+const POSITIVE = d => !['declined', 'same'].includes(d || 'unclear');
+function evidenceText(e){ return ' ' + norm([e.metric, e.statement, e.after, e.basis, e.observation].join(' ')) + ' '; }
+function evidenceCategories(e){
+  if (!e || e.status === 'future') return [];
+  const d = domainOf(e);
+  return ACTIVE_OUTCOMES.filter(o => o.domains.includes(d) || (o.custom && (o.words || []).some(w => { const k = norm(w); return k && evidenceText(e).includes(' ' + k); }))).map(o => o.id);
+}
+/* metrics-card answers that point to an area (Kyle's answer, with its source not recorded) */
+function cardCategories(s){
+  const v = id => { const m = metricVal(s, id); return m ? m.value : ''; };
+  const out = [];
+  const add = (cat, field, val) => out.push({cat, field, val, status: (metricVal(s, field) || {}).status});
+  if (v('grades') === 'Improved') add('academic', 'grades', 'Grades improved');
+  if (v('schoolAttendance') === 'Improved') add('attendance', 'schoolAttendance', 'School attendance improved');
+  if (v('graduated') === 'Yes') add('graduation', 'graduated', 'Graduated high school');
+  if (v('firstGenCollege') === 'Yes') add('graduation', 'firstGenCollege', 'First in their family to attend college');
+  if (/college|university|degree|vocational|trade/i.test(v('nextStep'))) add('graduation', 'nextStep', v('nextStep'));
+  if (v('returnedToAbg') === 'Yes') add('leadership', 'returnedToAbg', 'Came back to ABG');
+  if (v('continuedArt') === 'Yes') add('confidence', 'continuedArt', 'Kept making art');
+  if (/\bjob\b|employ|intern|career/i.test(v('currentStatus'))) add('career', 'currentStatus', v('currentStatus'));
+  return out;
+}
+function storyOutcomes(s){
+  const set = new Set();
+  (s.evidence || []).forEach(e => { if (POSITIVE(e.direction)) evidenceCategories(e).forEach(id => set.add(id)); });
+  cardCategories(s).forEach(c => set.add(c.cat));
+  const customs = ACTIVE_OUTCOMES.filter(o => o.custom && o.words && o.words.length);
+  if (customs.length) { const t = ' ' + norm((s.takeaways || []).join(' ')) + ' '; customs.forEach(o => { if (o.words.some(w => { const k = norm(w); return k && t.includes(' ' + k); })) set.add(o.id); }); }
+  const live = new Set(ACTIVE_OUTCOMES.map(o => o.id));
+  return new Set(Array.from(set).filter(id => live.has(id)));
+}
+const bestClass = list => list.reduce((b, c) => (CLASS_RANK[c] || 0) > (CLASS_RANK[b] || 0) ? c : b, 'unconfirmed');
+function isComplete(e){ return !!(asStr(e.before) && asStr(e.after) && evidenceClass(e) !== 'unconfirmed'); }
+function insightIndex(list){
+  const profiles = studentProfiles(list);
+  const students = profiles.map(p => {
+    const cats = {};
+    const get = id => cats[id] || (cats[id] = {pos: [], neg: [], card: []});
+    p.stories.forEach(s => {
+      (s.evidence || []).forEach(e => evidenceCategories(e).forEach(id => (POSITIVE(e.direction) ? get(id).pos : get(id).neg).push({s, e})));
+      cardCategories(s).forEach(c => get(c.cat).card.push({s, c}));
+    });
+    Object.values(cats).forEach(c => { c.counted = c.pos.length > 0 || c.card.length > 0; c.cls = c.pos.length ? bestClass(c.pos.map(x => evidenceClass(x.e))) : (c.card.some(x => x.c.status === 'verified') ? 'verified' : 'unconfirmed'); });
+    return {p, cats, any: Object.values(cats).some(c => c.counted), ms: studentMilestones(p)};
+  });
+  const records = [];
+  list.forEach(s => (s.evidence || []).forEach(e => records.push({s, e})));
+  const current = records.filter(r => r.e.status !== 'future');
+  return {profiles, students, N: profiles.length, records: current, planned: records.filter(r => r.e.status === 'future')};
+}
+/* the stories behind any figure */
+function BehindSheet({title, rule, rows, close}){
+  const {nav} = useApp();
+  return html`<div className="view behind" style=${{gap: '12px'}}>
+    <${SheetHead} title=${title} close=${close} />
+    ${rule ? html`<p className="small muted">${rule}</p>` : null}
+    ${rows.length === 0 ? html`<p className="empty-note">No stories in this view.</p>` : rows.map(r => html`<div className="behind-row" key=${r.story.id}>
+      <button className="behind-head" onClick=${() => { close(); nav('story', {id: r.story.id}); }}>
+        <span><span className="behind-name"><strong>${r.story.alias || 'General story'}</strong>${r.story.demo ? html`<${DemoPill} />` : null}</span><small className="muted">${r.story.title}</small></span><${Icon} name="chev" size=${18} />
+      </button>
+      ${(r.lines || []).length ? html`<ul className="behind-lines">${r.lines.map((l, i) => html`<li key=${i}><span>${l.text}</span>${l.e ? html`<${EvLabel} e=${l.e} />` : l.tag ? html`<${Pill} tone="outline">${l.tag}<//>` : null}</li>`)}</ul>` : null}
+    </div>`)}
+  </div>`;
+}
+function groupRows(items){
+  const m = new Map();
+  items.forEach(x => { if (!m.has(x.s.id)) m.set(x.s.id, {story: x.s, lines: []}); if (x.line) m.get(x.s.id).lines.push(x.line); });
+  return Array.from(m.values());
+}
+const insLine = e => ({text: e.statement + (hasComparison(e) ? ' (' + e.before + ' → ' + e.after + ')' : ''), e});
+
+function InsightsOverview({list, filterBar, period}){
+  const {nav, storiesLoaded, settings, openSheet} = useApp();
+  const ix = useMemo(() => insightIndex(list), [list, settings.outcomes]);
+  const N = ix.N;
+  const show = (title, rule, rows) => openSheet(close => html`<${BehindSheet} title=${title} rule=${rule} rows=${rows} close=${close} />`);
+  const of = (n, d) => d ? n + ' of ' + d : '0';
+  const pct = (n, d) => d ? Math.round(100 * n / d) + '%' : '–';
+  const studentStories = st => st.p.stories;
+  /* overview */
+  const withOutcomes = ix.students.filter(st => st.any);
+  const complete = ix.records.filter(r => isComplete(r.e));
   const byProgram = {};
-  profiles.forEach(p => { const k = asStr(p.latest.program) || 'Other / Not specified'; byProgram[k] = (byProgram[k] || 0) + 1; });
-  const progRows = Object.entries(byProgram).filter(([k]) => k !== 'Other / Not specified').sort((a, b) => b[1] - a[1]);
-  let donut = progRows.slice(0, 4).map(([label, n], i) => ({label, n, color: programColor(settings, label, i)}));
-  const other = progRows.slice(4).reduce((t, r) => t + r[1], 0) + (byProgram['Other / Not specified'] || 0);
-  if (other) donut.push({label: 'Other / Not specified', n: other, color: '#B9B2A6'});
+  ix.profiles.forEach(p => { const k = asStr(p.latest.program) || 'Other / Not specified'; (byProgram[k] = byProgram[k] || []).push(p); });
+  const progRows = Object.entries(byProgram).filter(([k]) => k !== 'Other / Not specified').sort((a, b) => b[1].length - a[1].length);
+  const donut = progRows.slice(0, 4).map(([label, ps], i) => ({label, n: ps.length, ps, color: programColor(settings, label, i)}));
+  const otherPs = [].concat.apply([], progRows.slice(4).map(r => r[1])).concat(byProgram['Other / Not specified'] || []);
+  if (otherPs.length) donut.push({label: 'Other / Not specified', n: otherPs.length, ps: otherPs, color: '#B9B2A6'});
+  const EDU = [
+    {id: 'graduated', label: 'Graduated high school'}, {id: 'higher_ed', label: 'Went on to college or further education'}, {id: 'first_gen', label: 'First in their family to attend college'},
+    {id: 'school_engagement', label: 'Improved attendance, grades or engagement'}, {id: 'career', label: 'Career, job or internship'},
+  ];
+  const stillInSchool = ix.students.filter(st => (st.p.metrics.graduated || {}).value === 'Not yet (still in school)');
+  /* outcome analysis */
+  const outcomeRows = ACTIVE_OUTCOMES.map(o => {
+    const hit = ix.students.filter(st => st.cats[o.id] && st.cats[o.id].counted);
+    const neg = ix.students.filter(st => st.cats[o.id] && !st.cats[o.id].counted && st.cats[o.id].neg.length);
+    const byCls = {}; hit.forEach(st => { const c = st.cats[o.id].cls; byCls[c] = (byCls[c] || 0) + 1; });
+    return {o, hit, neg, byCls};
+  });
+  const openOutcome = r => show(r.o.label, 'Students counted: ' + of(r.hit.length, N) + ' documented in this view. A student counts once, using their strongest evidence. ' + (r.neg.length ? r.neg.length + ' more had no change or a decline in this area (listed last).' : ''),
+    groupRows([].concat.apply([], r.hit.map(st => st.cats[r.o.id].pos.map(x => ({s: x.s, line: insLine(x.e)})).concat(st.cats[r.o.id].card.map(x => ({s: x.s, line: {text: (byId(METRIC_FIELDS, x.c.field) || {}).short + ': ' + x.c.val, tag: 'Metrics card'}})))))
+      .concat([].concat.apply([], r.neg.map(st => st.cats[r.o.id].neg.map(x => ({s: x.s, line: insLine(x.e)})))))));
+  /* evidence quality */
+  const clsCount = {}; ix.records.forEach(r => { const c = evidenceClass(r.e); clsCount[c] = (clsCount[c] || 0) + 1; });
+  const R = ix.records.length;
+  const missing = list.filter(s => (s.evidence || []).some(e => e.status !== 'future' && !isComplete(e)) || (s.missingMetrics || []).length);
+  const follow = list.filter(s => s.status === 'needs_verification' || (s.followUps || []).some(f => f.status === 'open') || (s.evidence || []).some(e => asStr(e.openQuestion)));
+  const stat = (icon, tone, value, label, sub, onClick) => html`<button className="stat-card ins-stat" onClick=${onClick}><span className=${'stat-ic tone-' + tone}><${Icon} name=${icon} size=${26} /></span><span className="stat-text"><b className="tnum">${storiesLoaded ? value : '–'}</b><span className="stat-label">${label}</span><small className="muted">${sub}</small></span></button>`;
   const featured = list.slice().sort((a, b) => ((b.status === 'approved') - (a.status === 'approved')) || (outcomeCount(b) - outcomeCount(a)) || (b.createdAt || '').localeCompare(a.createdAt || '')).filter(isStudentStory).slice(0, 3);
-  const stat = (icon, tone, value, label, sub) => html`<div className="stat-card ins-stat"><span className=${'stat-ic tone-' + tone}><${Icon} name=${icon} size=${26} /></span><span className="stat-text"><b className="tnum">${storiesLoaded ? value : '–'}</b><span className="stat-label">${label}</span><small className="muted">${sub}</small></span></div>`;
+
   return html`<div className="view ins-body">
-    <div className="ins-stats">
-      ${stat('users', 'teal', profiles.length, 'Students featured', 'Unique first names')}
-      ${stat('openbook', 'purple', list.length, 'Stories captured', 'Journal entries')}
-      ${stat('bars', 'orange', outcomesN, 'Total outcomes', 'Reported across stories')}
-      ${stat('cap', 'blue', places, 'Schools & programs', 'Represented')}
-    </div>
-    <div className="ins-charts">
-      <section className="card ins-card">
-        <div><h2>Most common reported outcomes</h2><p className="small muted">Number of journal entries mentioning each outcome</p></div>
-        ${outs.length === 0 ? html`<p className="empty-note">No outcomes recorded in this view yet.</p>` : html`<div className="obars">${outs.map(x => html`<div className="obar" key=${x.o.id}>
-          <span className="obar-label">${x.o.label}</span>
-          <span className="obar-track"><span className="obar-fill" style=${{width: Math.max(4, Math.round(100 * x.n / Math.max(1, list.length))) + '%', background: x.o.color}}></span></span>
-          <span className="obar-n tnum">${x.n}</span>
-        </div>`)}</div>`}
-        <p className="tiny muted">Counts of stories in the journal, not rates for all ABG students.</p>
-      </section>
-      <section className="card ins-card">
-        <div><h2>Students by program</h2><p className="small muted">Unique students, by the program in their latest story</p></div>
-        ${profiles.length === 0 ? html`<p className="empty-note">No students in this view yet.</p>` : html`<div className="donut-wrap">
-          <${Donut} rows=${donut} total=${profiles.length} />
-          <ul className="donut-legend">${donut.map(r => html`<li key=${r.label}><span className="dot-sw" style=${{background: r.color}}></span><span className="dl-label">${r.label}</span><span className="dl-n tnum">${r.n} <span className="muted">(${Math.round(100 * r.n / profiles.length)}%)</span></span></li>`)}</ul>
-        </div>`}
-      </section>
-    </div>
     ${filterBar}
+    <p className="tiny muted ins-hint">Every number below is counted from the stories in this view. Select any number to see the stories behind it.</p>
+
+    <section className="ins-section" aria-labelledby="h-overview">
+      <h2 id="h-overview" className="ins-h">Impact overview</h2>
+      <div className="ins-stats">
+        ${stat('users', 'teal', N, 'Students documented', 'Unique students, ' + period, () => show('Students documented', N + ' unique students in this view, one per student record.', ix.profiles.map(p => ({story: p.latest, lines: p.stories.length > 1 ? [{text: p.stories.length + ' stories about this student'}] : []}))))}
+        ${stat('check', 'purple', of(withOutcomes.length, N), 'Students with documented outcomes', pct(withOutcomes.length, N) + ' of students documented', () => show('Students with documented outcomes', 'At least one counted outcome in any area (no-change, declines and planned outcomes are not counted).', withOutcomes.map(st => ({story: st.p.latest, lines: Object.keys(st.cats).filter(k => st.cats[k].counted).map(k => ({text: labelOf(ACTIVE_OUTCOMES, k), tag: (byId(EVIDENCE_CLASSES, st.cats[k].cls) || {}).short}))}))))}
+        ${stat('openbook', 'orange', list.length, 'Stories captured', R + ' outcome records', () => show('Stories captured', list.length + ' stories recorded ' + period + '.', list.map(s => ({story: s, lines: []}))))}
+        ${stat('bars', 'blue', pct(complete.length, R), 'Evidence completeness', of(complete.length, R) + ' outcome records complete', () => show('Evidence completeness', 'An outcome record is complete when it has an initial condition, a current condition, and a known source (staff-observed, reported or verified).', groupRows(ix.records.filter(r => !isComplete(r.e)).map(r => ({s: r.s, line: {text: 'Missing ' + [!asStr(r.e.before) ? 'initial condition' : '', !asStr(r.e.after) ? 'current condition' : '', evidenceClass(r.e) === 'unconfirmed' ? 'source' : ''].filter(Boolean).join(', ') + ': ' + r.e.statement}})))))}
+      </div>
+      <div className="ins-charts">
+        <section className="card ins-card">
+          <div><h3>Student participation by program</h3><p className="small muted">Unique students, by the program in their latest story</p></div>
+          ${N === 0 ? html`<p className="empty-note">No students in this view yet.</p>` : html`<div className="donut-wrap">
+            <${Donut} rows=${donut} total=${N} />
+            <ul className="donut-legend">${donut.map(r => html`<li key=${r.label}><button className="legend-btn" onClick=${() => show(r.label, r.n + ' of ' + N + ' students, by the program in their latest story.', r.ps.map(p => ({story: p.latest, lines: []})))}><span className="dot-sw" style=${{background: r.color}}></span><span className="dl-label">${r.label}</span><span className="dl-n tnum">${r.n} <span className="muted">(${pct(r.n, N)})</span></span></button></li>`)}</ul>
+          </div>`}
+        </section>
+        <section className="card ins-card">
+          <div><h3>Educational milestones</h3><p className="small muted">Students who reached each milestone, of ${N} documented</p></div>
+          <ul className="ms-list">${EDU.map(m => { const hit = ix.students.filter(st => st.ms[m.id]); return html`<li key=${m.id}><button className="ms-btn" onClick=${() => show(m.label, of(hit.length, N) + ' students documented.', hit.map(st => ({story: st.p.latest, lines: []})))}><span>${m.label}</span><b className="tnum">${hit.length}</b></button></li>`; })}
+            <li><button className="ms-btn" onClick=${() => show('Still in school', 'Metrics card: graduated high school "Not yet (still in school)".', stillInSchool.map(st => ({story: st.p.latest, lines: []})))}><span>Still in school</span><b className="tnum">${stillInSchool.length}</b></button></li>
+          </ul>
+        </section>
+      </div>
+    </section>
+
+    <section className="ins-section" aria-labelledby="h-outcomes">
+      <h2 id="h-outcomes" className="ins-h">Outcome analysis</h2>
+      <section className="card ins-card">
+        <div><h3>Students with documented outcomes, by area</h3><p className="small muted">Each bar is students, out of ${N} documented. Colors show the strongest evidence for each student.</p></div>
+        ${N === 0 ? html`<p className="empty-note">No students in this view yet.</p>` : html`<div className="oa-list">${outcomeRows.map(r => html`<button className="oa-row" key=${r.o.id} onClick=${() => openOutcome(r)}>
+          <span className="oa-label"><span className="dot-sw" style=${{background: r.o.color}}></span>${r.o.label}</span>
+          <span className="oa-track" aria-hidden="true">${EVIDENCE_CLASSES.map(c => r.byCls[c.id] ? html`<span key=${c.id} className="oa-seg" style=${{width: (100 * r.byCls[c.id] / N) + '%', background: c.color}}></span>` : null)}</span>
+          <span className="oa-n tnum"><span><b>${r.hit.length}</b> of ${N}</span>${r.neg.length ? html`<small className="muted">${r.neg.length} no change</small>` : null}</span>
+        </button>`)}</div>
+        <div className="cls-legend small">${EVIDENCE_CLASSES.map(c => html`<span key=${c.id}><span className="dot-sw" style=${{background: c.color}}></span>${c.label}</span>`)}</div>`}
+      </section>
+    </section>
+
+    <section className="ins-section" aria-labelledby="h-quality">
+      <h2 id="h-quality" className="ins-h">Evidence quality</h2>
+      <div className="ins-charts">
+        <section className="card ins-card">
+          <div><h3>Outcome records by evidence type</h3><p className="small muted">${R} outcome records. ${ix.planned.length ? ix.planned.length + ' planned outcomes are tracked separately and never counted.' : ''}</p></div>
+          ${R ? html`<div className="cls-bar" aria-hidden="true">${EVIDENCE_CLASSES.map(c => clsCount[c.id] ? html`<span key=${c.id} style=${{width: (100 * clsCount[c.id] / R) + '%', background: c.color}}></span>` : null)}</div>` : null}
+          <ul className="cls-list">${EVIDENCE_CLASSES.map(c => html`<li key=${c.id}><button className="ms-btn" onClick=${() => show(c.label, (clsCount[c.id] || 0) + ' of ' + R + ' outcome records.', groupRows(ix.records.filter(r => evidenceClass(r.e) === c.id).map(r => ({s: r.s, line: insLine(r.e)}))))}><span><span className="dot-sw" style=${{background: c.color}}></span>${c.label}</span><b className="tnum">${clsCount[c.id] || 0}<small className="muted"> ${pct(clsCount[c.id] || 0, R)}</small></b></button></li>`)}</ul>
+        </section>
+        <section className="card ins-card">
+          <div><h3>Records needing attention</h3><p className="small muted">Stories in this view</p></div>
+          <ul className="cls-list">
+            <li><button className="ms-btn" onClick=${() => show('Records with missing evidence', 'Stories with an outcome missing its initial condition, current condition or source, or with data gaps listed.', missing.map(s => ({story: s, lines: (s.evidence || []).filter(e => e.status !== 'future' && !isComplete(e)).map(e => ({text: e.statement, e})).concat((s.missingMetrics || []).map(m => ({text: 'Data gap: ' + m.metric})))})))}><span>Records with missing evidence</span><b className="tnum">${of(missing.length, list.length)}</b></button></li>
+            <li><button className="ms-btn" onClick=${() => show('Records requiring follow-up', 'Stories marked needs verification, with open questions or reminders, or with an outcome that has an open question.', follow.map(s => ({story: s, lines: (s.followUps || []).filter(f => f.status === 'open').map(f => ({text: f.question + (f.due ? ' (due ' + fmtDay(f.due) + ')' : ''), tag: f.kind === 'task' ? 'Reminder' : 'Question'})).concat((s.evidence || []).filter(e => asStr(e.openQuestion)).map(e => ({text: e.openQuestion, tag: 'Still unknown'})))})))}><span>Records requiring follow-up</span><b className="tnum">${of(follow.length, list.length)}</b></button></li>
+          </ul>
+        </section>
+      </div>
+    </section>
+
     <section className="card ins-card">
-      <div className="sec-head"><div><h2>Featured Stories</h2><p className="small muted">Real student experiences that highlight the impact of ABG's work.</p></div><button className="btn btn-quiet btn-sm view-all" onClick=${() => nav('library')}>View all stories <span aria-hidden="true">→</span></button></div>
+      <div className="sec-head"><div><h2>Stories behind the numbers</h2><p className="small muted">Featured student stories from this view. Approved stories come first.</p></div><button className="btn btn-quiet btn-sm view-all" onClick=${() => nav('library')}>View all stories <span aria-hidden="true">→</span></button></div>
       ${featured.length === 0 ? html`<p className="empty-note">No student stories in this view yet.</p>` : html`<div className="fs-grid">${featured.map(st => { const ov = st.overview || {}; const tags = ACTIVE_OUTCOMES.filter(o => storyOutcomes(st).has(o.id)).slice(0, 2); return html`<button className="fs-card" key=${st.id} onClick=${() => nav('story', {id: st.id})}>
         ${storyArt(st.id)}
         <span className="fs-main"><strong>${st.alias || st.title}${st.demo ? html` <${DemoPill} />` : null}</strong><small className="muted">${[st.program, ov.ageOrGrade || ov.demographics].filter(Boolean).join(' · ')}</small><span className="fs-sum">${st.summary || st.title}</span></span>
         ${tags.length ? html`<span className="fs-tags">${tags.map(o => { const pp = outcomePill(o); return html`<span className=${pp.className} style=${pp.style} key=${o.id}>${o.short}</span>`; })}</span>` : null}
       </button>`; })}</div>`}
     </section>
+
+    <details className="sec ins-rules"><summary><span>How these numbers are counted</span><${Icon} name="chev" size=${18} /></summary><div className="sec-body small">
+      <p><strong>Reporting period:</strong> stories first recorded ${period}. Filters narrow it further.</p>
+      <p><strong>Students:</strong> each student is counted once, by student record. A story without a student record counts once under its first name. General stories (not about one student) count as stories but not students.</p>
+      <p><strong>Denominators:</strong> student figures are out of the ${N} students documented in this view; evidence figures are out of the ${R} outcome records in this view.</p>
+      <p><strong>Outcomes:</strong> a student counts once per area when at least one outcome record shows achievement, improvement, or a mixed or unspecified positive change, or when their metrics card says so (source not recorded, so it counts as unconfirmed). No-change and declines are shown separately. Planned or hoped-for outcomes are never counted.</p>
+      <p><strong>Evidence types:</strong> verified by documentation (only when staff checked a document), directly observed by staff, reported by the student or a third party, or unconfirmed or inferred. Kyle's confident account alone is never treated as verified.</p>
+      <p><strong>Not a representative sample:</strong> these are the students ABG staff chose to record. The figures describe them, not all ABG students, and are not rates for ABG as a whole.</p>
+    </div></details>
   </div>`;
 }
 function DashboardView({tab: initial}){
@@ -1629,6 +1835,7 @@ function DashboardView({tab: initial}){
   </div>`;
   const days = (byId(RANGES, range) || {}).days || 0;
   const since = days ? new Date(Date.now() - days * 864e5).toISOString() : '';
+  const period = since ? 'from ' + fmtDate(since) + ' to today' : 'at any time';
   const inRange = stories.filter(s => !since || (s.createdAt || '') >= since);
   const list = inRange.filter(s => (!f.program || s.program === f.program) && (!f.school || s.community === f.school) && (!f.grade || gradeBucket(s) === f.grade) && (!f.outcome || storyOutcomes(s).has(f.outcome)));
   const programs = uniq(stories.map(s => asStr(s.program))).sort();
@@ -1637,14 +1844,14 @@ function DashboardView({tab: initial}){
   const sel = (k, label, opts) => html`<label className="ins-filter"><span className="sr-only">${label}</span><select className="select" aria-label=${label} value=${f[k]} onChange=${e => setFilter(k, e.target.value)}><option value="">${label}</option>${opts.map(o => html`<option key=${o[0]} value=${o[0]}>${o[1]}</option>`)}</select></label>`;
   return html`<div className="view insights2">
     <div className="ins-top">
-      <header className="ins-hello"><p className="eyebrow">Impact Insights</p><h1>Stories that show what's possible.</h1><p className="lede">Explore key themes and outcomes from your journal entries. These insights highlight the real experiences of ABG students and help demonstrate the impact of our programs.</p></header>
+      <header className="ins-hello"><p className="eyebrow">Impact Insights</p><h1>Stories that show what's possible.</h1><p className="lede">Explore the outcomes in your journal entries, how well each one is supported, and the student stories behind every number.</p></header>
       <div className="ins-controls">
         <label className="range-pick"><${Icon} name="calendar" size=${18} /><select aria-label="Date range" value=${range} onChange=${e => setRange(e.target.value)}>${RANGES.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select></label>
         <button className="btn btn-ghost btn-sm" onClick=${() => setTab('reports')}><${Icon} name="file" size=${16} /> Reports and exports</button>
       </div>
     </div>
     ${demoN > 0 ? html`<p className="notice small demo-note"><${DemoPill} /> <span>Includes ${demoN} fictional demo stor${demoN === 1 ? 'y' : 'ies'} so you can see how Insights work. They're left out of reports and exports. <button className="link-btn" onClick=${() => nav('settings')}>Manage demo stories</button></span></p>` : null}
-    <${InsightsOverview} list=${list} filterBar=${html`<div className="filter-bar">
+    <${InsightsOverview} list=${list} period=${period} filterBar=${html`<div className="filter-bar">
       <span className="filter-label">Filter by:</span>
       ${sel('program', 'Program', programs.map(p => [p, p]))}
       ${sel('grade', 'Grade level', GRADE_BUCKETS.map(g => [g.id, g.label]))}
@@ -1652,7 +1859,7 @@ function DashboardView({tab: initial}){
       ${sel('outcome', 'Outcome', ACTIVE_OUTCOMES.map(o => [o.id, o.label]))}
       ${active ? html`<button className="btn btn-quiet btn-sm" onClick=${() => setF({program: '', grade: '', school: '', outcome: ''})}>Clear</button>` : null}
     </div>`} />
-    <details className="sec ins-more"><summary><span>Evidence details: milestones, impact by category, evidence quality<span className="count">All stories</span></span><${Icon} name="chev" size=${18} /></summary>
+    <details className="sec ins-more"><summary><span>More evidence details: milestones, metrics card, themes<span className="count">All stories</span></span><${Icon} name="chev" size=${18} /></summary>
       <div className="sec-body"><${InsightsView} embedded=${true} /></div>
     </details>
   </div>`;
@@ -2144,8 +2351,8 @@ function InterviewView({params}){
       const dup = nt.find(t => questionOverlap(t.q, q) >= 0.7);
       if (dup) { try { const r2 = await ask(dup.q); const q2 = asStr(r2 && r2.question); if (q2 && !nt.some(t => questionOverlap(t.q, q2) >= 0.7)) { r = r2; q = q2; } } catch (e2) { if (e2 && e2.code === 'cancelled') throw e2; } }
       if (r.notes && typeof r.notes === 'object') setNotes(r.notes);
-      setCurrent({q, kind: 'followup', category: asStr(r.target).slice(0, 40), why: asStr(r.why)});
-      if (r.enough === true && nt.filter(t => t.kind === 'followup').length >= 2) setTarget(t => Math.min(t, nt.filter(x => x.kind === 'followup').length + 1));
+      const stg = parseInt(asStr(r.stage), 10); setCurrent({q, kind: 'followup', category: asStr(r.target).slice(0, 40), why: asStr(r.why), stage: [1, 2, 3, 4, 5].includes(stg) ? stg : null});
+      if (r.enough === true && nt.filter(t => t.kind === 'followup').length >= (mode === 'update' ? 2 : 3)) setTarget(t => Math.min(t, nt.filter(x => x.kind === 'followup').length + 1));
     } catch (e) {
       if (e && e.code === 'cancelled') return;
       setErr(aiErrorMessage(e).replace('The analysis', 'The next question'));
@@ -2248,7 +2455,7 @@ function InterviewView({params}){
   if (busy === 'analyze') return html`<div className="view"><${FocusHeader} title=${'Interview: ' + name} onBack=${() => aCtl.current && aCtl.current.abort()} /><${Analyzing} title=${'Claude is writing ' + name + "'s story"} onStop=${() => aCtl.current && aCtl.current.abort()} /></div>`;
 
   const answeredCount = turns.filter(t => t.status === 'answered').length;
-  const stageLabel = !current ? '' : current.kind === 'opening' ? (mode === 'update' ? 'Story update' : 'Opening story') : current.kind === 'closing' ? 'Closing question' : 'Follow-up ' + (asked + 1) + ' of about ' + Math.max(target, asked + 1);
+  const stageLabel = !current ? '' : current.kind === 'opening' ? (mode === 'update' ? 'Story update' : 'Opening story') : current.kind === 'closing' ? 'Closing question' : 'Follow-up ' + (asked + 1) + ' of about ' + Math.max(target, asked + 1) + (current.stage ? ' · ' + labelOf(INTERVIEW_STAGES, current.stage) : '');
   return html`<div className="view interview">
     <${FocusHeader} title=${(mode === 'update' ? 'Story update: ' : 'Interview: ') + name} sub=${mode === 'update' ? story.title : 'Step 2 of 3: Interview'} onBack=${back} />
     ${restored ? html`<p className="small muted">Restored your unsaved interview from this device. <button className="btn btn-quiet btn-sm" onClick=${startOver}>Start over</button></p>` : null}
@@ -2337,7 +2544,7 @@ function EvidenceEdit({ev, onChange, onRemove, onShow}){
   return html`<div className=${'ev-edit' + (ev._new ? ' is-new' : '')}>
     <div className="ev-edit-top">
       <${EvLabel} e=${ev} />
-      <select className="select select-sm" aria-label="Verification status" title="Verification status" value=${ev.status} onChange=${e => onChange({status: e.target.value})}>${EVIDENCE_STATUS.map(s => html`<option key=${s.id} value=${s.id}>${s.label}</option>`)}</select>
+      <select className="select select-sm" aria-label="Evidence type" title="Evidence type" value=${evidenceClass(ev) === 'planned' ? '' : evidenceClass(ev)} onChange=${e => onChange(classPatch(ev, e.target.value))}>${evidenceClass(ev) === 'planned' ? html`<option value="">Expected, not yet happened</option>` : null}${EVIDENCE_CLASSES.map(c => html`<option key=${c.id} value=${c.id}>${c.label}</option>`)}</select>
       <button type="button" className="icon-btn" aria-label="Remove evidence" onClick=${onRemove}><${Icon} name="trash" size=${18} /></button>
     </div>
     <div className="row">
@@ -2352,15 +2559,24 @@ function EvidenceEdit({ev, onChange, onRemove, onShow}){
     ${numeric ? html`<div className="row">
       <${Field} label="Number, if one was given"><input className="input" inputMode="decimal" value=${ev.value == null ? '' : ev.value} onChange=${e => onChange({value: e.target.value})} /><//>
       <${Field} label="Unit"><input className="input" placeholder="percent, sessions, years" value=${ev.unit || ''} onChange=${e => onChange({unit: e.target.value})} /><//>
+    </div>` : null}
+    <div className="row">
+      <${Field} label="Initial condition"><input className="input" placeholder="Not recorded" value=${ev.before || ''} onChange=${e => onChange({before: e.target.value})} /><//>
+      <${Field} label="Current condition"><input className="input" placeholder="Not recorded" value=${ev.after || ''} onChange=${e => onChange({after: e.target.value})} /><//>
+      <${Field} label="Timeframe"><input className="input" placeholder="e.g. 2024 to 2025" value=${ev.timeframe || ''} onChange=${e => onChange({timeframe: e.target.value})} /><//>
     </div>
     <div className="row">
-      <${Field} label="Before"><input className="input" placeholder="Unknown" value=${ev.before || ''} onChange=${e => onChange({before: e.target.value})} /><//>
-      <${Field} label="After"><input className="input" placeholder="Unknown" value=${ev.after || ''} onChange=${e => onChange({after: e.target.value})} /><//>
-      <${Field} label="Period compared"><input className="input" placeholder="e.g. 2024 to 2025" value=${ev.timeframe || ''} onChange=${e => onChange({timeframe: e.target.value})} /><//>
-    </div>` : null}
+      <${Field} label="Supporting observation"><input className="input" placeholder="What was seen or heard" value=${ev.observation || ''} onChange=${e => onChange({observation: e.target.value})} /><//>
+      <${Field} label="ABG program or activity"><input className="input" placeholder="Not recorded" value=${ev.activity || ''} onChange=${e => onChange({activity: e.target.value})} /><//>
+    </div>
+    <div className="row">
+      <${Field} label="ABG's possible contribution"><input className="input" placeholder="Only what Kyle said" value=${ev.contribution || ''} onChange=${e => onChange({contribution: e.target.value})} /><//>
+      <${Field} label="Still unknown or to follow up"><input className="input" placeholder="None" value=${ev.openQuestion || ''} onChange=${e => onChange({openQuestion: e.target.value})} /><//>
+    </div>
     <div className="row">
       <${Field} label="Observed or reported by"><select className="select" value=${ev.observer || ''} onChange=${e => onChange({observer: e.target.value})}><option value="">Not recorded</option>${OBSERVERS.map(o => html`<option key=${o.id} value=${o.id}>${o.label}</option>`)}</select><//>
       <${Field} label="Source" hint="How it's known"><input className="input" placeholder="e.g. Kyle observed directly; teacher told Kyle" value=${ev.basis || ''} onChange=${e => onChange({basis: e.target.value})} /><//>
+      <${Field} label="Detail"><select className="select" value=${ev.status} onChange=${e => onChange({status: e.target.value})}>${EVIDENCE_STATUS.map(x => html`<option key=${x.id} value=${x.id}>${x.label}</option>`)}</select><//>
     </div>
     ${src.excerpt
       ? html`<div className=${'excerpt' + (src.found ? '' : ' missing')}><span>“${src.excerpt}”</span>${!src.found ? html`<span className="warn-note"> Not found word for word in the transcript. Check it before relying on it.</span>` : null}${onShow ? html` <button type="button" className="btn btn-quiet btn-sm" onClick=${onShow}>Show in transcript</button>` : null}</div>`
@@ -2563,6 +2779,50 @@ function StoryEditor({draft, setDraft, items, mode}){
     <//>
   </div>`;
 }
+/* the short review Kyle sees before saving: fix the story, drop outcomes that aren't supported, confirm how each is known */
+const SOURCE_CHOICES = [
+  {id: 'observed', label: 'I saw it myself'},
+  {id: 'reported', label: 'The student or someone else told me'},
+  {id: 'verified', label: 'Confirmed by a document'},
+  {id: 'unconfirmed', label: 'Not sure, or my impression'},
+];
+function QuickReview({draft, setDraft, mode}){
+  const {settings, stories} = useApp();
+  const programs = uniq((settings.programs || []).concat(stories.filter(x => !x.demo).map(x => x.program)));
+  const upd = fn => setDraft(d => { const n = clone(d); fn(n); return n; });
+  const shown = (draft.evidence || []).map((e, i) => ({e, i})).filter(x => mode !== 'update' || x.e._new);
+  const now = shown.filter(x => x.e.status !== 'future'), planned = shown.filter(x => x.e.status === 'future');
+  const row = ({e, i}) => html`<div className="qr-row" key=${e.id}>
+    <div className="qr-main">
+      <p className="eyebrow">${e.status === 'future' ? 'Planned or hoped for' : outcomeCategoryLabel(e)}</p>
+      <p className="qr-text">${e.statement}</p>
+      ${hasComparison(e) ? html`<p className="small muted tnum">${e.before} → ${e.after}${e.timeframe ? ' (' + e.timeframe + ')' : ''}</p>` : null}
+    </div>
+    <div className="qr-side">
+      ${e.status !== 'future' ? html`<label className="qr-src"><span className="small muted">How do you know?</span><select className="select select-sm" aria-label=${'How do you know: ' + e.statement} value=${evidenceClass(e)} onChange=${ev => { const v = ev.target.value; upd(n => { Object.assign(n.evidence[i], classPatch(n.evidence[i], v)); }); }}>${SOURCE_CHOICES.map(c => html`<option key=${c.id} value=${c.id}>${c.label}</option>`)}</select></label>` : null}
+      <button type="button" className="btn btn-ghost btn-xs" aria-label=${'Remove outcome: ' + e.statement} onClick=${() => upd(n => { n.evidence.splice(i, 1); })}>Remove</button>
+    </div>
+  </div>`;
+  return html`<div className="quick-review">
+    <section className="card qr-card">
+      <h2>${mode === 'update' ? 'The updated story' : 'The story'}</h2>
+      <p className="small muted">Read it through and fix anything that isn't right.</p>
+      <${Field} label="Title"><input id="qr-title" className="input" value=${draft.title} onChange=${e => { const v = e.target.value; upd(n => { n.title = v; }); }} /><//>
+      <${Field} label="Story"><textarea id="qr-story" className="textarea" rows="10" value=${draft.story || ''} onChange=${e => { const v = e.target.value; upd(n => { n.story = v; }); }}></textarea><//>
+      <div className="row">
+        <${Field} label="ABG program"><input id="qr-program" className="input" list="qr-programs" value=${draft.program || ''} onChange=${e => { const v = e.target.value; upd(n => { n.program = v; }); }} /><//>
+        <${Field} label="School or community"><input id="qr-community" className="input" value=${draft.community || ''} onChange=${e => { const v = e.target.value; upd(n => { n.community = v; }); }} /><//>
+      </div>
+      <datalist id="qr-programs">${programs.map(p => html`<option key=${p} value=${p}></option>`)}</datalist>
+    </section>
+    <section className="card qr-card">
+      <h2>Outcomes found <span className="count">${now.length}</span></h2>
+      <p className="small muted">Remove anything the interview doesn't really support, and say how you know each one. "Confirmed by a document" is only for things you've seen in writing, like a report card or certificate.</p>
+      ${now.length ? html`<div className="qr-list">${now.map(row)}</div>` : html`<p className="empty-note">No outcomes were found${mode === 'update' ? ' in this update' : ''}.</p>`}
+      ${planned.length ? html`<h3 className="qr-sub">Planned, not yet happened</h3><p className="small muted">Kept separate from outcomes. They become follow-up reminders.</p><div className="qr-list">${planned.map(row)}</div>` : null}
+    </section>
+  </div>`;
+}
 function ReviewView({params}){
   const {caps, stories, students, nav, safeWrite, showToast} = useApp();
   const {mode, storyId, analysis, entry, items, draftKey, whenHint, approx, followupId, answered, analyzedEntryIds, returnTo, studentId, studentName, newStudent, backlogId, studentInfo} = params;
@@ -2609,7 +2869,11 @@ function ReviewView({params}){
   return html`<div className="view review">
     <${FocusHeader} title=${title} sub=${mode === 'update' && base ? base.title : mode === 'new' ? 'Step 3 of 3' + (draft.alias ? ': ' + draft.alias : '') : (draft.alias || null)} onBack=${back} />
     ${mode !== 'edit' ? html`<p className="review-note"><${Icon} name="spark" size=${16} /><span>Claude drafted this from your words. Nothing is saved until you press Save, and nothing is approved for outside use until you approve it.${mode === 'update' ? ' New items are marked with an orange edge.' : ''}</span></p>` : null}
-    <${StoryEditor} draft=${draft} setDraft=${setDraft} items=${items || []} mode=${mode} />
+    ${mode === 'edit' ? html`<${StoryEditor} draft=${draft} setDraft=${setDraft} items=${items || []} mode=${mode} />` : html`
+      <${QuickReview} draft=${draft} setDraft=${setDraft} mode=${mode} />
+      <details className="sec all-details"><summary><span>All details (optional)<span className="count">transcript, metrics card, timeline, privacy</span></span><${Icon} name="chev" size=${18} /></summary>
+        <div className="sec-body"><${StoryEditor} draft=${draft} setDraft=${setDraft} items=${items || []} mode=${mode} /></div>
+      </details>`}
     <div className="savebar"><div className="inner">
       <button className="btn btn-ghost" onClick=${back} disabled=${saving}>${returnTo && returnTo.name === 'interview' ? 'Back to interview' : returnTo && returnTo.name === 'record' ? 'Back to transcript' : 'Cancel'}</button>
       <button className="btn btn-primary" onClick=${save} disabled=${saving}>${saving ? 'Saving…' : (mode === 'edit' ? 'Save changes' : 'Save story')}</button>
@@ -2835,6 +3099,9 @@ function EvidenceRow({ev, entries, onStatus, readOnly}){
     </div>
     ${!readOnly ? html`<label className="small muted ev-verify">Verification <select className=${'status-select tone-' + tone} aria-label="Verification status" value=${ev.status} onChange=${e => onStatus(e.target.value)}>${EVIDENCE_STATUS.map(s => html`<option key=${s.id} value=${s.id}>${s.label}</option>`)}</select></label>` : null}
     ${comparisonText(ev) ? html`<p className="ev-compare small tnum">${comparisonText(ev)}</p>` : null}
+    ${ev.observation ? html`<p className="small"><span className="muted">Supporting observation:</span> ${ev.observation}</p>` : null}
+    ${ev.contribution || ev.activity ? html`<p className="small"><span className="muted">ABG's possible contribution:</span> ${[ev.activity, ev.contribution].filter(Boolean).join(': ')}</p>` : null}
+    ${ev.openQuestion ? html`<p className="small"><span className="muted">Still unknown:</span> ${ev.openQuestion}</p>` : null}
     <p className="small muted">${ev.observer ? 'Observed by: ' + labelOf(OBSERVERS, ev.observer) + ' · ' : ''}Source: ${ev.basis || (src.note ? src.note : (src.excerpt ? "Kyle's account" : 'not recorded'))}</p>
     ${src.excerpt ? html`<button type="button" className="btn btn-quiet btn-sm src-toggle" aria-expanded=${open} onClick=${() => setOpen(o => !o)}>${open ? 'Hide passage' : 'Show passage'}</button>` : null}
     ${open ? html`<div className=${'excerpt' + (!src.found ? ' missing' : '')}>
@@ -2844,13 +3111,19 @@ function EvidenceRow({ev, entries, onStatus, readOnly}){
     </div>` : null}
   </div>`;
 }
-function Timeline({milestones}){
-  if (!milestones.length) return html`<p className="empty-note">No milestones yet. Add a story update when you learn what happened next.</p>`;
-  return html`<ol className="timeline">${milestones.map(m => { const pending = m.phase === 'future' || !m.confirmed; return html`<li key=${m.id} className=${'tl-item phase-' + m.phase + (pending ? ' pending' : '')}>
+/* completed milestones in order, with each follow-up interview shown where it was recorded */
+function Timeline({milestones, entries}){
+  const updates = (entries || []).slice().sort((a, b) => (a.recordedAt || '').localeCompare(b.recordedAt || '')).slice(1)
+    .map(e => ({id: 'u-' + e.id, update: true, label: e.summary || 'Story update recorded', date: {text: fmtDate(e.recordedAt), iso: (e.recordedAt || '').slice(0, 7)}}));
+  const items = milestones.map(m => ({m, iso: (m.date && m.date.iso) || ''})).concat(updates.map(u => ({m: u, iso: u.date.iso})));
+  const dated = items.filter(x => x.iso).sort((a, b) => a.iso.localeCompare(b.iso)), undated = items.filter(x => !x.iso);
+  const all = milestones.length && !milestones.some(m => m.date && m.date.iso) ? milestones.map(m => ({m})).concat(updates.map(u => ({m: u}))) : dated.concat(undated);
+  if (!all.length) return html`<p className="empty-note">No milestones yet. Add a new observation when you learn what happened next.</p>`;
+  return html`<ol className="timeline">${all.map(({m}) => { const pending = !m.update && !m.confirmed; return html`<li key=${m.id} className=${'tl-item ' + (m.update ? 'tl-update' : 'phase-' + m.phase) + (pending ? ' pending' : '')}>
     <span className="tl-swatch" aria-hidden="true"></span>
-    <p className="eyebrow">${labelOf(PHASES, m.phase)} · ${fmtEventDate(m.date) || 'Date unknown'}</p>
+    <p className="eyebrow">${m.update ? 'Follow-up update' : labelOf(PHASES, m.phase)} · ${fmtEventDate(m.date) || 'Date unknown'}</p>
     <p>${m.label}</p>
-    ${pending ? html`<p className="small muted">${m.phase === 'future' ? 'Pending. Not a documented outcome yet.' : 'Unconfirmed'}</p>` : null}
+    ${pending ? html`<p className="small muted">Unconfirmed</p>` : null}
   </li>`; })}</ol>`;
 }
 function MaterialSheet({storyId, close}){
@@ -2876,7 +3149,7 @@ function TurnsView({turns}){
   return html`<div className="view" style=${{gap: '12px'}}>${turns.map((t, i) => html`<div className="turn" key=${i}><p className="turn-q">${t.q}</p><p className=${'turn-a transcript' + (t.status === 'skipped' ? ' muted' : '')}>${t.status === 'skipped' ? 'Skipped' : t.a}</p>${(t.audio || []).map((c, j) => html`<${AudioClip} key=${c.path} path=${c.path} label=${'Play recording' + ((t.audio || []).length > 1 ? ' ' + (j + 1) : '') + (c.seconds ? ' (' + mmss(c.seconds) + ')' : '')} />`)}</div>`)}</div>`;
 }
 function StoryView({id}){
-  const {caps, stories, students, storiesLoaded, nav, openSheet, safeWrite, showToast, readOnly} = useApp();
+  const {caps, stories, students, storiesLoaded, nav, openSheet, safeWrite, showToast, readOnly, role} = useApp();
   const story = stories.find(s => s.id === id);
   const [entries, setEntries] = useState(null);
   const [openEntry, setOpenEntry] = useState(null);
@@ -3024,7 +3297,7 @@ function StoryView({id}){
 
     <section className="card">
       <div className="sec-head"><h2>Supporting evidence</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddEvidenceSheet} storyId=${id} close=${close} kind="qualitative" />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
-      <p className="small muted">Every outcome is labeled by source: Staff-reported (Kyle saw it), Teacher/parent-reported, Student-reported, Estimated, or Unverified. Documented / verified is only for items later confirmed against records.</p>
+      <p className="small muted">Every outcome shows its evidence type: verified by documentation, directly observed by staff, reported by the student or a third party, or unconfirmed. Verified is only for things checked against a document.</p>
       ${comparisons.length ? html`<details className="ev-more"><summary className="small">Sources for the ${comparisons.length} before-and-after outcome${comparisons.length > 1 ? 's' : ''}</summary>${comparisons.map(r => html`<${EvidenceRow} key=${r.e.id} ev=${r.e} entries=${entries} readOnly=${readOnly} onStatus=${v => setEvStatus(r.i, v)} />`)}</details>` : null}
       ${others.length === 0 ? html`<p className="empty-note small">No other observations recorded.</p>` : others.map(r => html`<${EvidenceRow} key=${r.e.id} ev=${r.e} entries=${entries} readOnly=${readOnly} onStatus=${v => setEvStatus(r.i, v)} />`)}
       ${(story.quotes || []).length > 0 ? html`<div className="ev-group">
@@ -3080,8 +3353,17 @@ function StoryView({id}){
     </section>
 
     <section className="card">
-      <h2>Student impact timeline</h2>
-      <${Timeline} milestones=${ms} />
+      <h2>Student timeline</h2>
+      <p className="small muted">From initial challenges to the latest update. Planned milestones are kept separate until they happen.</p>
+      <${Timeline} milestones=${ms.filter(m => m.phase !== 'future')} entries=${entries || []} />
+      ${(() => {
+        /* one line per plan: planned milestones, then reminders that aren't just restating one of them */
+        const fm = ms.filter(m => m.phase === 'future');
+        const planned = fm.map(m => ({id: m.id, text: m.label, when: fmtEventDate(m.date)}))
+          .concat((story.followUps || []).filter(f => f.kind === 'task' && f.status === 'open' && !fm.some(m => questionOverlap(f.question.replace(/^Check on: /, ''), m.label) >= 0.5)).map(f => ({id: f.id, text: f.question, when: f.due ? 'Due ' + fmtDay(f.due) : ''})));
+        return planned.length ? html`<div className="planned"><h3>Planned and to check</h3><ul>${planned.map(p => html`<li key=${p.id}><span className="tl-plan-dot" aria-hidden="true"></span><span>${p.text}${p.when ? html` <small className="muted">· ${p.when}</small>` : null}</span></li>`)}</ul></div>` : null;
+      })()}
+      ${!readOnly ? html`<div><button className="btn btn-ghost btn-sm" onClick=${() => nav('record', {storyId: id})}><${Icon} name="plus" size=${16} /> Add a new observation</button></div>` : null}
     </section>
 
 
@@ -3098,7 +3380,7 @@ function StoryView({id}){
       </div>`)}
     </section>` : null}
 
-    <section className="card">
+    ${role === 'viewer' ? html`<section className="card"><h2>Interview transcripts</h2><p className="small muted">Raw interview transcripts are available to editors and admins.</p></section>` : html`<section className="card">
       <h2>Interview transcripts</h2>
       <p className="small muted">The original account and every update, kept as recorded.</p>
       ${entries === null ? html`<div className="skeleton" style=${{height: '60px'}}></div>` : entries.length === 0 ? html`<p className="empty-note">No entries on file.</p>` : entries.map((e, idx) => {
@@ -3118,7 +3400,7 @@ function StoryView({id}){
             ${!readOnly ? html`<div className="row-btns"><button className="btn btn-ghost btn-sm" onClick=${() => openSheet(close => html`<${TranscriptSheet} entry=${e} close=${close} />`)}><${Icon} name="edit" size=${16} /> Correct transcript</button><button className="btn btn-quiet btn-sm danger" onClick=${() => deleteEntry(e)}>Delete entry</button></div>` : null}
           </div>` : null}
         </div>`; })}
-    </section>
+    </section>`}
 
     ${(story.drafts || []).length > 0 ? html`<section className="card">
       <h2>Audience versions</h2>
@@ -3628,8 +3910,92 @@ function FollowupsView({embedded}){
 }
 
 /* ================= reports ================= */
+/* ---------- stakeholder report: numbers computed from the records, stories chosen by staff ---------- */
+const REPORT_EDU = [{id: 'graduated', label: 'Graduated high school'}, {id: 'higher_ed', label: 'Went on to college or further education'}, {id: 'first_gen', label: 'First in their family to attend college'}, {id: 'school_engagement', label: 'Improved attendance, grades or engagement'}, {id: 'career', label: 'Career, job or internship'}, {id: 'returned', label: 'Returned to ABG to mentor, volunteer or teach'}];
+function buildStakeholderReport({stories, period, external, selected, includesDemo}){
+  const ix = insightIndex(stories);
+  const N = ix.N, R = ix.records.length;
+  const pct = (n, d) => d ? Math.round(100 * n / d) + '%' : '0%';
+  const programs = uniq(stories.map(s => asStr(s.program)));
+  const withOut = ix.students.filter(st => st.any).length;
+  const areas = ACTIVE_OUTCOMES.map(o => { const hit = ix.students.filter(st => st.cats[o.id] && st.cats[o.id].counted); const by = {}; hit.forEach(st => { const c = st.cats[o.id].cls; by[c] = (by[c] || 0) + 1; }); return {o, n: hit.length, by}; }).sort((a, b) => b.n - a.n);
+  const edu = REPORT_EDU.map(m => ({m, n: ix.students.filter(st => st.ms[m.id]).length}));
+  const cls = {}; ix.records.forEach(r => { const c = evidenceClass(r.e); cls[c] = (cls[c] || 0) + 1; });
+  const incomplete = ix.records.filter(r => !isComplete(r.e)).length;
+  const gaps = {}; stories.forEach(s => (s.missingMetrics || []).forEach(m => { const k = asStr(m.metric); if (k) gaps[k] = (gaps[k] || 0) + 1; }));
+  const topGaps = Object.entries(gaps).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const top = areas.filter(a => a.n > 0).slice(0, 3);
+  const out = [];
+  out.push('# ABG Impact Report', '', '_Stories first recorded ' + period + '. Prepared from the ABG Impact Journal on ' + fmtDay(todayLocal()) + '._' + (includesDemo ? ' **Includes fictional demo stories, marked [DEMO]. Not for distribution.**' : ''), '');
+  out.push('## Executive summary', '');
+  out.push('ABG staff documented ' + N + ' student' + (N === 1 ? '' : 's') + ' in ' + stories.length + ' stor' + (stories.length === 1 ? 'y' : 'ies') + (programs.length ? ' across ' + programs.length + ' program' + (programs.length === 1 ? '' : 's') : '') + '. ' + withOut + ' of ' + N + ' students (' + pct(withOut, N) + ') have at least one documented outcome.' +
+    (top.length ? ' The most frequently documented areas were ' + top.map(a => a.o.label.toLowerCase() + ' (' + a.n + ' of ' + N + ')').join(', ') + '.' : '') +
+    (edu[0].n || edu[1].n ? ' ' + edu[0].n + ' documented student' + (edu[0].n === 1 ? '' : 's') + ' graduated high school and ' + edu[1].n + ' went on to college or further education.' : '') +
+    ' Of ' + R + ' outcome records, ' + pct(cls.observed || 0, R) + ' were directly observed by ABG staff, ' + pct(cls.reported || 0, R) + ' were reported by students or others, ' + pct(cls.verified || 0, R) + ' were verified by documentation and ' + pct(cls.unconfirmed || 0, R) + ' are unconfirmed.', '');
+  out.push('These figures describe the students ABG staff chose to document. They are not a representative sample and are not rates for all ABG students.', '');
+  out.push('## Key findings', '');
+  out.push('- Students documented: ' + N + ' (each counted once)');
+  out.push('- Students with at least one documented outcome: ' + withOut + ' of ' + N + ' (' + pct(withOut, N) + ')');
+  out.push('- Stories recorded: ' + stories.length + '; outcome records: ' + R);
+  edu.filter(x => x.n > 0).forEach(x => out.push('- ' + x.m.label + ': ' + x.n + ' of ' + N + ' students'));
+  out.push('');
+  out.push('## Outcomes by area', '', '| Outcome area | Students | Share of students documented | Verified | Staff-observed | Reported | Unconfirmed |', '|---|---|---|---|---|---|---|');
+  areas.forEach(a => out.push('| ' + [a.o.label, a.n, pct(a.n, N), a.by.verified || 0, a.by.observed || 0, a.by.reported || 0, a.by.unconfirmed || 0].join(' | ') + ' |'));
+  out.push('', '_A student counts once per area, using the strongest evidence on file. No-change, declines and planned outcomes are not counted._', '');
+  const chosen = stories.filter(s => selected.includes(s.id));
+  if (chosen.length) {
+    out.push('## Student stories', '', '_Selected by ABG staff to illustrate the findings above, not as typical results._', '');
+    chosen.forEach(s => {
+      const nm = external ? (externalName(s) || 'A student') : (s.alias || 'A student');
+      const sw = t => external ? scrubName(t, s.alias, nm) : String(t || '');
+      out.push('### ' + sw(s.title), '', '_' + [nm, s.program, external && needsRedaction(s) ? '' : s.community].filter(Boolean).join(' · ') + '_', '', sw(s.story || s.summary), '');
+      const ev = (external ? externalEvidence(s) : (s.evidence || [])).filter(e => e.status !== 'future');
+      if (ev.length) { out.push('**Documented outcomes**'); ev.forEach(e => out.push('- ' + sw(e.statement) + (hasComparison(e) ? ' (' + sw(e.before) + ' → ' + sw(e.after) + ')' : '') + ' [' + classLabel(e) + ']')); out.push(''); }
+    });
+  }
+  out.push('## Evidence sources and verification', '', '| Evidence type | Outcome records | Share |', '|---|---|---|');
+  EVIDENCE_CLASSES.forEach(c => out.push('| ' + c.label + ' | ' + (cls[c.id] || 0) + ' | ' + pct(cls[c.id] || 0, R) + ' |'));
+  out.push('', '"Verified" means ABG staff checked a document. A confident account from staff is never treated as verified on its own.', '');
+  out.push('## Limitations and missing data', '');
+  out.push('- These are the students ABG staff chose to record, so they are not a representative sample of all ABG participants. Results should not be read as program-wide rates.');
+  out.push('- The reporting period is based on when stories were first recorded; some outcomes happened earlier.');
+  out.push('- ' + incomplete + ' of ' + R + ' outcome records lack an initial condition, a current condition or a known source.');
+  out.push('- ' + pct((cls.reported || 0) + (cls.unconfirmed || 0), R) + ' of outcome records rely on reports from students or others, or are unconfirmed; ' + pct(cls.verified || 0, R) + ' are verified by documentation.');
+  if (topGaps.length) out.push('- Most common data gaps: ' + topGaps.map(g => g[0] + ' (' + g[1] + ')').join('; ') + '.');
+  if (external) out.push('- Student names appear only where publication permission is documented; sensitive experiences are left out unless consent is documented.');
+  out.push('- ABG\'s contribution is described as staff observed or students reported it. These records do not establish that ABG caused an outcome.');
+  return out.join('\n');
+}
+function StakeholderReport({stories, includesDemo}){
+  const {caps, showToast} = useApp();
+  const [range, setRange] = useState('12m');
+  const [external, setExternal] = useState(true);
+  const days = (byId(RANGES, range) || {}).days || 0;
+  const since = days ? new Date(Date.now() - days * 864e5).toISOString() : '';
+  const period = since ? 'from ' + fmtDate(since) + ' to ' + fmtDate(nowISO()) : 'at any time';
+  const inRange = stories.filter(s => !since || (s.createdAt || '') >= since);
+  const eligible = inRange.filter(s => isStudentStory(s) && (!external || s.status === 'approved'));
+  const [picked, setPicked] = useState(null);
+  const selected = picked || eligible.slice().sort((a, b) => outcomeCount(b) - outcomeCount(a)).slice(0, 3).map(s => s.id);
+  const toggle = id => setPicked((picked || selected).includes(id) ? (picked || selected).filter(x => x !== id) : (picked || selected).concat([id]));
+  const md = useMemo(() => buildStakeholderReport({stories: inRange, period, external, selected: selected.filter(id => eligible.some(s => s.id === id)), includesDemo}), [stories, period, external, selected.join(), includesDemo]);
+  return html`<section className="card stake">
+    <h2>Stakeholder report</h2>
+    <p className="small muted">Combines an executive summary, key findings, outcomes by area, selected student stories, evidence types and limitations. Every number is counted from the journal; you choose the stories.</p>
+    <div className="row">
+      <${Field} label="Reporting period"><select id="sr-range" className="select" value=${range} onChange=${e => setRange(e.target.value)}>${RANGES.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select><//>
+      <${Field} label="Use"><select id="sr-use" className="select" value=${external ? 'ext' : 'int'} onChange=${e => { setExternal(e.target.value === 'ext'); setPicked(null); }}><option value="ext">External (donors, grants, schools): approved stories only</option><option value="int">Internal (ABG staff): any story</option></select><//>
+    </div>
+    <div className="field"><span className="field-label">Student stories to include</span>
+      ${eligible.length === 0 ? html`<p className="small muted">${external ? 'No approved student stories in this period. Approve stories in their Privacy and approval section, or switch to internal use.' : 'No student stories in this period.'}</p>` : html`<div className="pick-chips">${eligible.map(s => html`<label key=${s.id} className=${'chip' + (selected.includes(s.id) ? ' on' : '')}><input type="checkbox" className="sr-only" checked=${selected.includes(s.id)} onChange=${() => toggle(s.id)} />${(external ? externalName(s) || 'A student' : s.alias) + ': ' + trunc(s.title, 40)}</label>`)}</div>`}
+    </div>
+    <textarea id="sr-text" className="textarea report-ta" rows="16" aria-label="Stakeholder report" readOnly=${true} value=${md}></textarea>
+    <div className="row-btns end"><${CopyButton} text=${md} /><button className="btn btn-ghost btn-sm" disabled=${!caps.downloads} onClick=${() => saveFile(caps, showToast, 'abg-stakeholder-report' + (includesDemo ? '-DEMO' : '') + '.md', md)}><${Icon} name="download" size=${16} /> Download .md</button></div>
+  </section>`;
+}
+
 function ReportsView({embedded}){
-  const {caps, stories: shown, students: shownStudents, metrics, showToast, settings, safeWrite, readOnly} = useApp();
+  const {caps, stories: shown, students: shownStudents, metrics, showToast, settings, safeWrite, readOnly, role} = useApp();
   const rset = forReporting(shown, shownStudents, settings);
   const stories = rset.stories, students = rset.students;
   const setDemoInExports = v => safeWrite(() => caps.db.doc('config/settings').set(Object.assign({}, settings, {demo: Object.assign({}, settings.demo || {}, {inExports: v}), updatedAt: nowISO()})));
@@ -3673,8 +4039,9 @@ function ReportsView({embedded}){
       ${rset.included ? html`<p><strong>Fictional demo stories are included</strong> in this report and these exports, marked "[DEMO, fictional]". Don't share these files outside ABG.</p>` : html`<p><strong>${rset.demoN} fictional demo stor${rset.demoN === 1 ? 'y is' : 'ies are'} left out</strong> of reports and exports. Include them to try the report and exports with sample data.</p>`}
       ${readOnly ? null : html`<button className="btn btn-ghost btn-sm" onClick=${() => setDemoInExports(!rset.included)}>${rset.included ? 'Leave demo stories out' : 'Include demo stories'}</button>`}
     </div>` : null}
+    <${StakeholderReport} stories=${stories} includesDemo=${rset.included && rset.demoN > 0} />
     <section className="card">
-      <h2>Generate Impact Report</h2>
+      <h2>Draft a narrative report with Claude</h2>
       <p className="small muted">Uses only stories approved for external use (${approved.length} now) and verified program metrics (${metrics.length}). Theme counts and data gaps cover all stories. The draft keeps storytelling separate from verified numbers and cites each story.</p>
       ${approved.length === 0 ? html`<p className="notice small">No stories are approved for external use yet. Approve stories in the Privacy and approval section of each story first.</p>` : null}
       ${!caps.sample ? html`<p className="notice small">Claude isn't available in this view, so reports can't be generated here.</p>` : null}
@@ -3693,12 +4060,13 @@ function ReportsView({embedded}){
         ${row('Approved stories', 'Summaries, takeaways, evidence with status, approved quotes, and approved audience drafts. Markdown pastes cleanly into Google Docs and Word.', html`<select id="exp-aud" className="select select-sm" aria-label="Audience" value=${aud} onChange=${e => setAud(e.target.value)}><option value="">All audiences</option>${AUDIENCES.map(a => html`<option key=${a.id} value=${a.id}>${a.short}</option>`)}</select><${CopyButton} text=${approvedMarkdown(stories, aud)} />${dlBtn(() => dl('abg-approved-stories' + (aud ? '-' + aud : '') + '.md', approvedMarkdown(stories, aud)))}`)}
         ${row('Student outcomes for the consulting team (CSV, names removed)', 'One row per student: the metrics card with how certain each value is, themes, audiences, evidence counts, approval status, and summaries. First names are replaced with codes (Student 01, Student 02…). Program and school names stay in, so read the summaries for other identifying details before sharing.', dlBtn(() => dl('abg-student-outcomes-team.csv', teamCSV(stories, students))))}
         ${row('Stories (CSV)', 'Every story with status, dates, program, themes, audiences, and privacy fields. Internal.', dlBtn(() => dl('abg-stories.csv', storiesCSV(stories))))}
+        ${row('Structured impact records (JSON)', 'One record per story with every outcome field: category, initial and current condition, supporting observation, evidence source and type, values, timeframe, ABG activity and contribution, and open questions. Unknown fields are null.', dlBtn(() => dl('abg-impact-records.json', JSON.stringify(impactRecords(stories), null, 2))))}
         ${row('Measurable outcomes, evidence and data gaps (CSV)', 'Each measurable outcome and observation with before and after values, who observed it, its verification status, and the transcript passage, plus data gaps.', dlBtn(() => dl('abg-evidence.csv', evidenceCSV(stories))))}
         ${row('Verified program metrics (CSV)', 'Numbers entered from verified sources, with their sources.', dlBtn(() => dl('abg-verified-metrics.csv', metricsCSV(metrics, stories))))}
         ${row('Approved quotes (CSV)', 'Quotes marked approved, from approved stories only.', dlBtn(() => dl('abg-approved-quotes.csv', quotesCSV(stories))))}
         ${row('Student impact timelines (CSV)', 'Every milestone by stage, from initial circumstances to long-term outcomes, with pending items marked.', dlBtn(() => dl('abg-timelines.csv', timelineCSV(stories))))}
         ${row('Follow-ups (CSV)', 'Questions and check-back reminders with their status and answers.', dlBtn(() => dl('abg-followups.csv', followupsCSV(stories))))}
-        ${row('Full interview transcripts (internal only)', 'Every original transcript, with corrections. Keep this file inside ABG.', html`<button className="btn btn-ghost btn-sm" disabled=${!caps.downloads || busyExport === 'tr'} onClick=${transcripts}><${Icon} name="download" size=${16} /> ${busyExport === 'tr' ? 'Preparing…' : 'Download'}</button>`)}
+        ${role === 'viewer' ? null : row('Full interview transcripts (internal only)', 'Every original transcript, with corrections. Keep this file inside ABG.', html`<button className="btn btn-ghost btn-sm" disabled=${!caps.downloads || busyExport === 'tr'} onClick=${transcripts}><${Icon} name="download" size=${16} /> ${busyExport === 'tr' ? 'Preparing…' : 'Download'}</button>`)}
       </div>
     </section>
   </div>`;
@@ -3779,6 +4147,18 @@ function forReporting(stories, students, settings){
 }
 function DemoPill(){ return html`<span className="pill tone-demo" title="Fictional demo story">Demo</span>`; }
 
+/* ---------- roles ----------
+   Admin: everything, including team roles and demo data. Editor: record, edit, approve and export stories.
+   Viewer: read stories and Insights only; no editing and no raw interview transcripts.
+   Roles live in config/access ({roles: {email: role}}); people not listed are Editors. */
+const ROLE_OPTS = [{id: 'admin', label: 'Admin'}, {id: 'editor', label: 'Editor'}, {id: 'viewer', label: 'Viewer'}];
+const DEFAULT_ADMINS = ['jacob.pajimola@pepperdine.edu', 'kyle@artsbridgingthegap.org'];
+function roleFor(access, email){
+  const e = asStr(email).toLowerCase(); const roles = (access && access.roles) || {};
+  if (roles[e] && byId(ROLE_OPTS, roles[e])) return roles[e];
+  return DEFAULT_ADMINS.includes(e) ? 'admin' : 'editor';
+}
+
 /* log out asks first, so a stray tap doesn't sign someone out */
 function confirmLogout(openSheet){
   openSheet(close => html`<${ConfirmSheet} close=${close} title="Log out of this device?" body="You'll need a sign-in code from your email to get back in on this device. Only log out on a shared or borrowed device. Your other devices stay signed in." confirmLabel="Log out" onConfirm=${async () => { await window.__platform.signOut(); }} />`);
@@ -3845,7 +4225,8 @@ function ItemRow({color, name, desc, onEdit, onDelete, readOnly, deleteLabel}){
   </div>`;
 }
 function SettingsView(){
-  const {caps, settings, stories, allStories, allStudents, safeWrite, readOnly, updateMe, openSheet, showToast} = useApp();
+  const {caps, settings, stories, allStories, allStudents, safeWrite, readOnly, updateMe, openSheet, showToast, role: myRole, isAdmin, access} = useApp();
+  const setMemberRole = (email, r) => safeWrite(() => caps.db.doc('config/access').set({roles: Object.assign({}, (access && access.roles) || {}, {[asStr(email).toLowerCase()]: r}), updatedAt: nowISO()}));
   const me = caps.me || {};
   const demo = settings.demo || {};
   const demoStories = (allStories || []).filter(x => x.demo);
@@ -3854,7 +4235,7 @@ function SettingsView(){
   const [demoShow, setDemoShow] = useState(!demo.hidden);
   const [demoExp, setDemoExp] = useState(!!demo.inExports);
   useEffect(() => { setDemoShow(!demo.hidden); setDemoExp(!!demo.inExports); }, [demo.hidden, demo.inExports]);
-  async function loadDemo(){ setDemoBusy('load'); const ok = await safeWrite(async () => { await loadDemoData(caps.db, me); }); if (ok) { await setDemo({loadedAt: nowISO(), removedAt: null, hidden: false}); showToast('Six demo stories added'); } setDemoBusy(''); }
+  async function loadDemo(){ setDemoBusy('load'); const ok = await safeWrite(async () => { await loadDemoData(caps.db, me); }); if (ok) { await setDemo({loadedAt: nowISO(), removedAt: null, hidden: false, version: DEMO_VERSION}); showToast('Six demo stories added'); } setDemoBusy(''); }
   const removeDemo = () => openSheet(close => html`<${ConfirmSheet} close=${close} title="Remove all demo stories?" body=${'This deletes the ' + demoStories.length + ' fictional demo stories, their interview entries and demo student records. Real stories are not touched. You can load the demo stories again later.'} confirmLabel="Remove demo stories" onConfirm=${async () => { const ok = await safeWrite(() => removeDemoData(caps.db, allStories || [], allStudents || [])); if (ok) { await setDemo({removedAt: nowISO(), loadedAt: null}); showToast('Demo stories removed'); } }} />`);
   /* saves build on the latest written values, so quick edits in a row never overwrite each other */
   const latest = useRef(settings);
@@ -3959,7 +4340,6 @@ function SettingsView(){
     const un = caps.db.collection('members').onSnapshot(snap => setMembers(snap.docs.map(d => Object.assign({id: d.id}, d.data())).sort((a, b) => (b.lastSeen || '').localeCompare(a.lastSeen || ''))), () => setMembers([]));
     return () => { try { un(); } catch (e) {} };
   }, []);
-  const access = readOnly ? 'View only' : 'Editor';
 
   const head = (title, sub, action) => html`<div className="set-card-head"><div><h2>${title}</h2>${sub ? html`<p className="small muted">${sub}</p>` : null}</div>${action || null}</div>`;
   const addBtn = (label, onClick) => readOnly ? null : html`<button type="button" className="btn btn-ghost btn-sm" onClick=${onClick}><${Icon} name="plus" size=${16} /> ${label}</button>`;
@@ -4066,10 +4446,10 @@ function SettingsView(){
           ${head('Demo Stories', 'Six fictional students, named after famous artists, show how recorded stories turn into Impact Insights. Their schools, programs and outcomes are invented.')}
           ${demoStories.length ? html`
             <p className="small">${demoStories.length} demo stor${demoStories.length === 1 ? 'y' : 'ies'} in the journal, each labeled <${DemoPill} />. Their numbers are calculated from the demo records, the same way real stories are.</p>
-            <label className="switch-row"><span><strong>Show demo stories in the journal</strong><br /><span className="small muted">Turn off to hide them everywhere (Overview, Story Library, Impact Insights) without deleting them.</span></span><input id="set-demo-show" type="checkbox" className="switch" checked=${demoShow} disabled=${readOnly} onChange=${e => { const v = e.target.checked; setDemoShow(v); setDemo({hidden: !v}); }} /></label>
-            <label className="switch-row"><span><strong>Include demo stories in reports and exports</strong><br /><span className="small muted">Off by default, so fictional stories never end up in donor reports or files. When on, they're marked "[DEMO, fictional]".</span></span><input id="set-demo-exports" type="checkbox" className="switch" checked=${demoExp} disabled=${readOnly} onChange=${e => { const v = e.target.checked; setDemoExp(v); setDemo({inExports: v}); }} /></label>
-            ${readOnly ? null : html`<div><button className="btn btn-ghost btn-sm danger-text" onClick=${removeDemo}><${Icon} name="trash" size=${16} /> Remove all demo stories</button></div>`}`
-          : html`<p className="small">No demo stories are in the journal.</p>${readOnly ? null : html`<div><button className="btn btn-primary btn-sm" disabled=${!!demoBusy} onClick=${loadDemo}>${demoBusy === 'load' ? 'Adding…' : 'Load six demo stories'}</button></div>`}`}
+            <label className="switch-row"><span><strong>Show demo stories in the journal</strong><br /><span className="small muted">Turn off to hide them everywhere (Overview, Story Library, Impact Insights) without deleting them.</span></span><input id="set-demo-show" type="checkbox" className="switch" checked=${demoShow} disabled=${!isAdmin} onChange=${e => { const v = e.target.checked; setDemoShow(v); setDemo({hidden: !v}); }} /></label>
+            <label className="switch-row"><span><strong>Include demo stories in reports and exports</strong><br /><span className="small muted">Off by default, so fictional stories never end up in donor reports or files. When on, they're marked "[DEMO, fictional]".</span></span><input id="set-demo-exports" type="checkbox" className="switch" checked=${demoExp} disabled=${!isAdmin} onChange=${e => { const v = e.target.checked; setDemoExp(v); setDemo({inExports: v}); }} /></label>
+            ${!isAdmin ? html`<p className="small muted">Only admins can change or remove demo stories.</p>` : html`<div><button className="btn btn-ghost btn-sm danger-text" onClick=${removeDemo}><${Icon} name="trash" size=${16} /> Remove all demo stories</button></div>`}`
+          : html`<p className="small">No demo stories are in the journal.</p>${!isAdmin ? null : html`<div><button className="btn btn-primary btn-sm" disabled=${!!demoBusy} onClick=${loadDemo}>${demoBusy === 'load' ? 'Adding…' : 'Load six demo stories'}</button></div>`}`}
         </section></div>
 
         <div className="set-sec" id="sec-team" data-sec="team"><section className="card set-card">
@@ -4078,11 +4458,15 @@ function SettingsView(){
             ${members == null ? html`<p className="small muted">Loading…</p>` : members.map(m => html`<div className="member-row" key=${m.id}>
               <${Avatar} name=${m.name || m.email} photo=${m.photo} />
               <span className="member-main"><strong>${m.name || m.email || 'Team member'}${m.id === me.id ? html` <span className="pill tone-teal">You</span>` : null}</strong><small className="muted">${[m.role, m.email].filter(Boolean).join(' · ')}</small></span>
-              <small className="muted member-seen">${m.lastSeen ? 'Last active ' + fmtDate(m.lastSeen) : ''}</small>
+              <span className="member-side">
+                ${isAdmin && m.email && m.id !== me.id ? html`<select className="select select-sm" aria-label=${'Role for ' + (m.name || m.email)} value=${roleFor(access, m.email)} onChange=${e => setMemberRole(m.email, e.target.value)}>${ROLE_OPTS.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select>` : html`<span className="pill tone-blue">${labelOf(ROLE_OPTS, roleFor(access, m.email))}</span>`}
+                <small className="muted member-seen">${m.lastSeen ? 'Last active ' + fmtDate(m.lastSeen) : ''}</small>
+              </span>
             </div>`)}
           </div>
+          <p className="small muted"><strong>Admins</strong> manage roles and demo data. <strong>Editors</strong> record, edit, approve and export stories. <strong>Viewers</strong> can read stories and Insights but can't edit or open raw interview transcripts. People are Editors unless an admin changes it.</p>
           <p className="small muted">New people are invited by email from ABG's Supabase project (Authentication, then Users, then Invite user). They accept once and stay signed in on that device, and they appear here after their first visit.</p>
-          <div className="acct-row"><span className="small">Signed in as <strong>${email || me.name}</strong> · ${access}. This device stays signed in; log out only on a shared device.</span>${window.__platform ? html`<button className="btn btn-ghost btn-sm" onClick=${() => confirmLogout(openSheet)}><${Icon} name="logout" size=${16} /> Log out</button>` : null}</div>
+          <div className="acct-row"><span className="small">Signed in as <strong>${email || me.name}</strong> · ${labelOf(ROLE_OPTS, myRole)}. This device stays signed in; log out only on a shared device.</span>${window.__platform ? html`<button className="btn btn-ghost btn-sm" onClick=${() => confirmLogout(openSheet)}><${Icon} name="logout" size=${16} /> Log out</button>` : null}</div>
         </section></div>
 
       </div>
@@ -4111,6 +4495,8 @@ function App(){
   const [backlogLoaded, setBacklogLoaded] = useState(false);
   const [settings, setSettings] = useState({programs: [], communities: [], programInfo: {}, outcomes: [], demo: {}});
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [access, setAccess] = useState({roles: {}});
+  const [accessLoaded, setAccessLoaded] = useState(false);
   const demoSeeded = useRef(false);
   const [route, setRoute] = useState(initialRoute);
   const [sheet, setSheet] = useState(null);
@@ -4145,8 +4531,9 @@ function App(){
     const u2 = db.collection('metrics').onSnapshot(snap => setMetrics(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
     const u4 = db.collection('students').onSnapshot(snap => setStudents(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
     const u3 = db.doc('config/settings').onSnapshot(snap => { const d = snap.exists ? (snap.data() || {}) : {}; ACTIVE_OUTCOMES = mergeOutcomes(d.outcomes); setSettings({programs: asArr(d.programs), communities: asArr(d.communities), programInfo: d.programInfo && typeof d.programInfo === 'object' ? d.programInfo : {}, outcomes: asArr(d.outcomes), demo: d.demo && typeof d.demo === 'object' ? d.demo : {}}); setSettingsLoaded(true); }, () => setSettingsLoaded(true));
+    const u6 = db.doc('config/access').onSnapshot(snap => { setAccess(snap.exists ? (snap.data() || {roles: {}}) : {roles: {}}); setAccessLoaded(true); }, () => setAccessLoaded(true));
     const u5 = db.collection('backlog').onSnapshot(snap => { setBacklog(snap.docs.map(d => Object.assign({id: d.id}, d.data()))); setBacklogLoaded(true); }, () => setBacklogLoaded(true));
-    return () => { u1(); u2(); u3(); u4(); u5(); };
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
   }, [caps.status]);
 
   const nav = useCallback((name, params) => { setSheet(null); setRoute({name, params: params || {}, key: Date.now()}); try { window.scrollTo(0, 0); } catch (e) {} }, []);
@@ -4164,23 +4551,33 @@ function App(){
   const updateMe = useCallback(patch => setCaps(c => Object.assign({}, c, {me: Object.assign({}, c.me, patch)})), []);
   /* fictional demo stories: added once so a new journal has something to explore; hidden or removed from Settings */
   useEffect(() => {
-    if (caps.status !== 'ready' || !storiesLoaded || !settingsLoaded || readOnly || demoSeeded.current || window.__ABG_NO_DEMO_SEED) return;
+    if (caps.status !== 'ready' || !storiesLoaded || !settingsLoaded || !accessLoaded || readOnly || demoSeeded.current || window.__ABG_NO_DEMO_SEED) return;
+    if (roleFor(access, (caps.me && caps.me.email) || (window.__platform && window.__platform.email)) === 'viewer') return;
     const dc = settings.demo || {};
-    if (dc.loadedAt || dc.removedAt) return;
+    if (dc.removedAt) return;
+    if (dc.loadedAt) {
+      /* demo records from an older version are refreshed in place (fixed ids, so nothing duplicates) */
+      if ((dc.version || 1) >= DEMO_VERSION || !stories.some(x => x.demo)) return;
+      demoSeeded.current = true;
+      safeWrite(async () => { await loadDemoData(caps.db, caps.me || {}); await caps.db.doc('config/settings').set(Object.assign({}, settings, {demo: Object.assign({}, dc, {version: DEMO_VERSION}), updatedAt: nowISO()})); });
+      return;
+    }
     demoSeeded.current = true;
     (async () => {
       const ok = await safeWrite(async () => {
-        await caps.db.doc('config/settings').set(Object.assign({}, settings, {demo: Object.assign({}, dc, {loadedAt: nowISO(), hidden: false, inExports: false}), updatedAt: nowISO()}));
+        await caps.db.doc('config/settings').set(Object.assign({}, settings, {demo: Object.assign({}, dc, {loadedAt: nowISO(), hidden: false, inExports: false, version: DEMO_VERSION}), updatedAt: nowISO()}));
         await loadDemoData(caps.db, caps.me || {});
       });
       if (ok) showToast('Six fictional demo stories were added so you can explore. They are labeled Demo; manage them in Settings.');
     })();
-  }, [caps.status, storiesLoaded, settingsLoaded, readOnly]);
+  }, [caps.status, storiesLoaded, settingsLoaded, accessLoaded, readOnly]);
   const demoHidden = !!(settings.demo || {}).hidden;
   const allStories = stories, allStudents = students;
   const shownStories = useMemo(() => demoHidden ? stories.filter(x => !x.demo) : stories, [stories, demoHidden]);
   const shownStudents = useMemo(() => demoHidden ? students.filter(x => !x.demo) : students, [students, demoHidden]);
-  const ctx = {caps, updateMe, stories: shownStories, students: shownStudents, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite, readOnly};
+  const role = roleFor(access, (caps.me && caps.me.email) || (window.__platform && window.__platform.email));
+  const ctx = {caps, updateMe, stories: shownStories, students: shownStudents, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite,
+    readOnly: readOnly || role === 'viewer', role, isAdmin: role === 'admin', access};
   const focus = caps.status === 'ready' && (route.name === 'record' || route.name === 'review' || route.name === 'interview');
   let content;
   if (caps.status === 'loading') content = html`<div className="boot"><div className="boot-mark"></div><p>Opening ABG Impact Journal…</p></div>`;

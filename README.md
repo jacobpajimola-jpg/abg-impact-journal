@@ -88,6 +88,22 @@ Supabase's built-in email sender allows only a few emails per hour, so this proj
 
 ---
 
+## How a story becomes evidence
+
+**Interview (five stages).** Kyle tells the story in his own words first. Then about four to six follow-up questions, one at a time, fill only what's missing: (1) background and ABG involvement, (2) the most meaningful changes, (3) supporting evidence, (4) ABG's contribution, (5) current progress and follow-up. For each outcome the interviewer tracks the starting point, what changed, when, how Kyle knows, and ABG's possible role, and it asks about the most important gap. It never asks for records or diagnoses and never assumes causes.
+
+**Two outputs.** A student impact story (narrative), and a structured impact record: one entry per outcome with category, description, initial and current condition, supporting observation, evidence source and type, numbers and units, timeframe, ABG program or activity, ABG's possible contribution, and open questions. Unknown fields stay empty (exported as `null` in the structured records JSON).
+
+**Evidence types.** Verified by documentation (only when staff checked a document), directly observed by staff, reported by the student or a third party, or unconfirmed or inferred. A confident account is never treated as verified on its own.
+
+**Brief review.** Before saving, Kyle sees the story and the outcomes found. He can fix the text, remove unsupported outcomes, and answer "How do you know?" for each. Planned outcomes are kept separate and become follow-up reminders. Everything else is under "All details".
+
+**Impact Insights.** Impact overview, outcome analysis by area, evidence quality, and the stories behind every number (select any figure). Students are deduplicated; each figure states its denominator; the reporting period is by date recorded; "How these numbers are counted" spells out the rules.
+
+**Stakeholder report.** Reports and exports > Stakeholder report builds an executive summary, key findings, outcomes by area, selected stories, evidence types and limitations from the records. External use includes approved stories only, with the privacy rules applied.
+
+**Roles.** Admin (roles, demo data), Editor (record, edit, approve, export), Viewer (read only, no raw transcripts). Admins set roles in Settings > Team Access. To enforce roles on the server as well, run section 3 of `supabase/setup.sql`.
+
 ## Demo stories (fictional)
 
 The first time an editor opens the journal, it adds six fictional demo stories (Michelangelo, Leonardo, Vincent, Frida, Pablo and Georgia, named after famous artists) so the Overview, Story Library and Impact Insights have something to explore. They live in `src/demoData.js` and go through the same steps as a real interview: transcript, analysis, review and save.
