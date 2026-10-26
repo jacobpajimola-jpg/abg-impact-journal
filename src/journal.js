@@ -1304,6 +1304,8 @@ const ICONS = {
   logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l5-5-5-5"/><path d="M15 12H4"/>',
   doc: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>',
   openbook: '<path d="M3 5.5c3.2-1.6 6.2-1.4 9 .8v13.2c-2.8-2.2-5.8-2.4-9-.8z"/><path d="M21 5.5c-3.2-1.6-6.2-1.4-9 .8v13.2c2.8-2.2 5.8-2.4 9-.8z"/>',
+  cap: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2.5 9 2.5 12 0v-5"/><path d="M22 9v6"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   bars: '<path d="M6 20v-6M12 20V9M18 20V4" stroke-width="3.4"/>',
   users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.2 5 2.6 5 5.8"/>',
 };
@@ -1459,12 +1461,162 @@ function StoriesView({tab: initial}){
     ${tab === 'list' ? html`<${BacklogView} embedded=${true} />` : tab === 'followups' ? html`<${FollowupsView} embedded=${true} />` : html`<${LibraryView} embedded=${true} />`}
   </div>`;
 }
+/* ---------- Impact Insights overview ---------- */
+const INSIGHT_OUTCOMES = [
+  {id:'confidence', label:'Increased confidence or creativity', short:'Confidence & Creativity', domains:['confidence', 'artistic'], color:'#2ED3B4', tone:'teal'},
+  {id:'academic', label:'Improved academic performance', short:'Academic Performance', domains:['academics'], color:'#A653C9', tone:'purple'},
+  {id:'community', label:'Positive community engagement', short:'Community Engagement', domains:['social', 'activities', 'risk', 'behavior'], color:'#F26B6B', tone:'coral'},
+  {id:'attendance', label:'Improved school attendance', short:'School Attendance', domains:['attendance'], color:'#2B9FE0', tone:'blue'},
+  {id:'higher_ed', label:'Pursued higher education', short:'Higher Education', domains:['higher_ed'], color:'#F59A3C', tone:'orange'},
+  {id:'graduation', label:'Graduated high school', short:'Graduated', domains:['graduation'], color:'#F4C542', tone:'yellow'},
+  {id:'engagement', label:'More motivated and engaged in school', short:'School Engagement', domains:['engagement'], color:'#4DB6AC', tone:'teal'},
+  {id:'career', label:'Career, job or internship', short:'Career', domains:['career', 'pathways'], color:'#5C6BC0', tone:'blue'},
+  {id:'returned', label:'Returned to ABG as a mentor or instructor', short:'Returned to ABG', domains:['returned', 'leadership_abg'], color:'#8D6E63', tone:'orange'},
+  {id:'arts', label:'Continued art or creative pursuits', short:'Continued Art', domains:['arts_continued'], color:'#EC6FB5', tone:'purple'},
+];
+const GRADE_BUCKETS = [{id:'elem', label:'Elementary (K–5)'}, {id:'middle', label:'Middle school (6–8)'}, {id:'high', label:'High school (9–12)'}, {id:'post', label:'College or older'}, {id:'none', label:'Not specified'}];
+const RANGES = [{id:'30d', label:'Last 30 days', days:30}, {id:'3m', label:'Last 3 months', days:92}, {id:'12m', label:'Last 12 months', days:366}, {id:'all', label:'All time', days:0}];
+function gradeBucket(s){
+  const ov = s.overview || {}; const t = norm([ov.ageOrGrade, ov.demographics].join(' '));
+  const words = {kindergarten: 0, first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10, eleventh: 11, twelfth: 12};
+  let g = null; const m = t.match(/\b(\d{1,2})(st|nd|rd|th)?\s*grade|grade\s*(\d{1,2})/);
+  if (m) g = +(m[1] || m[3]); else { for (const k in words) if (new RegExp('\\b' + k + '\\b').test(t)) { g = words[k]; break; } }
+  if (g == null) {
+    if (/high school|freshman|sophomore|junior|senior/.test(t)) return 'high';
+    if (/middle school/.test(t)) return 'middle';
+    if (/elementary/.test(t)) return 'elem';
+    if (/college|university|adult|alum/.test(t)) return 'post';
+    const a = t.match(/age\s*(\d{1,2})|(\d{1,2})\s*(years? old|yo)/); if (a) { const n = +(a[1] || a[2]); return n <= 10 ? 'elem' : n <= 13 ? 'middle' : n <= 18 ? 'high' : 'post'; }
+    return 'none';
+  }
+  return g <= 5 ? 'elem' : g <= 8 ? 'middle' : g <= 12 ? 'high' : 'post';
+}
+/* outcomes a story mentions: positive or unclear evidence in a matching area, plus metrics-card answers */
+function storyOutcomes(s){
+  const set = new Set();
+  (s.evidence || []).forEach(e => { if (e.status === 'future' || ['declined', 'same'].includes(e.direction)) return; const d = domainOf(e); INSIGHT_OUTCOMES.forEach(o => { if (o.domains.includes(d)) set.add(o.id); }); });
+  const v = id => { const m = metricVal(s, id); return m ? m.value : ''; };
+  if (v('grades') === 'Improved') set.add('academic');
+  if (v('schoolAttendance') === 'Improved') set.add('attendance');
+  if (v('graduated') === 'Yes') set.add('graduation');
+  if (v('returnedToAbg') === 'Yes') set.add('returned');
+  if (v('continuedArt') === 'Yes') set.add('arts');
+  if (/college|university|degree|vocational|trade/i.test(v('nextStep'))) set.add('higher_ed');
+  return set;
+}
+function storyArt(id){
+  let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const pal = ['#2ED3B4', '#A653C9', '#F26B6B', '#2B9FE0', '#F59A3C', '#F4C542', '#EC6FB5', '#5C6BC0'];
+  const pick = k => pal[(h >>> (k * 3)) % pal.length];
+  const r = k => 20 + ((h >>> k) % 60);
+  return html`<svg className="fs-art" viewBox="0 0 100 120" aria-hidden="true" focusable="false">
+    <defs><linearGradient id=${'g' + h} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color=${pick(0)} /><stop offset="1" stop-color=${pick(1)} /></linearGradient></defs>
+    <rect width="100" height="120" fill=${'url(#g' + h + ')'} />
+    <circle cx=${r(2)} cy=${r(5) + 20} r="26" fill=${pick(2)} opacity=".75" />
+    <circle cx=${r(7) + 20} cy=${r(9)} r="20" fill=${pick(3)} opacity=".7" />
+    <path d=${'M0 ' + (70 + (h % 30)) + ' C30 ' + (40 + (h % 40)) + ' 60 ' + (110 - (h % 30)) + ' 100 ' + (60 + (h % 20)) + ' L100 120 L0 120z'} fill=${pick(4)} opacity=".8" />
+    <path d=${'M10 ' + (30 + (h % 50)) + ' q30 -20 80 10'} stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round" opacity=".7" />
+  </svg>`;
+}
+function Donut({rows, total}){
+  const R = 52, C = 2 * Math.PI * R; let off = 0;
+  const sum = rows.reduce((t, r) => t + r.n, 0) || 1;
+  return html`<svg className="donut" viewBox="0 0 140 140" role="img" aria-label=${'Students by program, ' + total + ' students'}>
+    <circle cx="70" cy="70" r=${R} fill="none" stroke="var(--surface-2)" stroke-width="24" />
+    ${rows.map(r => { const len = C * r.n / sum; const gap = rows.length > 1 ? Math.min(3, len / 3) : 0; const el = html`<circle key=${r.label} cx="70" cy="70" r=${R} fill="none" stroke=${r.color} stroke-width="24" stroke-dasharray=${Math.max(0, len - gap) + ' ' + (C - Math.max(0, len - gap))} stroke-dashoffset=${-off} transform="rotate(-90 70 70)" />`; off += len; return el; })}
+    <text x="70" y="70" textAnchor="middle" className="donut-n">${total}</text>
+    <text x="70" y="88" textAnchor="middle" className="donut-l">${total === 1 ? 'Student' : 'Students'}</text>
+  </svg>`;
+}
+function InsightsOverview({list, filterBar}){
+  const {nav, storiesLoaded} = useApp();
+  const profiles = useMemo(() => studentProfiles(list), [list]);
+  const outcomesN = list.reduce((t, s) => t + outcomeCount(s), 0);
+  const places = uniq(list.map(s => asStr(s.program)).concat(list.map(s => asStr(s.community))).map(x => x.toLowerCase())).length;
+  const outs = INSIGHT_OUTCOMES.map(o => ({o, n: list.filter(s => storyOutcomes(s).has(o.id)).length})).filter(x => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 6);
+  const byProgram = {};
+  profiles.forEach(p => { const k = asStr(p.latest.program) || 'Other / Not specified'; byProgram[k] = (byProgram[k] || 0) + 1; });
+  const progRows = Object.entries(byProgram).filter(([k]) => k !== 'Other / Not specified').sort((a, b) => b[1] - a[1]);
+  const colors = ['#2ED3B4', '#A653C9', '#2B9FE0', '#F59A3C', '#F4C542'];
+  let donut = progRows.slice(0, 4).map(([label, n], i) => ({label, n, color: colors[i]}));
+  const other = progRows.slice(4).reduce((t, r) => t + r[1], 0) + (byProgram['Other / Not specified'] || 0);
+  if (other) donut.push({label: 'Other / Not specified', n: other, color: colors[4]});
+  const featured = list.slice().sort((a, b) => ((b.status === 'approved') - (a.status === 'approved')) || (outcomeCount(b) - outcomeCount(a)) || (b.createdAt || '').localeCompare(a.createdAt || '')).filter(isStudentStory).slice(0, 3);
+  const stat = (icon, tone, value, label, sub) => html`<div className="stat-card ins-stat"><span className=${'stat-ic tone-' + tone}><${Icon} name=${icon} size=${26} /></span><span className="stat-text"><b className="tnum">${storiesLoaded ? value : '–'}</b><span className="stat-label">${label}</span><small className="muted">${sub}</small></span></div>`;
+  return html`<div className="view ins-body">
+    <div className="ins-stats">
+      ${stat('users', 'teal', profiles.length, 'Students featured', 'Unique first names')}
+      ${stat('openbook', 'purple', list.length, 'Stories captured', 'Journal entries')}
+      ${stat('bars', 'orange', outcomesN, 'Total outcomes', 'Reported across stories')}
+      ${stat('cap', 'blue', places, 'Schools & programs', 'Represented')}
+    </div>
+    <div className="ins-charts">
+      <section className="card ins-card">
+        <div><h2>Most common reported outcomes</h2><p className="small muted">Number of journal entries mentioning each outcome</p></div>
+        ${outs.length === 0 ? html`<p className="empty-note">No outcomes recorded in this view yet.</p>` : html`<div className="obars">${outs.map(x => html`<div className="obar" key=${x.o.id}>
+          <span className="obar-label">${x.o.label}</span>
+          <span className="obar-track"><span className="obar-fill" style=${{width: Math.max(4, Math.round(100 * x.n / Math.max(1, list.length))) + '%', background: x.o.color}}></span></span>
+          <span className="obar-n tnum">${x.n}</span>
+        </div>`)}</div>`}
+        <p className="tiny muted">Counts of stories in the journal, not rates for all ABG students.</p>
+      </section>
+      <section className="card ins-card">
+        <div><h2>Students by program</h2><p className="small muted">Unique students, by the program in their latest story</p></div>
+        ${profiles.length === 0 ? html`<p className="empty-note">No students in this view yet.</p>` : html`<div className="donut-wrap">
+          <${Donut} rows=${donut} total=${profiles.length} />
+          <ul className="donut-legend">${donut.map(r => html`<li key=${r.label}><span className="dot-sw" style=${{background: r.color}}></span><span className="dl-label">${r.label}</span><span className="dl-n tnum">${r.n} <span className="muted">(${Math.round(100 * r.n / profiles.length)}%)</span></span></li>`)}</ul>
+        </div>`}
+      </section>
+    </div>
+    ${filterBar}
+    <section className="card ins-card">
+      <div className="sec-head"><div><h2>Featured Stories</h2><p className="small muted">Real student experiences that highlight the impact of ABG's work.</p></div><button className="btn btn-quiet btn-sm view-all" onClick=${() => nav('library')}>View all stories <span aria-hidden="true">→</span></button></div>
+      ${featured.length === 0 ? html`<p className="empty-note">No student stories in this view yet.</p>` : html`<div className="fs-grid">${featured.map(st => { const ov = st.overview || {}; const tags = INSIGHT_OUTCOMES.filter(o => storyOutcomes(st).has(o.id)).slice(0, 2); return html`<button className="fs-card" key=${st.id} onClick=${() => nav('story', {id: st.id})}>
+        ${storyArt(st.id)}
+        <span className="fs-main"><strong>${st.alias || st.title}</strong><small className="muted">${[st.program, ov.ageOrGrade || ov.demographics].filter(Boolean).join(' · ')}</small><span className="fs-sum">${st.summary || st.title}</span></span>
+        ${tags.length ? html`<span className="fs-tags">${tags.map(o => html`<span className=${'pill tone-' + o.tone} key=${o.id}>${o.short}</span>`)}</span>` : null}
+      </button>`; })}</div>`}
+    </section>
+  </div>`;
+}
 function DashboardView({tab: initial}){
+  const {stories} = useApp();
   const [tab, setTab] = useState(initial || 'overview');
-  return html`<div className="view">
-    <header className="page-head"><h1>Impact Insights</h1></header>
-    <${PageTabs} label="Impact Insights" value=${tab} onChange=${setTab} tabs=${[{id: 'overview', label: 'Overview'}, {id: 'reports', label: 'Reports and exports'}]} />
-    ${tab === 'reports' ? html`<${ReportsView} embedded=${true} />` : html`<${InsightsView} embedded=${true} />`}
+  const [range, setRange] = useState(() => lsGet('abg-ins-range') || '12m');
+  const [f, setF] = useState({program: '', grade: '', school: '', outcome: ''});
+  const setFilter = (k, v) => setF(x => Object.assign({}, x, {[k]: v}));
+  useEffect(() => { lsSet('abg-ins-range', range); }, [range]);
+  if (tab === 'reports') return html`<div className="view">
+    <div className="ins-top"><div><p className="eyebrow">Impact Insights</p><h1>Reports and exports</h1></div><button className="btn btn-ghost btn-sm" onClick=${() => setTab('overview')}><${Icon} name="back" size=${16} /> Back to insights</button></div>
+    <${ReportsView} embedded=${true} />
+  </div>`;
+  const days = (byId(RANGES, range) || {}).days || 0;
+  const since = days ? new Date(Date.now() - days * 864e5).toISOString() : '';
+  const inRange = stories.filter(s => !since || (s.createdAt || '') >= since);
+  const list = inRange.filter(s => (!f.program || s.program === f.program) && (!f.school || s.community === f.school) && (!f.grade || gradeBucket(s) === f.grade) && (!f.outcome || storyOutcomes(s).has(f.outcome)));
+  const programs = uniq(stories.map(s => asStr(s.program))).sort();
+  const schools = uniq(stories.map(s => asStr(s.community))).sort();
+  const active = Object.values(f).some(Boolean);
+  const sel = (k, label, opts) => html`<label className="ins-filter"><span className="sr-only">${label}</span><select className="select" aria-label=${label} value=${f[k]} onChange=${e => setFilter(k, e.target.value)}><option value="">${label}</option>${opts.map(o => html`<option key=${o[0]} value=${o[0]}>${o[1]}</option>`)}</select></label>`;
+  return html`<div className="view insights2">
+    <div className="ins-top">
+      <header className="ins-hello"><p className="eyebrow">Impact Insights</p><h1>Stories that show what's possible.</h1><p className="lede">Explore key themes and outcomes from your journal entries. These insights highlight the real experiences of ABG students and help demonstrate the impact of our programs.</p></header>
+      <div className="ins-controls">
+        <label className="range-pick"><${Icon} name="calendar" size=${18} /><select aria-label="Date range" value=${range} onChange=${e => setRange(e.target.value)}>${RANGES.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select></label>
+        <button className="btn btn-ghost btn-sm" onClick=${() => setTab('reports')}><${Icon} name="file" size=${16} /> Reports and exports</button>
+      </div>
+    </div>
+    <${InsightsOverview} list=${list} filterBar=${html`<div className="filter-bar">
+      <span className="filter-label">Filter by:</span>
+      ${sel('program', 'Program', programs.map(p => [p, p]))}
+      ${sel('grade', 'Grade level', GRADE_BUCKETS.map(g => [g.id, g.label]))}
+      ${sel('school', 'School', schools.map(p => [p, p]))}
+      ${sel('outcome', 'Outcome', INSIGHT_OUTCOMES.map(o => [o.id, o.label]))}
+      ${active ? html`<button className="btn btn-quiet btn-sm" onClick=${() => setF({program: '', grade: '', school: '', outcome: ''})}>Clear</button>` : null}
+    </div>`} />
+    <details className="sec ins-more"><summary><span>Evidence details: milestones, impact by category, evidence quality<span className="count">All stories</span></span><${Icon} name="chev" size=${18} /></summary>
+      <div className="sec-body"><${InsightsView} embedded=${true} /></div>
+    </details>
   </div>`;
 }
 
