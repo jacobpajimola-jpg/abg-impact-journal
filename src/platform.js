@@ -112,10 +112,16 @@ export function makeDb(sb){
 export function makeUser(sb, authUser, db){
   const name = (authUser.user_metadata && (authUser.user_metadata.full_name || authUser.user_metadata.name)) || (authUser.email || '').split('@')[0];
   const pretty = name ? name.charAt(0).toUpperCase() + name.slice(1) : '';
-  const me = {id: authUser.id, name: pretty, email: authUser.email || null, avatarUrl: '', color: '#2A726D', isOwner: true, canEdit: true};
-  db.doc('members/' + authUser.id).set({name: pretty, email: authUser.email || '', lastSeen: new Date().toISOString()}).catch(() => {});
+  const me = {id: authUser.id, name: pretty, role: '', email: authUser.email || null, avatarUrl: '', color: '#2A726D', isOwner: true, canEdit: true};
+  /* keep a name and role the person set in Settings; otherwise start from the account name */
+  const ref = db.doc('members/' + authUser.id);
+  const loaded = ref.get().then(snap => {
+    const d = snap.exists ? (snap.data() || {}) : null;
+    if (d && d.name) { me.name = d.name; me.role = d.role || ''; return ref.update({email: authUser.email || '', lastSeen: new Date().toISOString()}); }
+    return ref.set({name: pretty, role: '', email: authUser.email || '', lastSeen: new Date().toISOString()});
+  }).catch(() => {});
   return Object.freeze({
-    me: async () => me,
+    me: async () => { await loaded; return me; },
     id: async () => me.id,
     name: async () => me.name,
     email: async () => me.email,
