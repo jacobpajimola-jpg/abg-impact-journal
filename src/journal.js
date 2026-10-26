@@ -1394,6 +1394,7 @@ const ICONS = {
   shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  compass: '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>',
   users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.2 5 2.6 5 5.8"/>',
 };
 function Icon({name, size}){ const s = size || 20; return html`<svg className="ic" width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{__html: ICONS[name] || ''}}></svg>`; }
@@ -1490,6 +1491,7 @@ const NAV = [
   {id: 'interview', label: 'Capture a Story', icon: 'edit'},
   {id: 'library', label: 'Story Library', icon: 'doc'},
   {id: 'insights', label: 'Impact Insights', icon: 'chart'},
+  {id: 'guide', label: 'Interview Guide', icon: 'compass'},
 ];
 const STORIES_ROUTES = ['library', 'story', 'backlog', 'followups'];
 function isCurrent(route, id){ if (id === 'library') return STORIES_ROUTES.includes(route.name); if (id === 'insights') return route.name === 'insights' || route.name === 'reports'; return route.name === id; }
@@ -1519,6 +1521,7 @@ function TopBar(){
   const {nav} = useApp();
   return html`<header className="topbar">
     <button className="icon-btn topbar-logo" onClick=${() => nav('home')} aria-label="Overview"><${Brand} small=${true} /></button>
+    <button className="btn btn-quiet btn-sm topbar-guide" onClick=${() => nav('guide')}><${Icon} name="compass" size=${18} /> Guide</button>
   </header>`;
 }
 function TabBar(){
@@ -1945,7 +1948,8 @@ function HomeView(){
         <p className="hero-eyebrow">Rooted in story. Driven by love.</p>
         <h2 className="hero-title">Let's capture a story.</h2>
         <p className="hero-text">Share a student experience. We'll guide you through the details and outcomes that matter.</p>
-        <button className="btn btn-purple btn-lg" disabled=${readOnly} onClick=${() => nav('interview')}><${Icon} name="plus" size=${20} /> Capture a New Story</button>
+        <div className="hero-actions"><button className="btn btn-purple btn-lg" disabled=${readOnly} onClick=${() => nav('interview')}><${Icon} name="plus" size=${20} /> Capture a New Story</button>
+        <button className="btn btn-quiet" onClick=${() => nav('guide')}><${Icon} name="compass" size=${18} /> Interview Guide</button></div>
       </div>
       <${PaletteArt} />
     </section>
@@ -1964,9 +1968,119 @@ function HomeView(){
   </div>`;
 }
 
+/* ================= Interview Guide ================= */
+const GUIDE_STEPS = [
+  {id: 'background', title: 'Student background', prompt: 'I want to talk about a student named ___. I met them through ___ around ___. At the time, they were experiencing ___.',
+    why: "Where the student started is the \"before\" that every later change is measured against.", listen: ['How you know them and roughly when you met', 'What was hard for them then, in your own words']},
+  {id: 'experience', title: 'ABG experience', prompt: 'They became involved in ___, where they participated in ___. One particular experience that stood out was ___.',
+    why: 'Naming the program and one real moment connects the outcome to ABG and makes the story memorable.', listen: ['The program, project or mural', 'One moment you remember clearly']},
+  {id: 'changes', title: 'Meaningful changes', prompt: 'Before participating, the student ___. Over time, I noticed ___. A specific example was ___.',
+    why: 'A before, an after and one example turn "they grew" into something a funder can believe.', listen: ['What they did before, and what they do now', 'One specific example you saw or heard about']},
+  {id: 'outcomes', title: 'Measurable outcomes', prompt: 'In terms of school or personal progress, I know that ___. I learned this because ___.',
+    why: 'How you know matters as much as what you know. "Her teacher told me" or "I saw it" both count.', listen: ['Attendance, grades, graduation, college, a job, if you know them', 'Who told you, or whether you saw it yourself']},
+  {id: 'current', title: 'Current progress', prompt: 'Today, the student is ___. I believe ABG contributed by ___. The most meaningful part of their experience was ___.',
+    why: 'Where they are now shows lasting impact, and your view of ABG\'s part keeps the story honest.', listen: ['What they are doing today', "What about ABG you think helped, if anything"]},
+];
+const GUIDE_EXAMPLES = [
+  {topic: 'School attendance', vague: 'She comes to school more now.', strong: 'Her teacher told me she was missing about two days a week in the fall, and hardly any by spring.', adds: ['Before and after', 'Timeframe', 'How you know']},
+  {topic: 'Academic improvement', vague: 'His grades got better.', strong: 'He was failing math last fall. His mom told me he passed the class at the end of the year.', adds: ['Before and after', 'How you know']},
+  {topic: 'High school graduation', vague: 'She finished school.', strong: 'She graduated from high school in June 2024. I went to the ceremony.', adds: ['Date', 'You saw it']},
+  {topic: 'Higher education', vague: "He's in college now.", strong: "He started community college last fall, studying graphic design. He told me he's the first in his family to go.", adds: ['What and when', 'How you know']},
+  {topic: 'Confidence and self-expression', vague: "She's more confident.", strong: "In September she wouldn't speak in our group. By March she presented her mural design to the whole class.", adds: ['Before and after', 'A specific moment']},
+  {topic: 'Leadership', vague: "He's a leader now.", strong: 'This spring he led four younger students on the library mural and ran the paint station on his own.', adds: ['What he did', 'Number, because you counted']},
+  {topic: 'Community engagement', vague: "She's involved in the community.", strong: 'She volunteered at two neighborhood clean-up days this spring and brought a friend each time.', adds: ['What she did', 'Timeframe']},
+];
+const GUIDE_CHECKLIST = [
+  {id: 'who', text: 'Who the student is and how you know them'},
+  {id: 'before', text: 'What was going on for them before ABG'},
+  {id: 'moments', text: 'One or two specific moments that show progress'},
+  {id: 'source', text: 'How you know each change: you saw it, someone told you, or you saw it in writing'},
+  {id: 'now', text: 'What they are doing now, if you know'},
+  {id: 'privacy', text: 'First name only; skip last names, addresses and private details that aren\'t needed'},
+  {id: 'sharing', text: 'Whether the family has said the story can be shared outside ABG'},
+];
+function GuideSec({id, title, sub, open, children}){
+  return html`<details className="sec guide-sec" id=${'g-' + id} open=${open}><summary><span>${title}${sub ? html`<span className="count">${sub}</span>` : null}</span><${Icon} name="chev" size=${18} /></summary><div className="sec-body">${children}</div></details>`;
+}
+function GuideContent({compact}){
+  const [checked, setChecked] = useState(() => { try { return JSON.parse(lsGet('abg-guide-check') || '{}') || {}; } catch (e) { return {}; } });
+  const tick = (k, v) => { const n = Object.assign({}, checked, {[k]: v}); setChecked(n); lsSet('abg-guide-check', JSON.stringify(n)); };
+  const done = GUIDE_CHECKLIST.filter(c => checked[c.id]).length;
+  return html`<div className="guide-body">
+    <${GuideSec} id="start" title="Getting started" open=${!compact}>
+      <div className="guide-cards">
+        <div className="guide-card"><h3>Why we record stories</h3><p>Each story keeps a student's experience on record, in your words, so ABG can show what its programs make possible.</p></div>
+        <div className="guide-card"><h3>How stories become evidence</h3><p>The journal pulls out the changes you describe and how you know them. Those add up in Impact Insights and reports for donors, grants and schools.</p></div>
+        <div className="guide-card"><h3>Just talk</h3><p>Speak naturally, the way you'd tell a colleague. You don't need every answer. "I don't know" is a perfectly good answer.</p></div>
+        <div className="guide-card"><h3>Protect privacy</h3><p>Use first names only. Stories stay internal until someone approves them, and names are shared outside ABG only with permission.</p></div>
+      </div>
+    <//>
+    <${GuideSec} id="script" title="Guided storytelling script" sub="5 prompts, optional" open=${compact}>
+      <p className="small muted">Use these as a guide if it helps. You don't need to read them word for word, follow the order, or fill every blank.</p>
+      <ol className="guide-steps">${GUIDE_STEPS.map((st, i) => html`<li key=${st.id}><details className="guide-step" open=${i === 0}>
+        <summary><span className="step-num">${i + 1}</span><span className="step-title">${st.title}</span><${Icon} name="chev" size=${16} /></summary>
+        <div className="step-body">
+          <blockquote className="guide-prompt">${st.prompt}</blockquote>
+          <div className="row-btns"><${CopyButton} text=${st.prompt} label="Copy prompt" /></div>
+          <p className="small"><strong>Why it helps:</strong> ${st.why}</p>
+          <ul className="small guide-listen">${st.listen.map(l => html`<li key=${l}>${l}</li>`)}</ul>
+        </div>
+      </details></li>`)}</ol>
+    <//>
+    <${GuideSec} id="strong" title="What makes a strong impact story?" open=${false}>
+      <p className="small">Specific beats general. Four things make an observation credible:</p>
+      <ul className="guide-keys small">
+        <li><strong>Before and after:</strong> what it was like, and what changed.</li>
+        <li><strong>When:</strong> a rough timeframe, like "by spring" or "senior year".</li>
+        <li><strong>Numbers, only if you know them:</strong> "missing about two days a week" is great if that's what you were told.</li>
+        <li><strong>How you know:</strong> you saw it, the student or a teacher told you, or you saw it in writing.</li>
+      </ul>
+      <p className="notice small guide-warn">Never guess a number or stretch an improvement. "It got better, but I don't know by how much" is more useful than a figure you're unsure of, and it keeps ABG's reports trustworthy.</p>
+      <div className="guide-examples">${GUIDE_EXAMPLES.map(x => html`<div className="gx" key=${x.topic}>
+        <p className="eyebrow">${x.topic}</p>
+        <div className="gx-pair">
+          <div className="gx-vague"><span className="gx-tag">General</span><p>"${x.vague}"</p></div>
+          <div className="gx-strong"><span className="gx-tag">Specific</span><p>"${x.strong}"</p></div>
+        </div>
+        <p className="gx-adds small">${x.adds.map(a => html`<span className="chip static small" key=${a}>${a}</span>`)}</p>
+      </div>`)}</div>
+      <p className="small muted">Examples are made up for illustration.</p>
+    <//>
+    <${GuideSec} id="prep" title="Before you record" sub=${done ? done + ' of ' + GUIDE_CHECKLIST.length : 'optional'} open=${false}>
+      <p className="small muted">A quick, optional checklist. Skip anything you don't know; the interview will help fill gaps.</p>
+      <ul className="guide-check">${GUIDE_CHECKLIST.map(c => html`<li key=${c.id}><label className="check"><input type="checkbox" checked=${!!checked[c.id]} onChange=${e => tick(c.id, e.target.checked)} /> ${c.text}</label></li>`)}</ul>
+      ${done ? html`<button className="btn btn-quiet btn-sm" onClick=${() => { setChecked({}); lsSet('abg-guide-check', '{}'); }}>Clear checklist</button>` : null}
+    <//>
+  </div>`;
+}
+function GuideView(){
+  const {nav, readOnly} = useApp();
+  return html`<div className="view guide">
+    <header className="ins-hello guide-head">
+      <p className="eyebrow">Interview Guide</p>
+      <h1>Record a story with confidence.</h1>
+      <p className="lede">Short tips for telling a student's story in a way that's true to them and useful for ABG's impact reporting.</p>
+      <div className="row-btns"><button className="btn btn-purple" disabled=${readOnly} onClick=${() => nav('interview')}><${Icon} name="plus" size=${18} /> Capture a Story</button></div>
+    </header>
+    <${GuideContent} />
+    <div className="guide-foot"><p className="small muted">Ready? The interview asks follow-up questions for anything that's missing.</p><button className="btn btn-purple" disabled=${readOnly} onClick=${() => nav('interview')}><${Icon} name="plus" size=${18} /> Capture a Story</button></div>
+  </div>`;
+}
+/* side panel during capture: a sibling of the recorder, so opening or closing it never touches a recording */
+function GuidePanel({onClose}){
+  useEffect(() => { const k = e => { if (e.key === 'Escape') onClose(); }; document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k); }, []);
+  return html`<aside className="guide-panel" role="complementary" aria-label="Interview Guide">
+    <div className="gp-head"><div><p className="eyebrow">Interview Guide</p><p className="small muted">Your recording keeps going while this is open.</p></div><button className="icon-btn" onClick=${onClose} aria-label="Close guide"><${Icon} name="close" /></button></div>
+    <div className="gp-body"><${GuideContent} compact=${true} /></div>
+  </aside>`;
+}
+function GuideButton({open, onToggle}){
+  return html`<button type="button" className="btn btn-ghost btn-sm guide-btn" aria-expanded=${open} onClick=${onToggle}><${Icon} name="compass" size=${16} /> ${open ? 'Hide guide' : 'View Interview Guide'}</button>`;
+}
+
 /* ================= recording building blocks ================= */
-function FocusHeader({title, sub, onBack}){
-  return html`<header className="focus-head"><button className="icon-btn" onClick=${onBack} aria-label="Back"><${Icon} name="back" /></button><div><h1 className="h-focus">${title}</h1>${sub ? html`<p className="small muted">${sub}</p>` : null}</div></header>`;
+function FocusHeader({title, sub, onBack, action}){
+  return html`<header className="focus-head"><button className="icon-btn" onClick=${onBack} aria-label="Back"><${Icon} name="back" /></button><div className="focus-title"><h1 className="h-focus">${title}</h1>${sub ? html`<p className="small muted">${sub}</p>` : null}</div>${action ? html`<div className="focus-action">${action}</div>` : null}</header>`;
 }
 function Analyzing({onStop, title, body}){
   return html`<div className="card analyzing" role="status">
@@ -2236,12 +2350,14 @@ function ComposerView({params}){
     if (sid) { lsDel(draftKey); showToast(story ? 'Update saved' : 'Story saved'); nav('story', {id: sid}); }
   }
   const back = () => story ? nav('story', {id: story.id}) : nav('home');
+  const [guideOpen, setGuideOpen] = useState(false);
   const title = story ? 'Add Story Update' : 'Record a general story';
   if (readOnly) return html`<div className="view"><${FocusHeader} title=${title} onBack=${() => nav('home')} /><p className="notice">You have view-only access to this journal. Ask the person who shared it for Editor access to record stories.</p></div>`;
   if (storyId && !story) return html`<div className="view"><${FocusHeader} title=${title} onBack=${() => nav('library')} />${storiesLoaded ? html`<p className="notice">This story isn't in the journal anymore.</p>` : html`<div className="skeleton"></div>`}</div>`;
   if (busy === 'analyze') return html`<div className="view"><${FocusHeader} title=${title} sub=${story ? story.title : null} onBack=${() => ctlRef.current && ctlRef.current.abort()} /><${Analyzing} onStop=${() => ctlRef.current && ctlRef.current.abort()} /></div>`;
   return html`<div className="view composer">
-    <${FocusHeader} title=${title} sub=${story ? story.title : 'For programs, murals, partnerships, and community moments. For a student, start a student story instead.'} onBack=${back} />
+    <${FocusHeader} title=${title} sub=${story ? story.title : 'For programs, murals, partnerships, and community moments. For a student, start a student story instead.'} onBack=${back} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+    ${guideOpen ? html`<${GuidePanel} onClose=${() => setGuideOpen(false)} />` : null}
     <div className="prompt-card">
       <p className="prompt-text">${prompt}</p>
       <button type="button" className="btn btn-quiet btn-sm" onClick=${() => setPIdx(i => i + 1)}>Try another prompt</button>
@@ -2285,6 +2401,7 @@ function InterviewView({params}){
   const [current, setCurrent] = useState(I.current || null);
   const [answer, setAnswer] = useState(I.answer || '');
   const [target, setTarget] = useState(I.target || (mode === 'update' ? 3 : 5));
+  const [guideOpen, setGuideOpen] = useState(false);
   const [phase, setPhase] = useState(I.phase || 'asking');
   const [student, setStudent] = useState(I.student || null);
   const [notes, setNotes] = useState(I.notes || null);
@@ -2426,7 +2543,8 @@ function InterviewView({params}){
     const fn = asStr(first);
     const needPick = matches.length > 0 && !pick;
     return html`<div className="view interview">
-      <${FocusHeader} title="New Story" sub="Step 1 of 3: Student information" onBack=${backlogId ? () => nav('backlog') : back} />
+      <${FocusHeader} title="New Story" sub="Step 1 of 3: Student information" onBack=${backlogId ? () => nav('backlog') : back} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+      ${guideOpen ? html`<${GuidePanel} onClose=${() => setGuideOpen(false)} />` : null}
       ${memo ? html`<p className="memo-note"><${Icon} name="users" size=${16} /><span><strong>From your student list:</strong> ${memo}</span></p>` : null}
       <section className="card name-card">
         <${Field} label="Student's First Name"><input id="iv-first" className="input input-lg" autoComplete="off" placeholder="Enter student's first name" value=${first} onChange=${e => { setFirst(e.target.value.replace(/\s{2,}/g, ' ')); setPick(''); }} /><//>
@@ -2457,7 +2575,8 @@ function InterviewView({params}){
   const answeredCount = turns.filter(t => t.status === 'answered').length;
   const stageLabel = !current ? '' : current.kind === 'opening' ? (mode === 'update' ? 'Story update' : 'Opening story') : current.kind === 'closing' ? 'Closing question' : 'Follow-up ' + (asked + 1) + ' of about ' + Math.max(target, asked + 1) + (current.stage ? ' · ' + labelOf(INTERVIEW_STAGES, current.stage) : '');
   return html`<div className="view interview">
-    <${FocusHeader} title=${(mode === 'update' ? 'Story update: ' : 'Interview: ') + name} sub=${mode === 'update' ? story.title : 'Step 2 of 3: Interview'} onBack=${back} />
+    <${FocusHeader} title=${(mode === 'update' ? 'Story update: ' : 'Interview: ') + name} sub=${mode === 'update' ? story.title : 'Step 2 of 3: Interview'} onBack=${back} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+    ${guideOpen ? html`<${GuidePanel} onClose=${() => setGuideOpen(false)} />` : null}
     ${restored ? html`<p className="small muted">Restored your unsaved interview from this device. <button className="btn btn-quiet btn-sm" onClick=${startOver}>Start over</button></p>` : null}
     ${memo && turns.length === 0 ? html`<p className="memo-note"><${Icon} name="users" size=${16} /><span><strong>Your note:</strong> ${memo}</span></p>` : null}
     ${turns.length > 0 ? html`<details className="sec convo"><summary><span>Conversation so far<span className="count">${turns.length} ${turns.length === 1 ? 'answer' : 'answers'}</span></span><${Icon} name="chev" size=${18} /></summary>
@@ -4482,7 +4601,7 @@ function SheetHost({sheet, close}){
 function initialRoute(){
   let h = '';
   try { h = (location.hash || '').replace('#', ''); } catch (e) {}
-  const ok = ['record', 'library', 'insights', 'followups', 'reports', 'backlog'];
+  const ok = ['record', 'library', 'insights', 'followups', 'reports', 'backlog', 'guide'];
   return {name: h === 'record' ? 'interview' : (ok.includes(h) ? h : 'home'), params: {}, key: 1};
 }
 function App(){
@@ -4595,6 +4714,7 @@ function App(){
       case 'followups': content = html`<${StoriesView} key=${route.key} tab="followups" />`; break;
       case 'reports': content = html`<${DashboardView} key=${route.key} tab="reports" />`; break;
       case 'settings': content = html`<${SettingsView} />`; break;
+      case 'guide': content = html`<${GuideView} key=${route.key} />`; break;
       default: content = html`<${HomeView} />`;
     }
   }
