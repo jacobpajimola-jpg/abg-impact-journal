@@ -367,7 +367,7 @@ function aiErrorMessage(e){
     case 'sampling_disabled': case 'not_declared': case 'capability_disabled': case 'capability_removed': return "Claude isn't available for this account. You can still save the entry and analyze it later.";
     case 'rate_limited': return "Claude is busy or you've reached a usage limit. Wait a few minutes, then try again.";
     case 'config_error': return "Claude rejected the app's API key or settings, so this isn't a connection problem. Check the Claude API key and workspace in Supabase (Edge Functions, then Secrets), then try again. Your words are safe.";
-    case 'session_expired': return "Your Claude session expired. Sign in again, then try again.";
+    case 'session_expired': return "Your sign-in needs refreshing. Reload the page, then try again. Your words are safe.";
     case 'prompt_too_large': return "This entry is too long to analyze in one go. Split it into two entries.";
     case 'invalid_json': return "Claude's answer came back in an unexpected shape. Try again.";
     case 'refused': return "Claude declined to analyze this text. Check the entry and try again.";
@@ -1413,7 +1413,7 @@ const STORIES_ROUTES = ['library', 'story', 'backlog', 'followups'];
 function isCurrent(route, id){ if (id === 'library') return STORIES_ROUTES.includes(route.name); if (id === 'insights') return route.name === 'insights' || route.name === 'reports'; return route.name === id; }
 function initialsOf(name){ const p = asStr(name).split(/[\s._-]+/).filter(Boolean); return ((p[0] || '?')[0] + (p[1] ? p[1][0] : '')).toUpperCase(); }
 function Sidebar(){
-  const {route, nav, readOnly, stories, caps} = useApp();
+  const {route, nav, readOnly, stories, caps, openSheet} = useApp();
   const due = countDue(stories);
   const me = caps.me || {};
   const shown = asStr(me.name) || firstNameOf(window.__platform && window.__platform.email) || 'Signed in';
@@ -1425,7 +1425,7 @@ function Sidebar(){
     <div className="side-bottom">
       <button className="side-link" aria-current=${route.name === 'settings' ? 'page' : undefined} onClick=${() => nav('settings')}><${Icon} name="gear" /><span>Settings</span></button>
       <div className="side-user"><${Avatar} name=${shown} photo=${me.photo} /><span className="side-user-text"><strong>${shown}</strong><small>${me.role || (window.__platform && window.__platform.email) || ''}</small></span></div>
-      ${window.__platform ? html`<button className="side-link side-small" onClick=${() => window.__platform.signOut()}><${Icon} name="logout" size=${18} /><span>Log out</span></button>` : null}
+      ${window.__platform ? html`<button className="side-link side-small" onClick=${() => confirmLogout(openSheet)}><${Icon} name="logout" size=${18} /><span>Log out</span></button>` : null}
     </div>
   </aside>`;
 }
@@ -1765,6 +1765,24 @@ function Analyzing({onStop, title, body}){
   </div>`;
 }
 /* text box with a real recorder: records audio, saves it, transcribes it, and appends the words */
+/* one microphone stream shared across answers: phones ask for permission per stream, so an interview reuses it,
+   and it is released 30 seconds after the last recording (the browser's mic indicator turns off then) */
+const MIC = (() => {
+  let stream = null, timer = null;
+  const live = () => stream && stream.getAudioTracks().some(t => t.readyState === 'live');
+  const stopNow = () => { clearTimeout(timer); if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; };
+  return {
+    async get(){ clearTimeout(timer); if (live()) return stream; stopNow(); stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}}); return stream; },
+    release(){ clearTimeout(timer); timer = setTimeout(stopNow, 30000); },
+    stopNow,
+  };
+})();
+function micBlockedHelp(){
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'Microphone access is off for this site. In Safari, tap the aA button in the address bar, then Website Settings, and set Microphone to Allow. Or type your answer instead.';
+  if (/Android/.test(ua)) return 'Microphone access is off for this site. Tap the icon next to the web address, then Permissions, and allow the microphone. Or type your answer instead.';
+  return 'Microphone access is off for this site. Click the icon next to the web address, allow the microphone, then try again. Or type your answer instead.';
+}
 function pickMime(){
   try {
     if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
@@ -1831,7 +1849,7 @@ function DictationBox({id, value, onChange, placeholder, label, compact, onAudio
   function cleanup(discard){
     const r = rec.current;
     if (discard && r.mr && r.mr.state !== 'inactive') { r.discard = true; try { r.mr.stop(); } catch (e) {} }
-    if (r.stream) r.stream.getTracks().forEach(t => t.stop());
+    if (r.stream) MIC.release();
     if (r.ctx) { try { r.ctx.close(); } catch (e) {} }
     rec.current = discard ? {} : {mr: r.mr};
     setAnalyser(null);
@@ -1861,8 +1879,8 @@ function DictationBox({id, value, onChange, placeholder, label, compact, onAudio
     VOICE.stop();
     setErr('');
     let stream;
-    try { stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}}); }
-    catch (e) { setErr('Microphone access was blocked. Allow the microphone for this site in your browser settings, or type your answer instead.'); return; }
+    try { stream = await MIC.get(); }
+    catch (e) { setErr(e && e.name === 'NotFoundError' ? 'No microphone was found on this device. You can type your answer instead.' : micBlockedHelp()); return; }
     const mime = pickMime();
     let mr;
     try { mr = new MediaRecorder(stream, mime ? {mimeType: mime, audioBitsPerSecond: 32000} : {audioBitsPerSecond: 32000}); }
@@ -3683,41 +3701,10 @@ function ListEditor({title, hint, items, onChange, placeholder, disabled, id}){
     ${!disabled ? html`<form className="add-row" onSubmit=${e => { e.preventDefault(); add(); }}><input id=${id} className="input" aria-label=${'Add to ' + title} placeholder=${placeholder} value=${v} onChange=${e => setV(e.target.value)} /><button className="btn btn-ghost" type="submit">Add</button></form>` : null}
   </section>`;
 }
-/* ---------- password: lets people sign in from any browser or device without an emailed link ---------- */
-function PasswordForm({onDone, label, cta}){
-  const {showToast} = useApp();
-  const [pw, setPw] = useState('');
-  const [show, setShow] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const email = (window.__platform && window.__platform.email) || '';
-  async function submit(e){
-    e.preventDefault(); setErr('');
-    if (pw.length < 8) { setErr('Use at least 8 characters.'); return; }
-    setBusy(true); const r = await window.__platform.setPassword(pw); setBusy(false);
-    if (r.error) { setErr(r.error); return; }
-    setPw(''); showToast('Password saved. Your browser can remember it for next time.'); if (onDone) onDone();
-  }
-  return html`<form className="pw-form" onSubmit=${submit}>
-    <input type="email" name="email" autoComplete="username" value=${email} readOnly=${true} className="sr-only" tabIndex="-1" aria-hidden="true" />
-    <label className="field"><span>${label || 'New password'}</span><span className="pw-wrap"><input id="pw-new" className="input" type=${show ? 'text' : 'password'} name="new-password" autoComplete="new-password" value=${pw} onChange=${e => setPw(e.target.value)} placeholder="At least 8 characters" /><button type="button" className="btn btn-quiet btn-sm" onClick=${() => setShow(!show)} aria-label=${show ? 'Hide password' : 'Show password'}>${show ? 'Hide' : 'Show'}</button></span></label>
-    ${err ? html`<p className="error" role="alert">${err}</p>` : null}
-    <div className="row-btns"><button className="btn btn-primary" type="submit" disabled=${busy || !pw}>${busy ? 'Saving…' : (cta || 'Save password')}</button></div>
-  </form>`;
+/* log out asks first, so a stray tap doesn't sign someone out */
+function confirmLogout(openSheet){
+  openSheet(close => html`<${ConfirmSheet} close=${close} title="Log out of this device?" body="You'll need a sign-in code from your email to get back in on this device. Only log out on a shared or borrowed device. Your other devices stay signed in." confirmLabel="Log out" onConfirm=${async () => { await window.__platform.signOut(); }} />`);
 }
-function PasswordSheet({close}){
-  const p = window.__platform || {};
-  const fresh = p.arrivedFrom === 'invite' || p.arrivedFrom === 'signup';
-  const skip = () => { lsSet('abg-pw-prompt', 'skip'); close(); };
-  return html`<div className="view" style=${{gap: '14px'}}>
-    <${SheetHead} title=${fresh ? 'Welcome to the ABG Impact Journal' : 'Make signing in easier'} close=${skip} />
-    <p>${fresh ? "You're signed in on this browser and will stay signed in here. " : ''}Create a password so you can open the journal from any browser, phone or computer without waiting for an email link. Your phone or browser can save it and fill it in for you.</p>
-    <p className="small muted">Signing in to ${p.email || 'your account'}.</p>
-    <${PasswordForm} onDone=${close} cta="Save password" />
-    <button type="button" className="btn btn-quiet btn-sm" onClick=${skip}>Not now</button>
-  </div>`;
-}
-
 /* ---------- Settings ---------- */
 const SETTINGS_SECTIONS = [
   {id: 'profile', label: 'Profile', icon: 'user'},
@@ -3825,7 +3812,6 @@ function SettingsView(){
     if (await safeWrite(() => caps.db.doc('members/' + me.id).update({photo}))) { updateMe({photo}); showToast('Photo updated'); }
   }
   async function removePhoto(){ if (await safeWrite(() => caps.db.doc('members/' + me.id).update({photo: ''}))) updateMe({photo: ''}); }
-  const [hasPw, setHasPw] = useState(() => !!(window.__platform && window.__platform.hasPassword));
   const roles = ROLES.includes(asStr(me.role)) || !asStr(me.role) ? ROLES : [asStr(me.role)].concat(ROLES);
 
   /* programs */
@@ -3915,10 +3901,7 @@ function SettingsView(){
           </div>
           <p className="tiny muted">Your name and role appear in the sidebar, and the greeting uses your first name. Your photo and phone number are visible to the team.</p>
         </section>
-        ${window.__platform && window.__platform.setPassword ? html`<section className="card set-card">
-          ${head('Password', hasPw ? 'You can sign in with your email and password from any browser or device. Change it here if you need to.' : 'Set a password to sign in from any browser or device without waiting for an email link. You stay signed in on this browser either way.')}
-          <${PasswordForm} label=${hasPw ? 'New password' : 'Create a password'} cta=${hasPw ? 'Change password' : 'Save password'} onDone=${() => setHasPw(true)} />
-        </section>` : null}</div>
+</div>
 
         <div className="set-sec" id="sec-programs" data-sec="programs">
           <section className="card set-card">
@@ -4000,8 +3983,8 @@ function SettingsView(){
               <small className="muted member-seen">${m.lastSeen ? 'Last active ' + fmtDate(m.lastSeen) : ''}</small>
             </div>`)}
           </div>
-          <p className="small muted">New people are invited by email from ABG's Supabase project (Authentication, then Users, then Invite user). They appear here after their first sign-in.</p>
-          <div className="acct-row"><span className="small">Signed in as <strong>${email || me.name}</strong> · ${access}</span>${window.__platform ? html`<button className="btn btn-ghost btn-sm" onClick=${() => window.__platform.signOut()}><${Icon} name="logout" size=${16} /> Log out</button>` : null}</div>
+          <p className="small muted">New people are invited by email from ABG's Supabase project (Authentication, then Users, then Invite user). They accept once and stay signed in on that device, and they appear here after their first visit.</p>
+          <div className="acct-row"><span className="small">Signed in as <strong>${email || me.name}</strong> · ${access}. This device stays signed in; log out only on a shared device.</span>${window.__platform ? html`<button className="btn btn-ghost btn-sm" onClick=${() => confirmLogout(openSheet)}><${Icon} name="logout" size=${16} /> Log out</button>` : null}</div>
         </section></div>
 
       </div>
@@ -4078,13 +4061,6 @@ function App(){
     }
   }, [caps.canWrite, showToast]);
 
-  useEffect(() => {
-    const p = window.__platform;
-    if (caps.status !== 'ready' || !p || !p.setPassword || p.hasPassword) return;
-    if (p.arrivedFrom !== 'invite' && lsGet('abg-pw-prompt') === 'skip') return;
-    const t = setTimeout(() => setSheet({render: close => html`<${PasswordSheet} close=${close} />`}), 600);
-    return () => clearTimeout(t);
-  }, [caps.status]);
   const updateMe = useCallback(patch => setCaps(c => Object.assign({}, c, {me: Object.assign({}, c.me, patch)})), []);
   const ctx = {caps, updateMe, stories, students, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite, readOnly};
   const focus = caps.status === 'ready' && (route.name === 'record' || route.name === 'review' || route.name === 'interview');

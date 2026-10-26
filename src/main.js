@@ -7,8 +7,8 @@ import './journal.js';
 const URL_ = import.meta.env.VITE_SUPABASE_URL;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const root = document.getElementById('root');
-/* read before Supabase consumes it: arriving from an invite email means this is someone's first visit */
-const ARRIVED_FROM = (window.location.hash.match(/type=([a-z_]+)/) || [])[1] || '';
+/* read before Supabase consumes it, so an expired invitation or sign-in link can be explained */
+const ARRIVED_HASH = /access_token|error/.test(window.location.hash) ? window.location.hash : '';
 const {React, ReactDOM, htm} = window;
 const html = htm.bind(React.createElement);
 const {useState} = React;
@@ -19,62 +19,105 @@ function Brand(){
 const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 
-/* Two ways in: a password (filled in by the phone or browser's password manager) or a one-time email link.
-   People who haven't set a password yet use the link once, then set one. */
-function Login({sb}){
+/* Only shown when this device has no valid sign-in (first visit on a new browser, after logging out,
+   or if access was revoked). Passwordless: we email a code and a link; either one signs you in. */
+function Login({sb, notice}){
   const [email, setEmail] = useState(() => lsGet('abg-last-email') || '');
-  const [pw, setPw] = useState('');
-  const [show, setShow] = useState(false);
-  const [state, setState] = useState('idle');
-  const [msg, setMsg] = useState('');
+  const [stage, setStage] = useState('email');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(notice || '');
+  const [wait, setWait] = useState(0);
   const clean = () => email.trim().toLowerCase();
-  async function signIn(e){
-    e.preventDefault();
+  React.useEffect(() => { if (!wait) return; const t = setTimeout(() => setWait(w => Math.max(0, w - 1)), 1000); return () => clearTimeout(t); }, [wait]);
+  async function send(e){
+    if (e) e.preventDefault();
     if (!clean()) return;
-    if (!pw) { setMsg('Enter your password, or use the email link below.'); return; }
-    setState('signing'); setMsg('');
-    const {error} = await sb.auth.signInWithPassword({email: clean(), password: pw});
-    if (error) {
-      setState('idle');
-      const m = error.message || '';
-      if (/invalid login|invalid credentials/i.test(m)) setMsg("That email and password don't match. If you haven't set a password yet, or forgot it, use the email link below.");
-      else if (/rate|too many/i.test(m)) setMsg('Too many attempts. Wait a few minutes and try again.');
-      else setMsg("Couldn't sign in just now. Check your connection and try again.");
-      return;
-    }
-    lsSet('abg-last-email', clean());
-  }
-  async function sendLink(){
-    if (!clean()) { setMsg('Enter your email first.'); return; }
-    setState('sending'); setMsg('');
+    setBusy(true); setMsg('');
     const {error} = await sb.auth.signInWithOtp({email: clean(), options: {shouldCreateUser: false, emailRedirectTo: window.location.origin + window.location.pathname}});
+    setBusy(false);
     if (error) {
-      setState('idle');
       const m = error.message || '';
       if (/signup|not allowed|not found|invalid login/i.test(m)) setMsg("This email hasn't been invited yet. Ask the journal's administrator to invite you.");
-      else if (/rate|seconds|too many/i.test(m)) setMsg('Too many sign-in emails were sent recently. Wait a few minutes and try again.');
-      else setMsg("The sign-in email couldn't be sent. Check the address and try again.");
+      else if (/rate|seconds|too many/i.test(m)) { setMsg('A code was sent very recently. Check your email, or wait a minute and try again.'); if (stage === 'email') setStage('code'); }
+      else setMsg("The email couldn't be sent. Check the address and your connection, then try again.");
       return;
     }
     lsSet('abg-last-email', clean());
-    setState('sent');
+    setCode(''); setStage('code'); setWait(60);
+  }
+  async function verify(e){
+    e.preventDefault();
+    const token = code.replace(/\D/g, '');
+    if (token.length < 6) { setMsg('Enter the code from the email.'); return; }
+    setBusy(true); setMsg('');
+    let {error} = await sb.auth.verifyOtp({email: clean(), token, type: 'email'});
+    if (error) { const again = await sb.auth.verifyOtp({email: clean(), token, type: 'invite'}); if (!again.error) error = null; }
+    setBusy(false);
+    if (error) setMsg(/rate|too many/i.test(error.message || '') ? 'Too many tries. Wait a few minutes, then try again.' : "That code didn't work. Use the code from the newest email, or send a new one.");
+    // success: the app opens automatically
   }
   return html`<main className="login">
     <div className="login-card card">
       <${Brand} />
-      <h1>Sign in</h1>
-      ${state === 'sent'
-        ? html`<p>Check <strong>${clean()}</strong> for a sign-in link. Copy the link and open it in the browser you'll use for the journal (for example Safari or Chrome), not inside your email app. After that you can set a password in Settings, so you won't need emailed links again.</p><button className="btn btn-quiet btn-sm" onClick=${() => setState('idle')}>Back to sign in</button>`
-        : html`<form className="view" style=${{gap: '12px'}} onSubmit=${signIn}>
-            <p className="muted">ABG Impact Journal is private to invited team members.</p>
-            <label className="field"><span>Email</span><input id="login-email" className="input" type="email" name="email" autoComplete="username" value=${email} onChange=${e => setEmail(e.target.value)} required /></label>
-            <label className="field"><span>Password</span><span className="pw-wrap"><input id="login-password" className="input" type=${show ? 'text' : 'password'} name="password" autoComplete="current-password" value=${pw} onChange=${e => setPw(e.target.value)} /><button type="button" className="btn btn-quiet btn-sm" onClick=${() => setShow(!show)} aria-label=${show ? 'Hide password' : 'Show password'}>${show ? 'Hide' : 'Show'}</button></span></label>
-            ${msg ? html`<p className="error" role="alert">${msg}</p>` : null}
-            <button className="btn btn-primary" type="submit" disabled=${state !== 'idle'}>${state === 'signing' ? 'Signing in…' : 'Sign in'}</button>
-            <div className="login-alt"><span className="small muted">No password yet, or forgot it?</span><button type="button" className="btn btn-ghost btn-sm" disabled=${state !== 'idle'} onClick=${sendLink}>${state === 'sending' ? 'Sending…' : 'Email me a sign-in link'}</button></div>
-          </form>`}
+      ${stage === 'email' ? html`<form className="view" style=${{gap: '12px'}} onSubmit=${send}>
+          <h1>Sign in</h1>
+          <p className="muted">Enter the email address you were invited with. We'll email you a sign-in code. After that, this device stays signed in.</p>
+          <label className="field"><span>Email</span><input id="login-email" className="input" type="email" name="email" autoComplete="email" inputMode="email" value=${email} onChange=${e => setEmail(e.target.value)} required /></label>
+          ${msg ? html`<p className="error" role="alert">${msg}</p>` : null}
+          <button className="btn btn-primary" type="submit" disabled=${busy}>${busy ? 'Sending…' : 'Email me a sign-in code'}</button>
+        </form>`
+      : html`<form className="view" style=${{gap: '12px'}} onSubmit=${verify}>
+          <h1>Check your email</h1>
+          <p>We sent a sign-in code to <strong>${clean()}</strong>. Type it here. If you're reading the email on this device, you can tap the link in it instead.</p>
+          <label className="field"><span>Sign-in code</span><input id="login-code" className="input code-input" type="text" name="one-time-code" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]*" maxLength="10" value=${code} onChange=${e => setCode(e.target.value.replace(/\D/g, ''))} autoFocus=${true} /></label>
+          ${msg ? html`<p className="error" role="alert">${msg}</p>` : null}
+          <button className="btn btn-primary" type="submit" disabled=${busy}>${busy ? 'Signing in…' : 'Sign in'}</button>
+          <div className="login-alt">
+            <button type="button" className="btn btn-quiet btn-sm" disabled=${busy || wait > 0} onClick=${() => send()}>${wait > 0 ? 'Send a new code in ' + wait + 's' : 'Send a new code'}</button>
+            <button type="button" className="btn btn-quiet btn-sm" onClick=${() => { setStage('email'); setMsg(''); }}>Use a different email</button>
+          </div>
+        </form>`}
     </div>
   </main>`;
+}
+
+function Offline(){
+  return html`<main className="login"><div className="login-card card"><${Brand} /><h1>Can't connect</h1>
+    <p>The journal couldn't reach the internet. Check your Wi-Fi or data connection, then try again. You don't need to sign in again.</p>
+    <button className="btn btn-primary" onClick=${() => window.location.reload()}>Try again</button></div></main>`;
+}
+
+/* Long-term sign-in. Supabase keeps the session in this browser and refreshes it automatically.
+   A copy of the refresh token also lives in a secure HttpOnly cookie (see functions/api/session.js),
+   so the session survives browsers clearing saved site data, such as Safari after a week away. */
+function makeKeeper(sb){
+  const H = {'X-ABG-Session': '1'};
+  let last = '', timer = null;
+  return {
+    remember(){
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const {data} = await sb.auth.getSession();
+        const rt = data && data.session && data.session.refresh_token;
+        if (!rt || rt === last) return;
+        try { const r = await fetch('/api/session', {method: 'POST', credentials: 'same-origin', headers: Object.assign({'Content-Type': 'application/json'}, H), body: JSON.stringify({refresh_token: rt})}); if (r.ok) last = rt; } catch (e) { /* tries again on the next refresh */ }
+      }, 300);
+    },
+    async restore(){
+      let r;
+      try { r = await fetch('/api/session', {method: 'GET', credentials: 'same-origin', cache: 'no-store', headers: H}); } catch (e) { return {offline: true}; }
+      if (r.status === 503) return {offline: true};
+      if (!r.ok) return {};
+      let t; try { t = await r.json(); } catch (e) { return {}; }
+      if (!t || !t.access_token || !t.refresh_token) return {};
+      const {data, error} = await sb.auth.setSession({access_token: t.access_token, refresh_token: t.refresh_token});
+      if (error || !data || !data.session) return {};
+      last = t.refresh_token;
+      return {session: data.session};
+    },
+    async forget(){ last = ''; clearTimeout(timer); try { await fetch('/api/session', {method: 'DELETE', credentials: 'same-origin', headers: H}); } catch (e) {} },
+  };
 }
 
 function Setup(){
@@ -84,37 +127,47 @@ function Setup(){
 
 async function boot(){
   if (!URL_ || !KEY) { ReactDOM.createRoot(root).render(html`<${Setup} />`); return; }
-  const sb = createClient(URL_, KEY, {auth: {persistSession: true, autoRefreshToken: true, detectSessionInUrl: true}});
-  const {data} = await sb.auth.getSession();
-  let mounted = false;
+  // implicit flow: an emailed link works in whichever browser it opens in
+  const sb = createClient(URL_, KEY, {auth: {persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'implicit'}});
+  const keeper = makeKeeper(sb);
+  let mounted = false, userId = null, leaving = false, screen = null;
+  const show = el => { if (!screen) screen = ReactDOM.createRoot(root); screen.render(el); };
   const start = user => {
     if (mounted) return;
-    mounted = true;
+    mounted = true; userId = user.id;
+    if (screen) { screen.unmount(); screen = null; }
     const db = makeDb(sb);
     const caps = {db, user: makeUser(sb, user, db), sample: makeSample(sb, URL_, KEY), downloads};
-    const meta = user.user_metadata || {};
-    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
     if (user.email) lsSet('abg-last-email', user.email);
-    window.__platform = {audio: makeAudio(sb, URL_, KEY), speech: makeSpeech(sb, URL_, KEY), signOut: async () => { await sb.auth.signOut(); window.location.reload(); }, email: user.email,
-      hasPassword: !!meta.has_password, arrivedFrom: ARRIVED_FROM,
-      setPassword: async pw => {
-        const {error} = await sb.auth.updateUser({password: pw, data: {has_password: true}});
-        if (!error) { window.__platform.hasPassword = true; return {}; }
-        const m = error.message || '', code = error.code || '';
-        if (code === 'same_password' || /different from the old/i.test(m)) { window.__platform.hasPassword = true; return {error: "That's already your password, so you're all set."}; }
-        if (code === 'weak_password' || /at least|weak|characters/i.test(m)) return {error: 'Choose a stronger password: at least 8 characters, mixing letters and numbers.'};
-        if (code === 'reauthentication_needed' || /reauthenticat/i.test(m)) return {error: 'For security, sign out, sign back in with an email link, then set your password right away.'};
-        return {error: "The password couldn't be saved. Check your connection and try again."};
-      }};
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+    window.__platform = {audio: makeAudio(sb, URL_, KEY), speech: makeSpeech(sb, URL_, KEY), email: user.email,
+      // logs out this device only; other devices stay signed in
+      signOut: async () => { leaving = true; await keeper.forget(); try { await sb.auth.signOut({scope: 'local'}); } catch (e) {} window.location.replace(window.location.pathname); }};
     window.claude = {use: async name => caps[name] || null};
-    if (window.location.hash.includes('access_token')) history.replaceState(null, '', window.location.pathname);
+    if (/access_token|error_description/.test(window.location.hash)) history.replaceState(null, '', window.location.pathname + window.location.search);
     window.__mountJournal(root);
   };
-  if (data && data.session) start(data.session.user);
-  else {
-    const r = ReactDOM.createRoot(root);
-    r.render(html`<${Login} sb=${sb} />`);
-    sb.auth.onAuthStateChange((_e, session) => { if (session && !mounted) { r.unmount(); start(session.user); } });
-  }
+  // no async auth calls inside this callback (supabase-js can deadlock); defer them instead
+  sb.auth.onAuthStateChange((event, session) => {
+    if (session && session.user) {
+      keeper.remember();
+      if (!mounted) setTimeout(() => start(session.user), 0);
+      else if (userId && session.user.id !== userId) setTimeout(() => window.location.reload(), 0);
+    } else if (event === 'SIGNED_OUT' && mounted && !leaving) {
+      // the session ended while the app was open: restore it silently if possible, otherwise ask to sign in
+      setTimeout(async () => { const r = await keeper.restore(); if (!r.session) window.location.reload(); }, 0);
+    }
+  });
+
+  const {data} = await sb.auth.getSession();
+  if (data && data.session) { start(data.session.user); return; }
+  const restored = await keeper.restore();
+  if (restored.session) { start(restored.session.user); return; }
+  if (mounted) return;
+  if (restored.offline && navigator.onLine === false) { show(html`<${Offline} />`); return; }
+  const linkProblem = /error_code=otp_expired|error=access_denied/.test(ARRIVED_HASH)
+    ? 'That link has expired or was already used. Enter your email and we will send you a new sign-in code.' : '';
+  if (ARRIVED_HASH) history.replaceState(null, '', window.location.pathname + window.location.search);
+  show(html`<${Login} sb=${sb} notice=${linkProblem} />`);
 }
 boot();

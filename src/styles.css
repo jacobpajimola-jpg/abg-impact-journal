@@ -742,3 +742,4 @@ h1{font-weight:800}
 .login-brand{flex-direction:column;align-items:flex-start;gap:6px}
 .login-brand .brand-text{font-family:var(--font-display);font-weight:700;color:var(--ink-2)}
 .login-alt{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding-top:12px;border-top:1px solid var(--line)}
+.code-input{font-size:1.6rem;letter-spacing:.3em;text-align:center;font-variant-numeric:tabular-nums;font-family:var(--font-display);font-weight:700}

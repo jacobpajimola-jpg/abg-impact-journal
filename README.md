@@ -53,13 +53,38 @@ For each function: **Edge Functions** > **Deploy a new function** > **Via Editor
 
 ### 7. Invite people
 1. **Authentication** > **Users** > **Invite user**. Invite yourself first, then Kyle.
-2. The invited person opens the email and taps the link. Tip for phones: long-press the link, copy it, and open it in Safari or Chrome. Email apps often open links in their own built-in browser, which doesn't share sign-ins with your regular browser.
-3. On that first visit the journal asks them to create a password. After that:
-   - The same browser stays signed in; just open the journal link.
-   - On any other browser, phone or computer, they sign in with email and password, which the phone or browser can save and fill in.
-   - Forgot the password, or skipped it? **Email me a sign-in link** on the sign-in page still works, and a password can be set or changed any time in **Settings > Profile > Password**.
+2. The invited person taps **Accept the invitation** in the email. That's the only setup: the journal opens and stays signed in on that device.
 
-Supabase's built-in email sender allows only a few sign-in emails per hour. That's enough for a small team. If someone gets a "too many emails" message, wait a few minutes.
+### How staying signed in works
+- After someone accepts their invitation (or signs in once on a new device), that browser stays signed in through refreshes, restarts, and weeks away. Opening the journal link goes straight to the Overview.
+- Supabase refreshes the session automatically. A copy of the long-term sign-in token is also kept in a secure, HttpOnly cookie on the journal's own domain (`functions/api/session.js`, a Cloudflare Pages Function). If the browser clears the site's saved data, which Safari does after about a week without a visit, the journal quietly restores the session from that cookie.
+- The cookie function reads the existing `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` Pages variables, so there is nothing extra to set.
+- **Log out** asks for confirmation and signs out only that device. Other devices stay signed in.
+- If a device has no valid sign-in (a new phone, the home-screen app on iPhone, after logging out, or after access was removed), the journal asks for an email address and emails a sign-in code. Typing the code, or tapping the link in the same email, signs that device in. No passwords.
+- To remove someone's access, delete them under **Authentication** > **Users**. Their devices are signed out within the hour.
+
+### Email templates (sign-in code)
+In **Authentication** > **Emails** > **Templates**, the **Magic Link** template should include the code as well as the link:
+
+```html
+<h2>Sign in to the ABG Impact Journal</h2>
+<p>Your sign-in code is:</p>
+<p style="font-size:28px;font-weight:bold;letter-spacing:6px">{{ .Token }}</p>
+<p>Type this code on the sign-in page. Or, if you're reading this on the device you use for the journal, <a href="{{ .ConfirmationURL }}">tap here to sign in</a>.</p>
+<p>The code works once and expires in an hour. If you didn't try to sign in, you can ignore this email.</p>
+```
+
+The **Invite user** template:
+
+```html
+<h2>You're invited to the ABG Impact Journal</h2>
+<p>Arts Bridging the Gap has invited you to the Impact Journal, where staff record student stories.</p>
+<p><a href="{{ .ConfirmationURL }}">Accept the invitation</a></p>
+<p>You'll only do this once. After that, the journal stays signed in on this device.</p>
+<p>Using a phone? If the link opens inside your email app, that's fine. To use the journal in Safari or Chrome instead, open {{ .SiteURL }} there and enter this email address; we'll email you a sign-in code.</p>
+```
+
+Supabase's built-in email sender allows only a few emails per hour, so this project sends through Brevo (custom SMTP). If someone sees a "sent very recently" message, wait a minute.
 
 ---
 

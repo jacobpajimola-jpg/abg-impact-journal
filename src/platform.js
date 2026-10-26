@@ -117,8 +117,9 @@ export function makeUser(sb, authUser, db){
   const ref = db.doc('members/' + authUser.id);
   const loaded = ref.get().then(snap => {
     const d = snap.exists ? (snap.data() || {}) : null;
-    if (d && d.name) { me.name = d.name; me.role = d.role || ''; me.firstName = d.firstName || ''; me.lastName = d.lastName || ''; me.phone = d.phone || ''; me.photo = d.photo || ''; return ref.update({email: authUser.email || '', lastSeen: new Date().toISOString()}); }
-    return ref.set({name: pretty, role: '', email: authUser.email || '', lastSeen: new Date().toISOString()});
+    if (d && d.name) { me.name = d.name; me.role = d.role || ''; me.firstName = d.firstName || ''; me.lastName = d.lastName || ''; me.phone = d.phone || ''; me.photo = d.photo || ''; const now = new Date().toISOString(); return ref.update(Object.assign({email: authUser.email || '', lastSeen: now}, d.joinedAt ? {} : {joinedAt: d.lastSeen || now})); }
+    const now = new Date().toISOString();
+    return ref.set(Object.assign({}, d || {}, {name: pretty, role: (d && d.role) || '', email: authUser.email || '', lastSeen: now, joinedAt: (d && d.joinedAt) || now}));
   }).catch(() => {});
   return Object.freeze({
     me: async () => { await loaded; return me; },
