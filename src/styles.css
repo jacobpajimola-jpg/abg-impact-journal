@@ -743,3 +743,11 @@ h1{font-weight:800}
 .login-brand .brand-text{font-family:var(--font-display);font-weight:700;color:var(--ink-2)}
 .login-alt{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding-top:12px;border-top:1px solid var(--line)}
 .code-input{font-size:1.6rem;letter-spacing:.3em;text-align:center;font-variant-numeric:tabular-nums;font-family:var(--font-display);font-weight:700}
+/* demo data */
+.tone-demo{background:#FFF1C9;color:#6B4E00;border:1px dashed #C9A227}
+.demo-note{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;background:#FFF8E1;border:1px dashed #E0C25A;border-radius:12px;padding:10px 14px;color:var(--ink)}
+.demo-note p{margin:0}
+.demo-note.warn{background:var(--warn-soft);border-color:var(--warn)}
+.danger-text{color:var(--bad)}
+:root[data-theme="dark"] .tone-demo,:root[data-theme="dark"] .demo-note{background:#3A3216;color:#F3E2A6;border-color:#8A7530}
+.demo-note > span:not(.pill){flex:1 1 300px;min-width:0}

@@ -88,6 +88,17 @@ Supabase's built-in email sender allows only a few emails per hour, so this proj
 
 ---
 
+## Demo stories (fictional)
+
+The first time an editor opens the journal, it adds six fictional demo stories (Michelangelo, Leonardo, Vincent, Frida, Pablo and Georgia, named after famous artists) so the Overview, Story Library and Impact Insights have something to explore. They live in `src/demoData.js` and go through the same steps as a real interview: transcript, analysis, review and save.
+
+- Every demo record is marked `demo: true` and labeled **Demo** in the app. The students, schools, programs and outcomes are invented.
+- Demo stories are **left out of reports and exports** by default. Settings > Demo Stories (or the notice on Reports and exports) can include them, marked "[DEMO, fictional]".
+- Settings > Demo Stories can hide them everywhere, remove them all in one step, or load them again. Removing them never touches real stories.
+- Real interviews never match a demo student or suggest linking to a demo story.
+
+---
+
 ## Natural voice for interview questions
 The app can read each interview question aloud. By default it uses a natural voice from Groq (Orpheus), with the same `GROQ_API_KEY` used for transcription, so no new account is needed. It costs about $22 per million characters, which works out to a dollar or two a semester. If the natural voice can't be reached, the app falls back to the device's built-in voice. Kyle can switch voices or turn the voice off in Settings.
 1. Deploy the `speak` function from [`supabase/functions/speak/index.ts`](supabase/functions/speak/index.ts) the same way as the other two, with "Verify JWT" off.

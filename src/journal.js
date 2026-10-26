@@ -1,3 +1,4 @@
+import { DEMO_STORIES } from './demoData.js';
 (function(){
 'use strict';
 if (!window.React || !window.ReactDOM || !window.htm) {
@@ -610,7 +611,7 @@ function normalizeAnalysis(raw, ctx){
 }
 
 async function runAnalysis({sample, mode, story, stories, items, whenHint, studentName, memo, studentInfo, signal}){
-  const others = stories.filter(s => !story || s.id !== story.id)
+  const others = stories.filter(s => (!story || s.id !== story.id) && (!s.demo || (story && story.demo)))
     .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0, 80)
     .map(s => ({id: s.id, title: s.title || null, student: s.alias || null, program: s.program || null, community: s.community || null, summary: trunc(s.summary, 220) || null}));
   const prompt = analysisPrompt({mode, story, items, others, whenHint, memo: asStr(memo), studentInfo, studentName: studentName || (story && story.alias) || ''});
@@ -1608,14 +1609,15 @@ function InsightsOverview({list, filterBar}){
       <div className="sec-head"><div><h2>Featured Stories</h2><p className="small muted">Real student experiences that highlight the impact of ABG's work.</p></div><button className="btn btn-quiet btn-sm view-all" onClick=${() => nav('library')}>View all stories <span aria-hidden="true">→</span></button></div>
       ${featured.length === 0 ? html`<p className="empty-note">No student stories in this view yet.</p>` : html`<div className="fs-grid">${featured.map(st => { const ov = st.overview || {}; const tags = ACTIVE_OUTCOMES.filter(o => storyOutcomes(st).has(o.id)).slice(0, 2); return html`<button className="fs-card" key=${st.id} onClick=${() => nav('story', {id: st.id})}>
         ${storyArt(st.id)}
-        <span className="fs-main"><strong>${st.alias || st.title}</strong><small className="muted">${[st.program, ov.ageOrGrade || ov.demographics].filter(Boolean).join(' · ')}</small><span className="fs-sum">${st.summary || st.title}</span></span>
+        <span className="fs-main"><strong>${st.alias || st.title}${st.demo ? html` <${DemoPill} />` : null}</strong><small className="muted">${[st.program, ov.ageOrGrade || ov.demographics].filter(Boolean).join(' · ')}</small><span className="fs-sum">${st.summary || st.title}</span></span>
         ${tags.length ? html`<span className="fs-tags">${tags.map(o => { const pp = outcomePill(o); return html`<span className=${pp.className} style=${pp.style} key=${o.id}>${o.short}</span>`; })}</span>` : null}
       </button>`; })}</div>`}
     </section>
   </div>`;
 }
 function DashboardView({tab: initial}){
-  const {stories} = useApp();
+  const {stories, nav} = useApp();
+  const demoN = stories.filter(x => x.demo).length;
   const [tab, setTab] = useState(initial || 'overview');
   const [range, setRange] = useState(() => lsGet('abg-ins-range') || '12m');
   const [f, setF] = useState({program: '', grade: '', school: '', outcome: ''});
@@ -1641,6 +1643,7 @@ function DashboardView({tab: initial}){
         <button className="btn btn-ghost btn-sm" onClick=${() => setTab('reports')}><${Icon} name="file" size=${16} /> Reports and exports</button>
       </div>
     </div>
+    ${demoN > 0 ? html`<p className="notice small demo-note"><${DemoPill} /> <span>Includes ${demoN} fictional demo stor${demoN === 1 ? 'y' : 'ies'} so you can see how Insights work. They're left out of reports and exports. <button className="link-btn" onClick=${() => nav('settings')}>Manage demo stories</button></span></p>` : null}
     <${InsightsOverview} list=${list} filterBar=${html`<div className="filter-bar">
       <span className="filter-label">Filter by:</span>
       ${sel('program', 'Program', programs.map(p => [p, p]))}
@@ -1666,6 +1669,7 @@ function StoryCard({story, why}){
   const open = () => nav('story', {id: story.id});
   return html`<div className="card story-card" role="button" tabIndex="0" onClick=${open} onKeyDown=${e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}>
     <div className="sc-top">
+      ${story.demo ? html`<${DemoPill} />` : null}
       <${StatusPill} status=${story.status} />
       ${story.period === 'past' ? html`<${Pill} tone="orange">Historical<//>` : null}
       ${updates > 0 ? html`<${Pill} tone="blue">${updates} update${updates > 1 ? 's' : ''}<//>` : null}
@@ -1710,7 +1714,7 @@ function RecentStoryRow({story, i}){
   const open = () => nav('story', {id: story.id});
   return html`<div className="recent-row" role="button" tabIndex="0" onClick=${open} onKeyDown=${e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}>
     <span className=${'avatar avatar-lg tone-' + tone}>${initialsOf(name).slice(0, 1)}</span>
-    <span className="recent-main"><strong>${name}</strong>${meta ? html`<small className="muted">${meta}</small>` : null}<span className="recent-sum">${story.summary || story.title || 'Not analyzed yet.'}</span></span>
+    <span className="recent-main"><strong>${name}${story.demo ? html` <${DemoPill} />` : null}</strong>${meta ? html`<small className="muted">${meta}</small>` : null}<span className="recent-sum">${story.summary || story.title || 'Not analyzed yet.'}</span></span>
     <span className="recent-side"><small className="muted">${fmtDate(story.createdAt)}</small>${n ? html`<span className=${'pill tone-' + tone}>${n} outcome${n === 1 ? '' : 's'}</span>` : null}</span>
     <${Icon} name="chev" size=${18} />
   </div>`;
@@ -1738,6 +1742,7 @@ function HomeView(){
       </div>
       <${PaletteArt} />
     </section>
+    ${stories.some(x => x.demo) ? html`<p className="notice small demo-note"><${DemoPill} /> <span>Stories marked Demo are fictional examples showing how a recorded story becomes impact evidence. <button className="link-btn" onClick=${() => nav('insights')}>See them in Impact Insights</button> or <button className="link-btn" onClick=${() => nav('settings')}>manage demo stories</button>.</span></p>` : null}
     <div className="stat-row">
       ${stat('openbook', 'purple', 'Stories captured', stories.length, 'Journal entries', 'library')}
       ${stat('users', 'teal', 'Students featured', studentsN, 'Unique first names', 'library')}
@@ -2112,7 +2117,7 @@ function InterviewView({params}){
   }, [current && current.q, voiceOn, loadingQ, busy, step]);
   function toggleVoice(){ const on = !voiceOn; setVoiceOn(on); lsSet('abg-voice', on ? 'on' : 'off'); if (!on) VOICE.stop(); }
 
-  const matches = useMemo(() => { const k = norm(first); return k ? students.filter(x => x.nameKey === k) : []; }, [students, first]);
+  const matches = useMemo(() => { const k = norm(first); return k ? students.filter(x => x.nameKey === k && !x.demo) : []; }, [students, first]);
   const storiesFor = sid => stories.filter(s => s.studentId === sid);
   const asked = turns.filter(t => t.kind === 'followup').length;
 
@@ -2940,7 +2945,7 @@ function StoryView({id}){
     const other = stories.find(s => s.id === sid);
     if (other) await safeWrite(() => caps.db.collection('stories').doc(sid).update({links: clone(other.links || []).filter(l => l.storyId !== id)}));
   }} />`);
-  function exportStory(){ saveFile(caps, showToast, 'abg-story-' + slug(story.title) + '.md', storyMarkdown(story, entries || [])); }
+  function exportStory(){ saveFile(caps, showToast, 'abg-' + (story.demo ? 'DEMO-' : '') + 'story-' + slug(story.title) + '.md', (story.demo ? '> FICTIONAL DEMO STORY. Not a real ABG student or outcome.\n\n' : '') + storyMarkdown(story, entries || [])); }
   function confirmDelete(){
     const n = (entries || []).length || story.entryCount || 1;
     openSheet(close => html`<${ConfirmSheet} close=${close} title="Delete this story?" body=${'This deletes the story, its ' + n + ' journal entr' + (n === 1 ? 'y' : 'ies') + ', transcripts and recordings, its evidence, and its timeline. The student record stays. This can\'t be undone.'} confirmLabel="Delete story" onConfirm=${async () => {
@@ -2965,8 +2970,10 @@ function StoryView({id}){
 
   return html`<div className="view story">
     <div className="crumbs"><button className="btn btn-quiet btn-sm" onClick=${() => nav('library')}><${Icon} name="back" size=${16} /> Story Library</button></div>
+    ${story.demo ? html`<p className="notice demo-note small"><strong>Fictional demo story.</strong> This student, school and outcomes are invented to show how a recorded story becomes impact evidence. Demo stories are left out of reports and exports unless included in Settings.</p>` : null}
     <header className="story-head">
       <div className="chips">
+        ${story.demo ? html`<${DemoPill} />` : null}
         <${StatusPill} status=${story.status} />
         ${story.period === 'past' ? html`<${Pill} tone="orange">Historical<//>` : null}
         ${updates > 0 ? html`<${Pill} tone="blue">${updates} update${updates > 1 ? 's' : ''}<//>` : null}
@@ -3622,7 +3629,10 @@ function FollowupsView({embedded}){
 
 /* ================= reports ================= */
 function ReportsView({embedded}){
-  const {caps, stories, students, metrics, showToast} = useApp();
+  const {caps, stories: shown, students: shownStudents, metrics, showToast, settings, safeWrite, readOnly} = useApp();
+  const rset = forReporting(shown, shownStudents, settings);
+  const stories = rset.stories, students = rset.students;
+  const setDemoInExports = v => safeWrite(() => caps.db.doc('config/settings').set(Object.assign({}, settings, {demo: Object.assign({}, settings.demo || {}, {inExports: v}), updatedAt: nowISO()})));
   const approved = stories.filter(s => s.status === 'approved');
   const [report, setReport] = useState(() => lsGet('abg-report') || '');
   const [busy, setBusy] = useState(false);
@@ -3659,6 +3669,10 @@ function ReportsView({embedded}){
   const dlBtn = (fn, label) => html`<button className="btn btn-ghost btn-sm" disabled=${!caps.downloads} onClick=${fn}><${Icon} name="download" size=${16} /> ${label || 'Download'}</button>`;
   return html`<div className="view reports">
     ${embedded ? null : html`<header className="page-head"><h1>Impact Reports</h1><p className="muted">Turn approved stories and verified evidence into fundraising materials, grant applications, partnership packets, newsletters, and annual impact summaries.</p></header>`}
+    ${rset.demoN > 0 ? html`<div className=${'notice small demo-note' + (rset.included ? ' warn' : '')}>
+      ${rset.included ? html`<p><strong>Fictional demo stories are included</strong> in this report and these exports, marked "[DEMO, fictional]". Don't share these files outside ABG.</p>` : html`<p><strong>${rset.demoN} fictional demo stor${rset.demoN === 1 ? 'y is' : 'ies are'} left out</strong> of reports and exports. Include them to try the report and exports with sample data.</p>`}
+      ${readOnly ? null : html`<button className="btn btn-ghost btn-sm" onClick=${() => setDemoInExports(!rset.included)}>${rset.included ? 'Leave demo stories out' : 'Include demo stories'}</button>`}
+    </div>` : null}
     <section className="card">
       <h2>Generate Impact Report</h2>
       <p className="small muted">Uses only stories approved for external use (${approved.length} now) and verified program metrics (${metrics.length}). Theme counts and data gaps cover all stories. The draft keeps storytelling separate from verified numbers and cites each story.</p>
@@ -3701,6 +3715,70 @@ function ListEditor({title, hint, items, onChange, placeholder, disabled, id}){
     ${!disabled ? html`<form className="add-row" onSubmit=${e => { e.preventDefault(); add(); }}><input id=${id} className="input" aria-label=${'Add to ' + title} placeholder=${placeholder} value=${v} onChange=${e => setV(e.target.value)} /><button className="btn btn-ghost" type="submit">Add</button></form>` : null}
   </section>`;
 }
+/* ---------- fictional demo stories (src/demoData.js) ----------
+   Built through the same steps as a real interview: transcript entries, the analysis structure,
+   normalizeAnalysis, newStoryFromAnalysis and finalizeStory. Every record carries demo: true and a
+   fixed id, so loading twice never duplicates and removal is exact. */
+const DEMO_ID = {story: k => 'demo-story-' + k, student: k => 'demo-student-' + k, entry: (k, i) => 'demo-entry-' + k + '-' + (i + 1)};
+function buildDemoRecords(me){
+  const out = {students: [], entries: [], stories: []};
+  DEMO_STORIES.forEach(d => {
+    const name = d.firstName, sid = DEMO_ID.story(d.key);
+    const entries = d.entries.map((en, i) => {
+      const turns = en.turns.map(([q, a], j) => ({
+        q: q === 'OPENING' ? OPENING_Q(name) : q === 'UPDATE' ? UPDATE_OPENING_Q(name) : q === 'CLOSING' ? CLOSING_Q(name) : q,
+        kind: q === 'OPENING' || q === 'UPDATE' ? 'opening' : q === 'CLOSING' ? 'closing' : 'followup', category: '',
+        a, status: 'answered', at: new Date(Date.parse(en.recordedAt) + j * 150000).toISOString(), audio: []}));
+      return {id: DEMO_ID.entry(d.key, i), storyId: sid, recordedAt: en.recordedAt, eventDateText: '', eventApprox: false, prompt: turns[0].q,
+        transcript: turnsToText(turns), turns, audio: [], transcriptEdited: null, summary: i === 0 ? (d.analysis.entrySummary || '') : 'Update interview', takeaways: [],
+        source: i === 0 ? 'interview' : 'interview-update', analyzed: true, createdBy: (me && me.id) || null, demo: true};
+    });
+    const a = normalizeAnalysis(d.analysis, {items: entries.map(e => ({id: e.id, text: e.transcript})), storyIds: new Set()});
+    const draft = newStoryFromAnalysis(a, {me, studentId: DEMO_ID.student(d.key), studentName: name, studentInfo: {gender: d.gender, school: d.school, demographics: d.demographics}});
+    const st = finalizeStory(draft, me).story;
+    const fu = (d.tasks || []).map((t, i) => ({id: 'demo-fu-' + d.key + '-t' + i, kind: 'task', question: t.q, due: t.due || '', status: t.status || 'open', answer: t.answer || '', entryId: null, suggested: true}))
+      .concat((d.questions || []).map((q, i) => ({id: 'demo-fu-' + d.key + '-q' + i, kind: 'question', question: q.q, due: '', status: q.status || 'open', answer: q.answer || '', entryId: q.status === 'answered' ? entries[entries.length - 1].id : null})));
+    Object.assign(st, {id: sid, demo: true, status: d.status, privacy: Object.assign({}, st.privacy, d.privacy), createdAt: d.createdAt, updatedAt: d.updatedAt, createdBy: (me && me.id) || null,
+      entryCount: entries.length, followUps: fu, analysis: {state: 'done', at: d.updatedAt},
+      quotes: st.quotes.map(q => Object.assign({}, q, {approved: d.status === 'approved'})),
+      drafts: (d.drafts || []).map((x, i) => ({id: 'demo-draft-' + d.key + '-' + i, audience: x.audience || '', format: x.format, text: x.text, createdAt: d.updatedAt, approved: !!x.approved})),
+      links: (d.links || []).map(l => ({storyId: DEMO_ID.story(l.key), type: l.type, reason: l.reason, confirmed: true}))});
+    out.stories.push(st);
+    out.entries = out.entries.concat(entries);
+    out.students.push({id: DEMO_ID.student(d.key), firstName: name, nameKey: norm(name), gender: d.gender || '', school: d.school || '', demographics: d.demographics || '', note: '', createdAt: d.createdAt, createdBy: (me && me.id) || null, demo: true});
+  });
+  /* links go both ways */
+  out.stories.forEach(st => st.links.forEach(l => { const o = out.stories.find(x => x.id === l.storyId); if (o && !o.links.some(x => x.storyId === st.id)) o.links.push({storyId: st.id, type: l.type, reason: l.reason, confirmed: true}); }));
+  return out;
+}
+async function loadDemoData(db, me){
+  const r = buildDemoRecords(me);
+  const put = async (col, rec) => { const x = Object.assign({}, rec); delete x.id; await db.collection(col).doc(rec.id).set(x); };
+  for (const x of r.students) await put('students', x);
+  for (const x of r.entries) await put('entries', x);
+  for (const x of r.stories) await put('stories', x);
+  return r;
+}
+async function removeDemoData(db, allStories, allStudents){
+  const storyIds = uniq(DEMO_STORIES.map(d => DEMO_ID.story(d.key)).concat(allStories.filter(x => x.demo).map(x => x.id)));
+  for (const sid of storyIds) {
+    const snap = await db.collection('entries').where('storyId', '==', sid).get();
+    for (const d of snap.docs) await db.collection('entries').doc(d.id).delete();
+    if (allStories.some(x => x.id === sid) || DEMO_STORIES.some(d => DEMO_ID.story(d.key) === sid)) await db.collection('stories').doc(sid).delete();
+  }
+  for (const id of uniq(DEMO_STORIES.map(d => DEMO_ID.student(d.key)).concat(allStudents.filter(x => x.demo).map(x => x.id)))) await db.collection('students').doc(id).delete();
+  /* a real story never keeps a link to a removed demo story */
+  for (const o of allStories.filter(x => !x.demo && (x.links || []).some(l => storyIds.includes(l.storyId)))) await db.collection('stories').doc(o.id).update({links: (o.links || []).filter(l => !storyIds.includes(l.storyId))});
+}
+/* demo records stay out of reports and exports unless included; when included they are clearly marked */
+function forReporting(stories, students, settings){
+  const inc = !!((settings && settings.demo) || {}).inExports;
+  if (!inc) return {stories: stories.filter(x => !x.demo), students: (students || []).filter(x => !x.demo), demoN: stories.filter(x => x.demo).length, included: false};
+  const mark = x => x.demo ? Object.assign({}, x, {title: '[DEMO, fictional] ' + (x.title || ''), summary: '[Fictional demo story] ' + (x.summary || '')}) : x;
+  return {stories: stories.map(mark), students: students || [], demoN: stories.filter(x => x.demo).length, included: true};
+}
+function DemoPill(){ return html`<span className="pill tone-demo" title="Fictional demo story">Demo</span>`; }
+
 /* log out asks first, so a stray tap doesn't sign someone out */
 function confirmLogout(openSheet){
   openSheet(close => html`<${ConfirmSheet} close=${close} title="Log out of this device?" body="You'll need a sign-in code from your email to get back in on this device. Only log out on a shared or borrowed device. Your other devices stay signed in." confirmLabel="Log out" onConfirm=${async () => { await window.__platform.signOut(); }} />`);
@@ -3714,6 +3792,7 @@ const SETTINGS_SECTIONS = [
   {id: 'privacy', label: 'Data & Privacy', icon: 'shield'},
   {id: 'display', label: 'Display', icon: 'monitor'},
   {id: 'team', label: 'Team Access', icon: 'users'},
+  {id: 'demo', label: 'Demo Stories', icon: 'spark'},
 ];
 const ROLES = ['Program Director', 'Program Coordinator', 'Executive Director', 'Teaching Artist', 'Staff', 'Volunteer', 'Consultant'];
 const THEME_OPTS = [{id: 'light', label: 'Light', hint: 'The standard cream look.'}, {id: 'auto', label: 'Match this device', hint: 'Light or dark, following your phone or computer.'}, {id: 'dark', label: 'Dark', hint: 'Easier on the eyes at night.'}];
@@ -3766,8 +3845,17 @@ function ItemRow({color, name, desc, onEdit, onDelete, readOnly, deleteLabel}){
   </div>`;
 }
 function SettingsView(){
-  const {caps, settings, stories, safeWrite, readOnly, updateMe, openSheet, showToast} = useApp();
+  const {caps, settings, stories, allStories, allStudents, safeWrite, readOnly, updateMe, openSheet, showToast} = useApp();
   const me = caps.me || {};
+  const demo = settings.demo || {};
+  const demoStories = (allStories || []).filter(x => x.demo);
+  const [demoBusy, setDemoBusy] = useState('');
+  const setDemo = patch => save({demo: Object.assign({}, cur().demo || {}, patch)});
+  const [demoShow, setDemoShow] = useState(!demo.hidden);
+  const [demoExp, setDemoExp] = useState(!!demo.inExports);
+  useEffect(() => { setDemoShow(!demo.hidden); setDemoExp(!!demo.inExports); }, [demo.hidden, demo.inExports]);
+  async function loadDemo(){ setDemoBusy('load'); const ok = await safeWrite(async () => { await loadDemoData(caps.db, me); }); if (ok) { await setDemo({loadedAt: nowISO(), removedAt: null, hidden: false}); showToast('Six demo stories added'); } setDemoBusy(''); }
+  const removeDemo = () => openSheet(close => html`<${ConfirmSheet} close=${close} title="Remove all demo stories?" body=${'This deletes the ' + demoStories.length + ' fictional demo stories, their interview entries and demo student records. Real stories are not touched. You can load the demo stories again later.'} confirmLabel="Remove demo stories" onConfirm=${async () => { const ok = await safeWrite(() => removeDemoData(caps.db, allStories || [], allStudents || [])); if (ok) { await setDemo({removedAt: nowISO(), loadedAt: null}); showToast('Demo stories removed'); } }} />`);
   /* saves build on the latest written values, so quick edits in a row never overwrite each other */
   const latest = useRef(settings);
   useEffect(() => { latest.current = settings; }, [settings]);
@@ -3974,6 +4062,16 @@ function SettingsView(){
           </div>
         </section></div>
 
+        <div className="set-sec" id="sec-demo" data-sec="demo"><section className="card set-card">
+          ${head('Demo Stories', 'Six fictional students, named after famous artists, show how recorded stories turn into Impact Insights. Their schools, programs and outcomes are invented.')}
+          ${demoStories.length ? html`
+            <p className="small">${demoStories.length} demo stor${demoStories.length === 1 ? 'y' : 'ies'} in the journal, each labeled <${DemoPill} />. Their numbers are calculated from the demo records, the same way real stories are.</p>
+            <label className="switch-row"><span><strong>Show demo stories in the journal</strong><br /><span className="small muted">Turn off to hide them everywhere (Overview, Story Library, Impact Insights) without deleting them.</span></span><input id="set-demo-show" type="checkbox" className="switch" checked=${demoShow} disabled=${readOnly} onChange=${e => { const v = e.target.checked; setDemoShow(v); setDemo({hidden: !v}); }} /></label>
+            <label className="switch-row"><span><strong>Include demo stories in reports and exports</strong><br /><span className="small muted">Off by default, so fictional stories never end up in donor reports or files. When on, they're marked "[DEMO, fictional]".</span></span><input id="set-demo-exports" type="checkbox" className="switch" checked=${demoExp} disabled=${readOnly} onChange=${e => { const v = e.target.checked; setDemoExp(v); setDemo({inExports: v}); }} /></label>
+            ${readOnly ? null : html`<div><button className="btn btn-ghost btn-sm danger-text" onClick=${removeDemo}><${Icon} name="trash" size=${16} /> Remove all demo stories</button></div>`}`
+          : html`<p className="small">No demo stories are in the journal.</p>${readOnly ? null : html`<div><button className="btn btn-primary btn-sm" disabled=${!!demoBusy} onClick=${loadDemo}>${demoBusy === 'load' ? 'Adding…' : 'Load six demo stories'}</button></div>`}`}
+        </section></div>
+
         <div className="set-sec" id="sec-team" data-sec="team"><section className="card set-card">
           ${head('Team Access', 'People who have signed in to this journal. Everyone signed in can record, edit and export stories.')}
           <div className="item-list">
@@ -4011,7 +4109,9 @@ function App(){
   const [students, setStudents] = useState([]);
   const [backlog, setBacklog] = useState([]);
   const [backlogLoaded, setBacklogLoaded] = useState(false);
-  const [settings, setSettings] = useState({programs: [], communities: [], programInfo: {}, outcomes: []});
+  const [settings, setSettings] = useState({programs: [], communities: [], programInfo: {}, outcomes: [], demo: {}});
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const demoSeeded = useRef(false);
   const [route, setRoute] = useState(initialRoute);
   const [sheet, setSheet] = useState(null);
   const [toast, setToast] = useState(null);
@@ -4044,7 +4144,7 @@ function App(){
     const u1 = db.collection('stories').onSnapshot(snap => { setStories(snap.docs.map(d => Object.assign({id: d.id}, d.data()))); setStoriesLoaded(true); }, err => { setStoriesLoaded(true); showToast(dbErrorMessage(err)); });
     const u2 = db.collection('metrics').onSnapshot(snap => setMetrics(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
     const u4 = db.collection('students').onSnapshot(snap => setStudents(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
-    const u3 = db.doc('config/settings').onSnapshot(snap => { const d = snap.exists ? (snap.data() || {}) : {}; ACTIVE_OUTCOMES = mergeOutcomes(d.outcomes); setSettings({programs: asArr(d.programs), communities: asArr(d.communities), programInfo: d.programInfo && typeof d.programInfo === 'object' ? d.programInfo : {}, outcomes: asArr(d.outcomes)}); }, () => {});
+    const u3 = db.doc('config/settings').onSnapshot(snap => { const d = snap.exists ? (snap.data() || {}) : {}; ACTIVE_OUTCOMES = mergeOutcomes(d.outcomes); setSettings({programs: asArr(d.programs), communities: asArr(d.communities), programInfo: d.programInfo && typeof d.programInfo === 'object' ? d.programInfo : {}, outcomes: asArr(d.outcomes), demo: d.demo && typeof d.demo === 'object' ? d.demo : {}}); setSettingsLoaded(true); }, () => setSettingsLoaded(true));
     const u5 = db.collection('backlog').onSnapshot(snap => { setBacklog(snap.docs.map(d => Object.assign({id: d.id}, d.data()))); setBacklogLoaded(true); }, () => setBacklogLoaded(true));
     return () => { u1(); u2(); u3(); u4(); u5(); };
   }, [caps.status]);
@@ -4062,7 +4162,25 @@ function App(){
   }, [caps.canWrite, showToast]);
 
   const updateMe = useCallback(patch => setCaps(c => Object.assign({}, c, {me: Object.assign({}, c.me, patch)})), []);
-  const ctx = {caps, updateMe, stories, students, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite, readOnly};
+  /* fictional demo stories: added once so a new journal has something to explore; hidden or removed from Settings */
+  useEffect(() => {
+    if (caps.status !== 'ready' || !storiesLoaded || !settingsLoaded || readOnly || demoSeeded.current || window.__ABG_NO_DEMO_SEED) return;
+    const dc = settings.demo || {};
+    if (dc.loadedAt || dc.removedAt) return;
+    demoSeeded.current = true;
+    (async () => {
+      const ok = await safeWrite(async () => {
+        await caps.db.doc('config/settings').set(Object.assign({}, settings, {demo: Object.assign({}, dc, {loadedAt: nowISO(), hidden: false, inExports: false}), updatedAt: nowISO()}));
+        await loadDemoData(caps.db, caps.me || {});
+      });
+      if (ok) showToast('Six fictional demo stories were added so you can explore. They are labeled Demo; manage them in Settings.');
+    })();
+  }, [caps.status, storiesLoaded, settingsLoaded, readOnly]);
+  const demoHidden = !!(settings.demo || {}).hidden;
+  const allStories = stories, allStudents = students;
+  const shownStories = useMemo(() => demoHidden ? stories.filter(x => !x.demo) : stories, [stories, demoHidden]);
+  const shownStudents = useMemo(() => demoHidden ? students.filter(x => !x.demo) : students, [students, demoHidden]);
+  const ctx = {caps, updateMe, stories: shownStories, students: shownStudents, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite, readOnly};
   const focus = caps.status === 'ready' && (route.name === 'record' || route.name === 'review' || route.name === 'interview');
   let content;
   if (caps.status === 'loading') content = html`<div className="boot"><div className="boot-mark"></div><p>Opening ABG Impact Journal…</p></div>`;
