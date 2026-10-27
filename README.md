@@ -102,7 +102,7 @@ Supabase's built-in email sender allows only a few emails per hour, so this proj
 
 **Stakeholder report.** Reports and exports > Stakeholder report builds an executive summary, key findings, outcomes by area, selected stories, evidence types and limitations from the records. External use includes approved stories only, with the privacy rules applied.
 
-**Roles.** Admin (roles, demo data), Editor (record, edit, approve, export), Viewer (read only, no raw transcripts). Admins set roles in Settings > Team Access. To enforce roles on the server as well, run section 3 of `supabase/setup.sql`.
+**Administrators and users.** Two roles: **Admin** (invite and manage users, change roles, application settings, demo data, plus everything else) and **Standard user** (record, review, edit and export stories, Impact Insights). Roles live in the server-side `user_roles` table, keyed by authenticated email, and only the `admin` Edge Function changes them after checking that the caller is an admin. Admins use **Settings > Manage Users** to invite people (secure email invitation), change roles, resend invitations, deactivate or reactivate, and remove access; every change is recorded and shown under Recent activity. Nobody can change their own role or remove themselves, and the last active admin can't be demoted, deactivated or removed. Setup: run `supabase/admin-roles.sql` once (creates the tables and access rules and makes the five initial admins), and deploy `supabase/functions/admin` with "Verify JWT" turned off (the function checks the sign-in itself).
 
 ## Demo stories (fictional)
 

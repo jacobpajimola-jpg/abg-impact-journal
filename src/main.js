@@ -1,7 +1,7 @@
 import './globals.js';
 import './styles.css';
 import { createClient } from '@supabase/supabase-js';
-import { makeDb, makeUser, makeSample, makeAudio, makeSpeech, downloads } from './platform.js';
+import { makeDb, makeUser, makeSample, makeAudio, makeSpeech, makeAdmin, makeRole, downloads } from './platform.js';
 import './journal.js';
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL;
@@ -141,6 +141,7 @@ async function boot(){
     if (user.email) lsSet('abg-last-email', user.email);
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
     window.__platform = {audio: makeAudio(sb, URL_, KEY), speech: makeSpeech(sb, URL_, KEY), email: user.email,
+      admin: makeAdmin(sb, URL_, KEY), getRole: makeRole(sb, user.email),
       // logs out this device only; other devices stay signed in
       signOut: async () => { leaving = true; await keeper.forget(); try { await sb.auth.signOut({scope: 'local'}); } catch (e) {} window.location.replace(window.location.pathname); }};
     window.claude = {use: async name => caps[name] || null};

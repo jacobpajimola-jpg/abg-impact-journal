@@ -43,25 +43,5 @@ create policy "Invited users can listen" on storage.objects for select to authen
 create policy "Invited users can upload" on storage.objects for insert to authenticated with check (bucket_id = 'recordings');
 create policy "Invited users can delete recordings" on storage.objects for delete to authenticated using (bucket_id = 'recordings');
 
--- 3. Roles enforced on the server (Admin, Editor, Viewer). Optional but recommended.
--- The app reads roles from the journal document config/access ({"roles": {"email": "admin|editor|viewer"}}).
--- People who aren't listed are Editors; the two addresses below are Admins until changed.
--- With this in place, Viewers can read but can't add, change or delete anything except their own profile,
--- and only Admins can change roles.
-create or replace function public.journal_role() returns text
-language sql stable security definer set search_path = public as $$
-  select coalesce(
-    (select data->'roles'->>lower(coalesce(auth.jwt()->>'email', '')) from public.docs where path = 'config/access'),
-    case when lower(coalesce(auth.jwt()->>'email', '')) in ('jacob.pajimola@pepperdine.edu', 'kyle@artsbridgingthegap.org') then 'admin' else 'editor' end
-  );
-$$;
-drop policy if exists "Invited users can add" on public.docs;
-drop policy if exists "Invited users can edit" on public.docs;
-drop policy if exists "Invited users can delete" on public.docs;
-create policy "Invited users can add" on public.docs for insert to authenticated
-  with check ((public.journal_role() <> 'viewer' or path = 'members/' || auth.uid()::text) and (path <> 'config/access' or public.journal_role() = 'admin'));
-create policy "Invited users can edit" on public.docs for update to authenticated
-  using ((public.journal_role() <> 'viewer' or path = 'members/' || auth.uid()::text) and (path <> 'config/access' or public.journal_role() = 'admin'))
-  with check ((public.journal_role() <> 'viewer' or path = 'members/' || auth.uid()::text) and (path <> 'config/access' or public.journal_role() = 'admin'));
-create policy "Invited users can delete" on public.docs for delete to authenticated
-  using (public.journal_role() <> 'viewer' and (path <> 'config/access' or public.journal_role() = 'admin'));
+-- 3. Administrators, roles and audit history: run supabase/admin-roles.sql next (it replaces the
+--    open write rules above with role-aware ones and sets up the first administrators).

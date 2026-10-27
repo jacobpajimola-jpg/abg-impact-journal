@@ -270,3 +270,25 @@ export function makeAudio(sb, url, anonKey){
     },
   });
 }
+
+/* administrator actions, carried out by the "admin" Edge Function, which checks the caller's role on the server */
+export function makeAdmin(sb, url, anonKey){
+  return async (action, payload) => {
+    const headers = await authHeaders(sb, anonKey);
+    let res;
+    try { res = await fetch(url + '/functions/v1/admin', {method: 'POST', headers, body: JSON.stringify(Object.assign({action}, payload || {}))}); }
+    catch (e) { throw {message: "Couldn't reach the journal. Check your connection and try again."}; }
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw {message: (data && data.error) || (res.status === 404 ? 'User management is not set up on the server yet.' : "That didn't work. Try again."), code: data && data.code, status: res.status};
+    return data;
+  };
+}
+/* this person's role, from the server-side roles table (standard user unless an administrator assigned otherwise) */
+export function makeRole(sb, email){
+  return async () => {
+    const e = String(email || '').toLowerCase();
+    const {data, error} = await sb.from('user_roles').select('role').eq('email', e).maybeSingle();
+    if (error) return 'user';
+    return (data && data.role) || 'user';
+  };
+}

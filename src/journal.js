@@ -3499,7 +3499,7 @@ function StoryView({id}){
       </div>`)}
     </section>` : null}
 
-    ${role === 'viewer' ? html`<section className="card"><h2>Interview transcripts</h2><p className="small muted">Raw interview transcripts are available to editors and admins.</p></section>` : html`<section className="card">
+    ${html`<section className="card">
       <h2>Interview transcripts</h2>
       <p className="small muted">The original account and every update, kept as recorded.</p>
       ${entries === null ? html`<div className="skeleton" style=${{height: '60px'}}></div>` : entries.length === 0 ? html`<p className="empty-note">No entries on file.</p>` : entries.map((e, idx) => {
@@ -4185,7 +4185,7 @@ function ReportsView({embedded}){
         ${row('Approved quotes (CSV)', 'Quotes marked approved, from approved stories only.', dlBtn(() => dl('abg-approved-quotes.csv', quotesCSV(stories))))}
         ${row('Student impact timelines (CSV)', 'Every milestone by stage, from initial circumstances to long-term outcomes, with pending items marked.', dlBtn(() => dl('abg-timelines.csv', timelineCSV(stories))))}
         ${row('Follow-ups (CSV)', 'Questions and check-back reminders with their status and answers.', dlBtn(() => dl('abg-followups.csv', followupsCSV(stories))))}
-        ${role === 'viewer' ? null : row('Full interview transcripts (internal only)', 'Every original transcript, with corrections. Keep this file inside ABG.', html`<button className="btn btn-ghost btn-sm" disabled=${!caps.downloads || busyExport === 'tr'} onClick=${transcripts}><${Icon} name="download" size=${16} /> ${busyExport === 'tr' ? 'Preparing…' : 'Download'}</button>`)}
+        ${row('Full interview transcripts (internal only)', 'Every original transcript, with corrections. Keep this file inside ABG.', html`<button className="btn btn-ghost btn-sm" disabled=${!caps.downloads || busyExport === 'tr'} onClick=${transcripts}><${Icon} name="download" size=${16} /> ${busyExport === 'tr' ? 'Preparing…' : 'Download'}</button>`)}
       </div>
     </section>
   </div>`;
@@ -4267,15 +4267,74 @@ function forReporting(stories, students, settings){
 function DemoPill(){ return html`<span className="pill tone-demo" title="Fictional demo story">Demo</span>`; }
 
 /* ---------- roles ----------
-   Admin: everything, including team roles and demo data. Editor: record, edit, approve and export stories.
-   Viewer: read stories and Insights only; no editing and no raw interview transcripts.
-   Roles live in config/access ({roles: {email: role}}); people not listed are Editors. */
-const ROLE_OPTS = [{id: 'admin', label: 'Admin'}, {id: 'editor', label: 'Editor'}, {id: 'viewer', label: 'Viewer'}];
-const DEFAULT_ADMINS = ['jacob.pajimola@pepperdine.edu', 'kyle@artsbridgingthegap.org'];
-function roleFor(access, email){
-  const e = asStr(email).toLowerCase(); const roles = (access && access.roles) || {};
-  if (roles[e] && byId(ROLE_OPTS, roles[e])) return roles[e];
-  return DEFAULT_ADMINS.includes(e) ? 'admin' : 'editor';
+   Two roles, stored on the server (public.user_roles) and changed only through the admin Edge Function:
+   Admin: manage users and application settings, plus everything a standard user can do.
+   Standard user: record, review, edit and export stories, and see Impact Insights. */
+const ROLE_OPTS = [{id: 'admin', label: 'Admin'}, {id: 'user', label: 'Standard user'}];
+
+/* ---------- Manage Users (administrators only; every action is checked again on the server) ---------- */
+const USER_STATUS = {active: {label: 'Active', tone: 'good'}, invited: {label: 'Invitation sent', tone: 'blue'}, deactivated: {label: 'Deactivated', tone: 'bad'}, not_invited: {label: 'Not invited yet', tone: 'neutral'}};
+const AUDIT_LABEL = {invited: 'invited', invite_resent: 'resent an invitation to', role_changed: 'changed the role of', deactivated: 'deactivated', reactivated: 'reactivated', removed: 'removed', admin_granted: 'made an administrator:'};
+function ManageUsers(){
+  const {caps, showToast, openSheet} = useApp();
+  const me = caps.me || {};
+  const myEmail = asStr((window.__platform && window.__platform.email) || me.email).toLowerCase();
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState('');
+  const [email, setEmail] = useState('');
+  const [newRole, setNewRole] = useState('user');
+  const [names, setNames] = useState({});
+  const api = (action, payload) => window.__platform.admin(action, payload);
+  const load = async () => { try { setData(await api('list')); setErr(''); } catch (e) { setErr((e && e.message) || "The user list couldn't load."); } };
+  useEffect(() => { load(); }, []);
+  useEffect(() => { const un = caps.db.collection('members').onSnapshot(snap => { const m = {}; snap.docs.forEach(d => { const x = d.data() || {}; if (x.email) m[String(x.email).toLowerCase()] = x.name || ''; }); setNames(m); }, () => {}); return () => { try { un(); } catch (e) {} }; }, []);
+  async function act(key, action, payload, done){
+    setBusy(key);
+    try { await api(action, payload); if (done) showToast(done); await load(); return true; }
+    catch (e) { showToast((e && e.message) || "That didn't work. Try again."); return false; }
+    finally { setBusy(''); }
+  }
+  async function invite(e){
+    e.preventDefault();
+    const em = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { showToast('Enter a valid email address.'); return; }
+    if (await act('invite', 'invite', {email: em, role: newRole}, 'Invitation sent to ' + em)) { setEmail(''); setNewRole('user'); }
+  }
+  const confirmThen = (title, body, label, fn) => openSheet(close => html`<${ConfirmSheet} close=${close} title=${title} body=${body} confirmLabel=${label} onConfirm=${fn} />`);
+  const users = data ? data.users.slice().sort((a, b) => (a.email === myEmail ? -1 : b.email === myEmail ? 1 : 0) || ((a.role === 'admin') === (b.role === 'admin') ? a.email.localeCompare(b.email) : a.role === 'admin' ? -1 : 1)) : [];
+  const counts = {admins: users.filter(u => u.role === 'admin').length, active: users.filter(u => u.status === 'active').length, pending: users.filter(u => u.status === 'invited' || u.status === 'not_invited').length};
+  return html`<div className="manage-users">
+    <form className="invite-form" onSubmit=${invite}>
+      <${Field} label="Invite someone by email"><input id="mu-email" className="input" type="email" inputMode="email" autoComplete="off" placeholder="name@example.org" value=${email} onChange=${e => setEmail(e.target.value)} /><//>
+      <${Field} label="Role"><select id="mu-role" className="select" value=${newRole} onChange=${e => setNewRole(e.target.value)}>${ROLE_OPTS.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select><//>
+      <button className="btn btn-primary" type="submit" disabled=${busy === 'invite' || !email.trim()}>${busy === 'invite' ? 'Sending…' : 'Send invitation'}</button>
+    </form>
+    <p className="small muted">They get an email with a secure link. After accepting once, they stay signed in on that device.</p>
+    ${err ? html`<div className="notice small"><p>${err}</p><button className="btn btn-ghost btn-sm" onClick=${load}>Try again</button></div>` : null}
+    ${data == null && !err ? html`<p className="small muted">Loading users…</p>` : null}
+    ${data ? html`<p className="small muted mu-counts">${users.length} people · ${counts.admins} admin${counts.admins === 1 ? '' : 's'} · ${counts.active} active · ${counts.pending} invitation${counts.pending === 1 ? '' : 's'} pending</p>
+      <div className="item-list">${users.map(u => { const self = u.email === myEmail; const st = USER_STATUS[u.status] || USER_STATUS.active; const k = k2 => k2 + ':' + u.email; return html`<div className="user-row" key=${u.email}>
+        <div className="user-main">
+          <strong>${names[u.email] || u.email}${self ? html` <span className="pill tone-teal">You</span>` : null}</strong>
+          <small className="muted">${names[u.email] ? u.email + ' · ' : ''}${u.status === 'active' ? (u.lastSignIn ? 'Last signed in ' + fmtDate(u.lastSignIn) : 'Active') : u.status === 'invited' ? 'Invited ' + (u.invitedAt ? fmtDate(u.invitedAt) : '') + ', not accepted yet' : u.status === 'not_invited' ? 'Has a role but no invitation yet' : 'Can\'t sign in'}</small>
+        </div>
+        <span className=${'pill tone-' + st.tone}>${st.label}</span>
+        <div className="user-controls">
+        ${self ? html`<span className="pill tone-blue">${labelOf(ROLE_OPTS, u.role)}</span>` : html`<select className="select select-sm" aria-label=${'Role for ' + u.email} value=${u.role} disabled=${!!busy} onChange=${e => { const v = e.target.value; act(k('role'), 'set_role', {email: u.email, role: v}, u.email + ' is now ' + labelOf(ROLE_OPTS, v).toLowerCase()); }}>${ROLE_OPTS.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select>`}
+        ${self ? null : html`<div className="user-actions">
+          ${u.status === 'invited' ? html`<button className="btn btn-ghost btn-xs" disabled=${!!busy} onClick=${() => act(k('resend'), 'resend', {email: u.email}, 'Invitation resent to ' + u.email)}>${busy === k('resend') ? 'Sending…' : 'Resend invite'}</button>` : null}
+          ${u.status === 'not_invited' ? html`<button className="btn btn-ghost btn-xs" disabled=${!!busy} onClick=${() => act(k('invite'), 'invite', {email: u.email, role: u.role}, 'Invitation sent to ' + u.email)}>Send invite</button>` : null}
+          ${u.status === 'active' || u.status === 'invited' ? html`<button className="btn btn-ghost btn-xs" disabled=${!!busy} onClick=${() => confirmThen('Deactivate ' + u.email + '?', 'They will be signed out and unable to open the journal until an administrator reactivates them. Their stories stay in the journal.', 'Deactivate', () => act(k('deact'), 'deactivate', {email: u.email}, u.email + ' deactivated'))}>Deactivate</button>` : null}
+          ${u.status === 'deactivated' ? html`<button className="btn btn-ghost btn-xs" disabled=${!!busy} onClick=${() => act(k('react'), 'reactivate', {email: u.email}, u.email + ' reactivated')}>Reactivate</button>` : null}
+          <button className="icon-btn icon-btn-box" aria-label=${'Remove ' + u.email} disabled=${!!busy} onClick=${() => confirmThen('Remove ' + u.email + '?', 'This removes their account and access. Stories they recorded stay in the journal. You can invite them again later.', 'Remove access', () => act(k('remove'), 'remove', {email: u.email}, u.email + ' removed'))}><${Icon} name="trash" size=${17} /></button>
+        </div>`}
+        </div>
+      </div>`; })}</div>
+      <details className="sec mu-audit"><summary><span>Recent activity<span className="count">${(data.audit || []).length}</span></span><${Icon} name="chev" size=${18} /></summary><div className="sec-body">
+        ${(data.audit || []).length === 0 ? html`<p className="small muted">No changes recorded yet.</p>` : html`<ul className="audit-list small">${data.audit.map((a, i) => html`<li key=${i}><span className="muted tnum">${fmtDate(a.at)}</span> <span><strong>${a.actor_email === 'setup' ? 'Initial setup' : (names[a.actor_email] || a.actor_email)}</strong> ${AUDIT_LABEL[a.action] || a.action} <strong>${a.target_email || ''}</strong>${a.action === 'role_changed' && a.details ? ' (' + labelOf(ROLE_OPTS, a.details.from) + ' → ' + labelOf(ROLE_OPTS, a.details.to) + ')' : a.action === 'invited' && a.details && a.details.role ? ' as ' + labelOf(ROLE_OPTS, a.details.role).toLowerCase() : ''}</span></li>`)}</ul>`}
+      </div></details>` : null}
+  </div>`;
 }
 
 /* log out asks first, so a stray tap doesn't sign someone out */
@@ -4290,7 +4349,7 @@ const SETTINGS_SECTIONS = [
   {id: 'voice', label: 'Interview Voice', icon: 'volume'},
   {id: 'privacy', label: 'Data & Privacy', icon: 'shield'},
   {id: 'display', label: 'Display', icon: 'monitor'},
-  {id: 'team', label: 'Team Access', icon: 'users'},
+  {id: 'team', label: 'Manage Users', icon: 'users'},
   {id: 'demo', label: 'Demo Stories', icon: 'spark'},
 ];
 const ROLES = ['Program Director', 'Program Coordinator', 'Executive Director', 'Teaching Artist', 'Staff', 'Volunteer', 'Consultant'];
@@ -4344,8 +4403,9 @@ function ItemRow({color, name, desc, onEdit, onDelete, readOnly, deleteLabel}){
   </div>`;
 }
 function SettingsView(){
-  const {caps, settings, stories, allStories, allStudents, safeWrite, readOnly, updateMe, openSheet, showToast, role: myRole, isAdmin, access} = useApp();
-  const setMemberRole = (email, r) => safeWrite(() => caps.db.doc('config/access').set({roles: Object.assign({}, (access && access.roles) || {}, {[asStr(email).toLowerCase()]: r}), updatedAt: nowISO()}));
+  const {caps, settings, stories, allStories, allStudents, safeWrite, readOnly, updateMe, openSheet, showToast, role: myRole, isAdmin} = useApp();
+  /* application settings (programs, schools, outcome categories, demo data) are for administrators */
+  const lock = readOnly || !isAdmin;
   const me = caps.me || {};
   const demo = settings.demo || {};
   const demoStories = (allStories || []).filter(x => x.demo);
@@ -4453,26 +4513,20 @@ function SettingsView(){
   const [theme, setTheme] = useState(() => { const t = lsGet('abg-theme'); return t === 'auto' || t === 'dark' ? t : 'light'; });
   const chooseTheme = t => { setTheme(t); lsSet('abg-theme', t); applyTheme(t); };
 
-  /* team: everyone who has signed in at least once */
-  const [members, setMembers] = useState(null);
-  useEffect(() => {
-    const un = caps.db.collection('members').onSnapshot(snap => setMembers(snap.docs.map(d => Object.assign({id: d.id}, d.data())).sort((a, b) => (b.lastSeen || '').localeCompare(a.lastSeen || ''))), () => setMembers([]));
-    return () => { try { un(); } catch (e) {} };
-  }, []);
 
   const head = (title, sub, action) => html`<div className="set-card-head"><div><h2>${title}</h2>${sub ? html`<p className="small muted">${sub}</p>` : null}</div>${action || null}</div>`;
-  const addBtn = (label, onClick) => readOnly ? null : html`<button type="button" className="btn btn-ghost btn-sm" onClick=${onClick}><${Icon} name="plus" size=${16} /> ${label}</button>`;
+  const addBtn = (label, onClick) => lock ? null : html`<button type="button" className="btn btn-ghost btn-sm" onClick=${onClick}><${Icon} name="plus" size=${16} /> ${label}</button>`;
 
   return html`<div className="view settings2">
     <header className="ins-hello set-head"><p className="eyebrow">Settings</p><h1>Settings</h1><p className="lede">Manage your profile, program details, interview voice, and how your journal data is organized and used.</p></header>
     <div className="set-layout">
-      <nav className="set-nav" aria-label="Settings sections">${SETTINGS_SECTIONS.map(s => html`<button key=${s.id} type="button" className="set-link" aria-current=${active === s.id ? 'true' : undefined} onClick=${() => jump(s.id)}><${Icon} name=${s.icon} /><span>${s.label}</span></button>`)}</nav>
+      <nav className="set-nav" aria-label="Settings sections">${SETTINGS_SECTIONS.map(s => s.id === 'team' && !isAdmin ? Object.assign({}, s, {label: 'Your Account', icon: 'user'}) : s).map(s => html`<button key=${s.id} type="button" className="set-link" aria-current=${active === s.id ? 'true' : undefined} onClick=${() => jump(s.id)}><${Icon} name=${s.icon} /><span>${s.label}</span></button>`)}</nav>
       <div className="set-main">
 
         <div className="set-sec" id="sec-profile" data-sec="profile"><section className="card set-card">
           <div className="set-card-head with-rule">
             <div><h2>Your Profile</h2><p className="small muted">Update your information and role.</p></div>
-            <div className="prof-id"><${Avatar} name=${fullName || me.name} photo=${me.photo} big=${true} /><span className="prof-text"><strong>${fullName || me.name || 'Your name'}</strong><small className="muted">${asStr(role) || 'Add your role'}</small></span></div>
+            <div className="prof-id"><${Avatar} name=${fullName || me.name} photo=${me.photo} big=${true} /><span className="prof-text"><strong>${fullName || me.name || 'Your name'}</strong><small className="muted">${asStr(role) || 'Add your job title'}</small></span></div>
             <div className="photo-btns">
               <label className="btn btn-ghost btn-sm photo-btn"><${Icon} name="camera" size=${17} /> ${me.photo ? 'Change photo' : 'Add photo'}<input type="file" accept="image/*" className="sr-only" onChange=${pickPhoto} /></label>
               ${me.photo ? html`<button type="button" className="btn btn-quiet btn-sm" onClick=${removePhoto}>Remove</button>` : null}
@@ -4482,7 +4536,7 @@ function SettingsView(){
             <${Field} label="First name"><input id="set-first" className="input" value=${first} onChange=${e => setFirst(e.target.value)} autoComplete="given-name" /><//>
             <${Field} label="Last name"><input id="set-last" className="input" value=${last} onChange=${e => setLast(e.target.value)} autoComplete="family-name" /><//>
             <${Field} label="Email"><input className="input" value=${email} readOnly=${true} aria-readonly="true" title="Your sign-in email" /><//>
-            <${Field} label="Role"><select id="set-role" className="select" value=${role} onChange=${e => setRole(e.target.value)}><option value="">Choose a role</option>${roles.map(r => html`<option key=${r} value=${r}>${r}</option>`)}</select><//>
+            <${Field} label="Job title"><select id="set-role" className="select" value=${role} onChange=${e => setRole(e.target.value)}><option value="">Choose a job title</option>${roles.map(r => html`<option key=${r} value=${r}>${r}</option>`)}</select><//>
             <${Field} label=${html`Phone <span className="opt">(optional)</span>`}><input id="set-phone" className="input" type="tel" value=${phone} onChange=${e => setPhone(e.target.value)} placeholder="(213) 555-1234" autoComplete="tel" /><//>
             <div className="prof-save"><button className="btn btn-primary" disabled=${!asStr(first)} onClick=${saveProfile}>${pSaved ? 'Saved' : 'Save changes'}</button></div>
           </div>
@@ -4492,27 +4546,27 @@ function SettingsView(){
 
         <div className="set-sec" id="sec-programs" data-sec="programs">
           <section className="card set-card">
-            ${head('Programs', 'Manage the ABG programs and activities that appear in the journal.', addBtn('Add program', () => setEditP('__new')))}
+            ${head('Programs', 'Manage the ABG programs and activities that appear in the journal.' + (lock ? ' Only administrators can change them.' : ''), addBtn('Add program', () => setEditP('__new')))}
             <div className="item-list">
               ${editP === '__new' ? html`<${ItemForm} kind="Program" init=${{color: SWATCHES[programs.length % SWATCHES.length]}} taken=${n => programs.some(p => p.toLowerCase() === n.toLowerCase())} onCancel=${() => setEditP(null)} onSave=${v => saveProgram(null, v)} />` : null}
               ${programs.map((p, i) => editP === p
                 ? html`<${ItemForm} key=${p} kind="Program" init=${{name: p, desc: (info[p] || {}).desc, color: programColor(settings, p, i)}} taken=${n => n.toLowerCase() !== p.toLowerCase() && programs.some(x => x.toLowerCase() === n.toLowerCase())} onCancel=${() => setEditP(null)} onSave=${v => saveProgram(p, v)} />`
-                : html`<${ItemRow} key=${p} color=${programColor(settings, p, i)} name=${p} desc=${(info[p] || {}).desc} readOnly=${readOnly} onEdit=${() => setEditP(p)} onDelete=${() => deleteProgram(p)} deleteLabel="Remove" />`)}
+                : html`<${ItemRow} key=${p} color=${programColor(settings, p, i)} name=${p} desc=${(info[p] || {}).desc} readOnly=${lock} onEdit=${() => setEditP(p)} onDelete=${() => deleteProgram(p)} deleteLabel="Remove" />`)}
               ${!programs.length && editP !== '__new' ? html`<p className="empty-note">No programs yet. Programs you add are suggested on every story, used as filters, and colored in Impact Insights.</p>` : null}
             </div>
           </section>
-          <${ListEditor} id="set-communities" title="Schools and communities" hint="Partner schools, neighborhoods, and community organizations, suggested on every story." items=${settings.communities || []} disabled=${readOnly} placeholder="e.g. a partner school or neighborhood" onChange=${v => save({communities: v})} />
+          <${ListEditor} id="set-communities" title="Schools and communities" hint="Partner schools, neighborhoods, and community organizations, suggested on every story." items=${settings.communities || []} disabled=${lock} placeholder="e.g. a partner school or neighborhood" onChange=${v => save({communities: v})} />
         </div>
 
         <div className="set-sec" id="sec-outcomes" data-sec="outcomes"><section className="card set-card">
-          ${head('Outcome Categories', 'Customize the outcomes used in Impact Insights charts, filters and story tags.', addBtn('Add outcome', () => setEditO('__new')))}
+          ${head('Outcome Categories', 'Customize the outcomes used in Impact Insights charts, filters and story tags.' + (lock ? ' Only administrators can change them.' : ''), addBtn('Add outcome', () => setEditO('__new')))}
           <div className="item-list">
             ${editO === '__new' ? html`<${ItemForm} kind="Outcome" withWords=${true} init=${{color: SWATCHES[(outcomes.length + 3) % SWATCHES.length]}} taken=${n => outcomes.some(o => o.label.toLowerCase() === n.toLowerCase())} onCancel=${() => setEditO(null)} onSave=${v => saveOutcome(null, v)} />` : null}
             ${outcomes.map(o => editO === o.id
               ? html`<${ItemForm} key=${o.id} kind="Outcome" withWords=${!!o.custom} init=${{name: o.label, desc: o.desc, color: o.color, words: o.words}} taken=${n => n.toLowerCase() !== o.label.toLowerCase() && outcomes.some(x => x.label.toLowerCase() === n.toLowerCase())} onCancel=${() => setEditO(null)} onSave=${v => saveOutcome(o, v)} />`
-              : html`<${ItemRow} key=${o.id} color=${o.color} name=${o.label} desc=${o.desc + (o.custom && o.words && o.words.length ? ' · Matches: ' + o.words.join(', ') : '')} readOnly=${readOnly} onEdit=${() => setEditO(o.id)} onDelete=${() => deleteOutcome(o)} deleteLabel=${o.custom ? 'Delete' : 'Hide'} />`)}
+              : html`<${ItemRow} key=${o.id} color=${o.color} name=${o.label} desc=${o.desc + (o.custom && o.words && o.words.length ? ' · Matches: ' + o.words.join(', ') : '')} readOnly=${lock} onEdit=${() => setEditO(o.id)} onDelete=${() => deleteOutcome(o)} deleteLabel=${o.custom ? 'Delete' : 'Hide'} />`)}
           </div>
-          <p className="tiny muted">The standard outcomes are matched automatically from each story's evidence and metrics card.${hiddenN ? ' ' + hiddenN + ' hidden.' : ''} ${changed && !readOnly ? html`<button type="button" className="link-btn" onClick=${restoreOutcomes}>Restore defaults</button>` : null}</p>
+          <p className="tiny muted">The standard outcomes are matched automatically from each story's evidence and metrics card.${hiddenN ? ' ' + hiddenN + ' hidden.' : ''} ${changed && !lock ? html`<button type="button" className="link-btn" onClick=${restoreOutcomes}>Restore defaults</button>` : null}</p>
         </section></div>
 
         <div className="set-sec" id="sec-voice" data-sec="voice">
@@ -4572,19 +4626,7 @@ function SettingsView(){
         </section></div>
 
         <div className="set-sec" id="sec-team" data-sec="team"><section className="card set-card">
-          ${head('Team Access', 'People who have signed in to this journal. Everyone signed in can record, edit and export stories.')}
-          <div className="item-list">
-            ${members == null ? html`<p className="small muted">Loading…</p>` : members.map(m => html`<div className="member-row" key=${m.id}>
-              <${Avatar} name=${m.name || m.email} photo=${m.photo} />
-              <span className="member-main"><strong>${m.name || m.email || 'Team member'}${m.id === me.id ? html` <span className="pill tone-teal">You</span>` : null}</strong><small className="muted">${[m.role, m.email].filter(Boolean).join(' · ')}</small></span>
-              <span className="member-side">
-                ${isAdmin && m.email && m.id !== me.id ? html`<select className="select select-sm" aria-label=${'Role for ' + (m.name || m.email)} value=${roleFor(access, m.email)} onChange=${e => setMemberRole(m.email, e.target.value)}>${ROLE_OPTS.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select>` : html`<span className="pill tone-blue">${labelOf(ROLE_OPTS, roleFor(access, m.email))}</span>`}
-                <small className="muted member-seen">${m.lastSeen ? 'Last active ' + fmtDate(m.lastSeen) : ''}</small>
-              </span>
-            </div>`)}
-          </div>
-          <p className="small muted"><strong>Admins</strong> manage roles and demo data. <strong>Editors</strong> record, edit, approve and export stories. <strong>Viewers</strong> can read stories and Insights but can't edit or open raw interview transcripts. People are Editors unless an admin changes it.</p>
-          <p className="small muted">New people are invited by email from ABG's Supabase project (Authentication, then Users, then Invite user). They accept once and stay signed in on that device, and they appear here after their first visit.</p>
+          ${isAdmin ? html`${head('Manage Users', 'Invite people, set their role, and remove access. Administrators can do everything; standard users record and work with stories.')}<${ManageUsers} />` : head('Your Account', 'Administrators manage who has access to the journal.')}
           <div className="acct-row"><span className="small">Signed in as <strong>${email || me.name}</strong> · ${labelOf(ROLE_OPTS, myRole)}. This device stays signed in; log out only on a shared device.</span>${window.__platform ? html`<button className="btn btn-ghost btn-sm" onClick=${() => confirmLogout(openSheet)}><${Icon} name="logout" size=${16} /> Log out</button>` : null}</div>
         </section></div>
 
@@ -4614,8 +4656,7 @@ function App(){
   const [backlogLoaded, setBacklogLoaded] = useState(false);
   const [settings, setSettings] = useState({programs: [], communities: [], programInfo: {}, outcomes: [], demo: {}});
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [access, setAccess] = useState({roles: {}});
-  const [accessLoaded, setAccessLoaded] = useState(false);
+  const [role, setRole] = useState(null);
   const demoSeeded = useRef(false);
   const [route, setRoute] = useState(initialRoute);
   const [sheet, setSheet] = useState(null);
@@ -4650,7 +4691,10 @@ function App(){
     const u2 = db.collection('metrics').onSnapshot(snap => setMetrics(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
     const u4 = db.collection('students').onSnapshot(snap => setStudents(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
     const u3 = db.doc('config/settings').onSnapshot(snap => { const d = snap.exists ? (snap.data() || {}) : {}; ACTIVE_OUTCOMES = mergeOutcomes(d.outcomes); setSettings({programs: asArr(d.programs), communities: asArr(d.communities), programInfo: d.programInfo && typeof d.programInfo === 'object' ? d.programInfo : {}, outcomes: asArr(d.outcomes), demo: d.demo && typeof d.demo === 'object' ? d.demo : {}}); setSettingsLoaded(true); }, () => setSettingsLoaded(true));
-    const u6 = db.doc('config/access').onSnapshot(snap => { setAccess(snap.exists ? (snap.data() || {roles: {}}) : {roles: {}}); setAccessLoaded(true); }, () => setAccessLoaded(true));
+    let alive = true;
+    const loadRole = () => (window.__platform && window.__platform.getRole ? window.__platform.getRole() : Promise.resolve('user')).then(r => { if (alive) setRole(r || 'user'); }, () => { if (alive) setRole('user'); });
+    loadRole();
+    const u6 = () => { alive = false; };
     const u5 = db.collection('backlog').onSnapshot(snap => { setBacklog(snap.docs.map(d => Object.assign({id: d.id}, d.data()))); setBacklogLoaded(true); }, () => setBacklogLoaded(true));
     return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
   }, [caps.status]);
@@ -4670,8 +4714,7 @@ function App(){
   const updateMe = useCallback(patch => setCaps(c => Object.assign({}, c, {me: Object.assign({}, c.me, patch)})), []);
   /* fictional demo stories: added once so a new journal has something to explore; hidden or removed from Settings */
   useEffect(() => {
-    if (caps.status !== 'ready' || !storiesLoaded || !settingsLoaded || !accessLoaded || readOnly || demoSeeded.current || window.__ABG_NO_DEMO_SEED) return;
-    if (roleFor(access, (caps.me && caps.me.email) || (window.__platform && window.__platform.email)) === 'viewer') return;
+    if (caps.status !== 'ready' || !storiesLoaded || !settingsLoaded || role !== 'admin' || readOnly || demoSeeded.current || window.__ABG_NO_DEMO_SEED) return;
     const dc = settings.demo || {};
     if (dc.removedAt) return;
     if (dc.loadedAt) {
@@ -4689,14 +4732,13 @@ function App(){
       });
       if (ok) showToast('Six fictional demo stories were added so you can explore. They are labeled Demo; manage them in Settings.');
     })();
-  }, [caps.status, storiesLoaded, settingsLoaded, accessLoaded, readOnly]);
+  }, [caps.status, storiesLoaded, settingsLoaded, role, readOnly]);
   const demoHidden = !!(settings.demo || {}).hidden;
   const allStories = stories, allStudents = students;
   const shownStories = useMemo(() => demoHidden ? stories.filter(x => !x.demo) : stories, [stories, demoHidden]);
   const shownStudents = useMemo(() => demoHidden ? students.filter(x => !x.demo) : students, [students, demoHidden]);
-  const role = roleFor(access, (caps.me && caps.me.email) || (window.__platform && window.__platform.email));
   const ctx = {caps, updateMe, stories: shownStories, students: shownStudents, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite,
-    readOnly: readOnly || role === 'viewer', role, isAdmin: role === 'admin', access};
+    readOnly, role: role || 'user', isAdmin: role === 'admin'};
   const focus = caps.status === 'ready' && (route.name === 'record' || route.name === 'review' || route.name === 'interview');
   let content;
   if (caps.status === 'loading') content = html`<div className="boot"><div className="boot-mark"></div><p>Opening ABG Impact Journal…</p></div>`;
