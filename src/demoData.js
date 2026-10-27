@@ -1,4 +1,4 @@
-/* FICTIONAL DEMO DATA. These six students do not exist. Their names come from famous artists, and every
+/* FICTIONAL DEMO DATA. These six students and two staff members do not exist. Their names come from famous artists, and every
    school, program and outcome below is invented so staff can explore how a recorded story becomes
    Impact Insights. The journal marks every record made from this file as demo data (demo: true),
    keeps it out of reports and exports unless an administrator includes it, and can remove it in one step.
@@ -9,7 +9,7 @@
    excerpts are quoted from the transcripts so every outcome links back to what Kyle said. */
 
 /* bump when the demo records change; journals that already have them refresh automatically */
-export const DEMO_VERSION = 2;
+export const DEMO_VERSION = 3;
 
 export const DEMO_STORIES = [
 /* ------------------------------------------------------------------ 1. Michelangelo */
@@ -405,6 +405,132 @@ export const DEMO_STORIES = [
   tasks: [{q: 'Ask Georgia about co-leading the 2027 summer mural', due: '2027-03-01'}],
   questions: [],
   drafts: [{audience: '', format: 'newsletter', approved: false, text: "Meet Georgia: from quiet painter to mural leader\n\nWhen Georgia joined ABG in ninth grade, she painted exactly what was on the design and waited for instructions. By junior year she was pitching her own ideas, and in 2022 she led eight younger students through six weekends of work on our community mural. Today she studies art and design and has completed an internship at a local design studio. (Fictional demo story.)"}],
+  links: [],
+},
+/* ------------------------------------------------------------------ 7. Diego (Staff Impact, former ABG student) */
+{
+  key: 'diego', kind: 'staff', firstName: 'Diego',
+  staffInfo: {status: 'current', role: 'Lead teaching artist', startYear: '2019', employmentType: 'part_time', formerStudent: 'yes', firstParticipatedYear: '2014', programs: 'School Mural Program', transitionYear: '2019'},
+  createdAt: '2026-06-18T18:10:00.000Z', updatedAt: '2026-06-18T18:40:00.000Z', status: 'internal',
+  privacy: {minor: 'no', identifying: 'no', permission: 'unknown', external: 'unknown', redact: 'no', sensitive: 'no', sensitiveConsent: 'unknown'},
+  entries: [{recordedAt: '2026-06-18T18:10:00.000Z', turns: [
+    ['OPENING', "Diego was one of our mural kids first. He joined the School Mural Program at Eastside Middle in 2014, when he was in seventh grade, and he just never really left. He kept coming back every year through high school. After he graduated, he told me he was working at a warehouse and didn't know what to do next. We needed help on a big summer mural, so in 2019 we hired him as a paid mural assistant. That was his first real job doing art. Now he's our lead teaching artist. He plans the lessons for two school sites and he runs the crews himself."],
+    ['Was the mural assistant role part-time or full-time?', "Part-time, about twenty hours a week during the season. It's still part-time, but he works year-round now."],
+    ['What responsibilities has he taken on since then?', "He went from prepping walls and mixing paint to designing walls with the kids. In 2022 we made him lead teaching artist, so he trains our new assistants too. He's trained three of them so far."],
+    ['Did he receive any training from ABG?', "Yeah, he shadowed our senior artist for a year, and we paid for a classroom management workshop through the county. He says that workshop is why he can handle a room of thirty seventh graders."],
+    ['How does he work with students now?', "He mentors a group of eighth graders every week. A lot of them remind him of himself. He told me, \"I'm the person I needed when I was their age.\""],
+    ['CLOSING', "Just that he's proof the program keeps going after the kids leave. He's been with us seven years now as staff, and he's thinking about getting his teaching credential. I don't know yet if he'll do it."],
+  ]}],
+  analysis: {
+    title: 'From mural crew kid to lead teaching artist',
+    summary: "Diego joined ABG's School Mural Program in seventh grade, was hired as a paid mural assistant after high school in 2019, and is now ABG's lead teaching artist, training new assistants and mentoring eighth graders.",
+    story: "Diego first came to ABG in 2014 as a seventh grader in the School Mural Program at Eastside Middle School, and he kept coming back every year through high school. After graduating he was working at a warehouse and unsure what came next. In 2019, ABG needed help on a large summer mural and hired him as a paid, part-time mural assistant: his first job doing art. He started by prepping walls and mixing paint. Over the next few years he moved into designing walls with students, and in 2022 ABG made him lead teaching artist. He now plans lessons for two school sites, runs the crews himself and has trained three new assistants. ABG supported his growth with a year of shadowing its senior artist and a county classroom management workshop, which he credits with helping him manage a room of thirty seventh graders. Each week he mentors a group of eighth graders, many of whom remind him of himself. Kyle sees Diego as proof that ABG's impact continues after students leave the program. He has worked with ABG for seven years and is considering a teaching credential, though he hasn't decided.",
+    entrySummary: 'First interview about Diego, from mural student to lead teaching artist.',
+    alias: 'Diego', isMinor: 'no', period: 'recent',
+    overview: {background: 'Working at a warehouse after high school and unsure what to do next', involvementDate: 'Student from 2014; staff since 2019'},
+    eventDate: {text: '2014 to now', iso: '2014', approximate: true},
+    program: 'School Mural Program', community: '',
+    takeaways: ['ABG hired him as a paid mural assistant in 2019, his first job doing art.', 'Promoted to lead teaching artist in 2022; plans lessons for two school sites.', 'Has trained three new assistants and mentors eighth graders weekly.', 'ABG funded training: a year of shadowing and a county classroom management workshop.'],
+    structure: {character: 'Diego, a former ABG student who is now its lead teaching artist.', circumstances: 'After high school he was working at a warehouse and unsure what to do next.', involvement: 'School Mural Program student from 2014; hired as a paid mural assistant in 2019.', events: 'Moved from wall prep to designing walls with students; promoted in 2022.', outcomes: 'Leads crews at two school sites, trains new assistants and mentors students.', longTerm: 'Seven years on staff; considering a teaching credential.'},
+    categories: ['longterm', 'community'], themes: ['alumni_return', 'leadership', 'long_term_development', 'artistic_skills'],
+    staffCard: {staffStatus: {value: 'Current staff', excerpt: "He's been with us seven years now as staff"}, role: {value: 'Lead teaching artist', excerpt: "Now he's our lead teaching artist"}, firstRole: {value: 'Mural assistant', excerpt: 'we hired him as a paid mural assistant'},
+      startYear: {value: '2019', excerpt: 'in 2019 we hired him as a paid mural assistant'}, yearsWithAbg: {value: '7', excerpt: "He's been with us seven years now as staff"}, opportunityType: {value: 'Paid employment', excerpt: 'we hired him as a paid mural assistant'},
+      employmentType: {value: 'Part-time', excerpt: "It's still part-time, but he works year-round now."}, firstJob: {value: 'Yes', excerpt: 'That was his first real job doing art.'}, positionsHeld: {value: '2', excerpt: 'In 2022 we made him lead teaching artist'},
+      roleGrowth: {value: 'Promoted', excerpt: 'In 2022 we made him lead teaching artist'}, skills: {value: 'Mural design, lesson planning, classroom management, training assistants', excerpt: 'He plans the lessons for two school sites'},
+      trainingReceived: {value: 'Yes', excerpt: 'we paid for a classroom management workshop through the county'}, mentored: {value: 'Yes', excerpt: 'he shadowed our senior artist for a year'}, leadership: {value: 'Yes', excerpt: 'he runs the crews himself'},
+      mentorsStudents: {value: 'Yes, mentors students', excerpt: 'He mentors a group of eighth graders every week.'}, inField: {value: 'Yes', excerpt: "Now he's our lead teaching artist"}, currentStatus: {value: 'Lead teaching artist at ABG', excerpt: "Now he's our lead teaching artist"}},
+    journey: [
+      {stage: 'student', text: 'Joined the School Mural Program in seventh grade in 2014 and returned every year through high school.', excerpt: 'He kept coming back every year through high school.'},
+      {stage: 'employment', text: 'Hired as a paid, part-time mural assistant in 2019, his first job doing art.', excerpt: 'That was his first real job doing art.'},
+      {stage: 'skills', text: 'Shadowed the senior artist for a year and completed a county classroom management workshop.', excerpt: 'he shadowed our senior artist for a year'},
+      {stage: 'growth', text: 'Promoted to lead teaching artist in 2022; plans lessons for two sites and trains new assistants.', excerpt: 'In 2022 we made him lead teaching artist'},
+      {stage: 'community', text: 'Mentors a group of eighth graders every week.', excerpt: 'He mentors a group of eighth graders every week.'},
+    ],
+    journeySummary: "Diego's path runs from seventh-grade mural student to ABG's lead teaching artist: ABG gave him his first paid art job in 2019, supported his training, and promoted him in 2022. Today he mentors students much like the ones he once was. His story shows how ABG's programs can continue to create opportunity years after a student first joins, though his own persistence is a large part of it.",
+    stakeholders: {primary: ['donors', 'schools'], why: "Diego's path from student to lead teaching artist is a documented example of ABG creating paid employment and career growth for a former participant. The facts come from Kyle's account and are reported, not verified against employment records.",
+      donors: 'Shows support for ABG reaching beyond one program year: a former student now earns a living teaching art.', grants: 'Staff-reported evidence of a student-to-staff pathway, a paid first job and a promotion (not yet verified against payroll records).', schools: 'The artist leading mural crews at two school sites came up through the same program.', community: 'ABG created a local paid arts job for a young adult from the community.', consulting: 'A clear example for the employment pathway analysis: student participation, paid hire, promotion and mentoring, each tied to a quote.'},
+    evidence: [
+      {category: 'longterm', domain: 'employment', direction: 'achieved', level: 3, metric: 'Paid position at ABG', statement: 'Hired as a paid, part-time mural assistant in 2019.', paid: 'yes', before: 'Working at a warehouse', after: 'Paid mural assistant at ABG', timeframe: '2019', observer: 'abg_staff', status: 'reported', basis: 'Kyle hired him.', activity: 'Summer mural', contribution: 'ABG needed help on a large mural and offered him the role', excerpt: 'in 2019 we hired him as a paid mural assistant'},
+      {category: 'longterm', domain: 'first_job', direction: 'achieved', level: 2, metric: 'First paid art job', statement: 'The mural assistant role was his first job doing art.', paid: 'yes', observer: 'abg_staff', status: 'reported', basis: 'Kyle observed; Diego told him.', excerpt: 'That was his first real job doing art.'},
+      {category: 'longterm', domain: 'role_growth', direction: 'achieved', level: 3, metric: 'Promoted to lead teaching artist', statement: 'Promoted from mural assistant to lead teaching artist in 2022.', before: 'Prepping walls and mixing paint', after: 'Lead teaching artist planning lessons for two school sites', timeframe: '2019 to 2022', observer: 'abg_staff', status: 'reported', basis: 'Kyle made the decision.', excerpt: 'In 2022 we made him lead teaching artist'},
+      {category: 'longterm', domain: 'training', direction: 'achieved', level: 2, metric: 'Training received', statement: 'Shadowed the senior artist for a year; ABG paid for a county classroom management workshop.', observer: 'abg_staff', status: 'reported', basis: 'Kyle arranged it.', contribution: 'ABG funded the workshop', excerpt: 'we paid for a classroom management workshop through the county'},
+      {category: 'community', domain: 'staff_leadership', direction: 'achieved', level: 3, metric: 'Assistants trained', statement: 'Has trained three new ABG assistants.', value: 3, unit: 'assistants', observer: 'abg_staff', status: 'reported', basis: "Kyle's count.", excerpt: "He's trained three of them so far."},
+      {category: 'community', domain: 'mentoring_students', direction: 'achieved', level: 2, metric: 'Mentors students', statement: 'Mentors a group of eighth graders every week.', observer: 'abg_staff', status: 'qualitative', basis: 'Observed by Kyle.', excerpt: 'He mentors a group of eighth graders every week.'},
+      {category: 'longterm', domain: 'further_ed', direction: 'unclear', level: 1, metric: 'Teaching credential', statement: 'Considering a teaching credential; not decided.', observer: 'abg_staff', status: 'future', basis: 'Diego told Kyle.', excerpt: "he's thinking about getting his teaching credential"},
+    ],
+    quotes: [{text: "I'm the person I needed when I was their age.", speaker: 'Diego', kind: 'remembered'}],
+    milestones: [
+      {date: {text: '2014', iso: '2014'}, label: 'Joined the School Mural Program in seventh grade', phase: 'involvement'},
+      {date: {text: 'After high school', iso: '2018'}, label: 'Working at a warehouse, unsure what to do next', phase: 'circumstances'},
+      {date: {text: '2019', iso: '2019'}, label: 'Hired as a paid part-time mural assistant', phase: 'immediate'},
+      {date: {text: '2022', iso: '2022'}, label: 'Promoted to lead teaching artist', phase: 'short_term'},
+      {date: {text: '2026', iso: '2026'}, label: 'Trains new assistants and mentors eighth graders weekly', phase: 'long_term'},
+      {date: {text: 'Later', iso: ''}, label: 'Check whether he pursues a teaching credential', phase: 'future'},
+    ],
+    missingMetrics: [{metric: 'Start date of the paid mural assistant role from payroll records', why: 'Would verify the year of his first paid position', howToGet: 'ABG payroll or contractor records'}],
+    materials: [{type: 'photo', description: 'Photos of Diego leading a mural crew'}],
+    containsIdentifying: false,
+  },
+  tasks: [{q: 'Ask Diego next spring whether he has started a teaching credential program', due: '2027-04-01'}],
+  questions: [],
+  links: [],
+},
+
+/* ------------------------------------------------------------------ 8. Mary (Staff Impact, not a former student) */
+{
+  key: 'mary', kind: 'staff', firstName: 'Mary',
+  staffInfo: {status: 'former', role: 'Teaching artist', startYear: '2021', employmentType: 'part_time', formerStudent: 'no', firstParticipatedYear: '', programs: '', transitionYear: ''},
+  createdAt: '2026-07-22T17:00:00.000Z', updatedAt: '2026-07-22T17:25:00.000Z', status: 'draft',
+  privacy: {minor: 'no', identifying: 'no', permission: 'unknown', external: 'unknown', redact: 'no', sensitive: 'no', sensitiveConsent: 'unknown'},
+  entries: [{recordedAt: '2026-07-22T17:00:00.000Z', turns: [
+    ['OPENING', "Mary came to us in 2021. She had an art degree but she'd been working retail for a few years and hadn't taught before. She answered our posting for a part-time teaching artist. Honestly she was nervous in front of kids at first, she'd plan way too much and run out of time. We paired her with our after-school program at Lincoln Elementary. Over two years she got really good. She started writing her own lesson plans and the teachers at Lincoln would ask for her by name. Last year she got hired as a full-time art teacher at a school in Pasadena, so she left us, which is bittersweet."],
+    ['Did ABG provide any training or mentorship?', "She went through our new artist orientation, and she co-taught with me for her first semester. That's really where she learned to read a room."],
+    ['Did she take on any leadership while she was here?', "Not formally. She helped plan our family art night one year, but she didn't supervise anyone."],
+    ['Do you know if her ABG experience helped her get the teaching job?', "She told me the lesson plans she wrote with us were what she showed in her interview. I can't say it's the only reason she got it."],
+    ['CLOSING', "I think it shows we're also a place where artists learn to teach. She came in with the talent, and she left with a career."],
+  ]}],
+  analysis: {
+    title: 'Learning to teach, then teaching full-time',
+    summary: 'Mary joined ABG in 2021 as a part-time teaching artist with no teaching experience. After two years of co-teaching and writing her own lessons, she was hired as a full-time art teacher at a school.',
+    story: "When Mary joined ABG in 2021, she had an art degree but had spent several years working retail and had never taught. She answered ABG's posting for a part-time teaching artist and was placed in the after-school program at Lincoln Elementary. Kyle remembers her as nervous in front of children at first, planning more than a session could hold. Through ABG's new artist orientation and a semester of co-teaching with Kyle, she learned, in his words, to read a room. Over two years she began writing her own lesson plans, and teachers at Lincoln started asking for her by name. She also helped plan a family art night. Last year Mary was hired as a full-time art teacher at a school in Pasadena. She told Kyle the lesson plans she wrote at ABG were what she showed in her interview, though Kyle is careful not to say ABG is the only reason she was hired. For Kyle, her story shows that ABG is also a place where artists learn to teach.",
+    entrySummary: 'First interview about Mary, a teaching artist who moved into full-time teaching.',
+    alias: 'Mary', isMinor: 'no', period: 'recent',
+    overview: {background: 'Art degree; several years in retail with no teaching experience', involvementDate: '2021 to 2025'},
+    eventDate: {text: '2021 to 2025', iso: '2021', approximate: true},
+    program: 'After-school program', community: 'Lincoln Elementary',
+    takeaways: ['Joined ABG as a part-time teaching artist with no teaching experience.', 'Learned to teach through orientation and a semester of co-teaching.', 'Began writing her own lesson plans; teachers asked for her by name.', 'Hired as a full-time art teacher; she used her ABG lesson plans in the interview.'],
+    structure: {character: 'Mary, a teaching artist with an art degree.', circumstances: 'Working retail with no teaching experience.', involvement: 'Part-time teaching artist in the after-school program from 2021.', events: 'Co-taught for a semester, then wrote her own lessons.', outcomes: 'Became a confident teacher; teachers requested her.', longTerm: 'Hired as a full-time art teacher at a school.'},
+    categories: ['community', 'longterm'], themes: ['long_term_development', 'school_partnership'],
+    staffCard: {staffStatus: {value: 'Former staff', excerpt: 'so she left us'}, role: {value: 'Teaching artist', excerpt: 'part-time teaching artist'}, firstRole: {value: 'Teaching artist', excerpt: 'part-time teaching artist'}, startYear: {value: '2021', excerpt: 'Mary came to us in 2021.'},
+      employmentType: {value: 'Part-time', excerpt: 'part-time teaching artist'}, yearsWithAbg: {value: '2', status: 'estimate', excerpt: 'Over two years she got really good.'},
+      skills: {value: 'Lesson planning, classroom management', excerpt: 'She started writing her own lesson plans'}, trainingReceived: {value: 'Yes', excerpt: 'She went through our new artist orientation'}, mentored: {value: 'Yes', excerpt: 'she co-taught with me for her first semester'},
+      leadership: {value: 'No', excerpt: "she didn't supervise anyone"}, otherEmployment: {value: 'Full-time art teacher at a school', excerpt: 'she got hired as a full-time art teacher at a school in Pasadena'}, inField: {value: 'Yes', excerpt: 'full-time art teacher'}, currentStatus: {value: 'Full-time art teacher', excerpt: 'full-time art teacher'}},
+    journey: [
+      {stage: 'skills', text: 'Learned to teach through orientation and a semester of co-teaching, then wrote her own lessons.', excerpt: 'She started writing her own lesson plans'},
+      {stage: 'growth', text: 'Hired as a full-time art teacher after two years with ABG.', excerpt: 'she got hired as a full-time art teacher at a school in Pasadena'},
+    ],
+    journeySummary: '',
+    stakeholders: {primary: ['schools', 'artists'], why: "Mary's story shows ABG developing teaching artists who go on to full-time teaching careers. Her move is reported by Kyle and Mary; ABG's role is one factor among several.",
+      donors: 'ABG also builds careers for the artists who teach in its programs.', grants: 'Staff-reported example of professional development leading to full-time employment in education.', schools: 'Partner school teachers asked for her by name; she now teaches full-time.', community: null, consulting: 'An example of professional development and a career transition without a student background.'},
+    evidence: [
+      {category: 'community', domain: 'employment', direction: 'achieved', level: 2, metric: 'Part-time teaching artist', statement: 'Hired as a part-time teaching artist in 2021.', paid: 'unknown', observer: 'abg_staff', status: 'reported', basis: 'Kyle hired her.', before: 'Working retail', after: 'Part-time teaching artist at ABG', timeframe: '2021', excerpt: 'She answered our posting for a part-time teaching artist.'},
+      {category: 'personal', domain: 'pro_skills', direction: 'improved', level: 2, metric: 'Teaching skills', statement: 'Went from over-planning and running out of time to writing her own lesson plans; teachers asked for her by name.', before: 'Nervous with children, over-planned sessions', after: 'Wrote her own lesson plans; requested by teachers', timeframe: '2021 to 2023', observer: 'abg_staff', status: 'qualitative', basis: 'Observed by Kyle; teachers told him.', excerpt: 'the teachers at Lincoln would ask for her by name'},
+      {category: 'personal', domain: 'training', direction: 'achieved', level: 2, metric: 'Orientation and co-teaching', statement: "Completed ABG's new artist orientation and co-taught with Kyle for a semester.", observer: 'abg_staff', status: 'reported', basis: 'Kyle co-taught with her.', excerpt: 'she co-taught with me for her first semester'},
+      {category: 'longterm', domain: 'next_employment', direction: 'achieved', level: 2, metric: 'Full-time art teacher', statement: 'Hired as a full-time art teacher at a school; she showed her ABG lesson plans in the interview.', observer: 'student', status: 'reported', basis: 'Mary told Kyle.', contribution: 'She used the lesson plans she wrote at ABG in her interview', excerpt: 'She told me the lesson plans she wrote with us were what she showed in her interview.'},
+    ],
+    quotes: [{text: 'She came in with the talent, and she left with a career.', speaker: 'Narrator', kind: 'exact'}],
+    milestones: [
+      {date: {text: 'Before 2021', iso: '2020'}, label: 'Working retail with an art degree, no teaching experience', phase: 'circumstances'},
+      {date: {text: '2021', iso: '2021'}, label: 'Joined ABG as a part-time teaching artist', phase: 'involvement'},
+      {date: {text: '2021 to 2023', iso: '2023'}, label: 'Began writing her own lesson plans', phase: 'short_term'},
+      {date: {text: 'Last year', iso: '2025'}, label: 'Hired as a full-time art teacher', phase: 'long_term'},
+    ],
+    missingMetrics: [{metric: 'Whether the teaching artist role was paid hourly or a stipend', why: 'Would confirm it as paid employment', howToGet: 'ABG payroll records'}],
+    materials: [],
+    containsIdentifying: false,
+  },
+  tasks: [],
+  questions: [],
   links: [],
 },
 ];

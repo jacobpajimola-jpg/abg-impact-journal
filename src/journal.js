@@ -71,7 +71,7 @@ const EVIDENCE_STATUS = [
 const GENDERS = [{id:'male', label:'Male'}, {id:'female', label:'Female'}, {id:'other', label:'Other'}];
 function studentInfoText(si){ if (!si) return ''; return [si.gender ? 'gender: ' + labelOf(GENDERS, si.gender) : '', si.school ? 'school: ' + si.school : '', si.demographics ? 'other details: ' + si.demographics : ''].filter(Boolean).join('; '); }
 /* impact domains: the five core metrics first, then other stakeholder-relevant outcomes */
-const DOMAIN_GROUPS = [{id:'academic', label:'Academic progress'}, {id:'personal', label:'Community and personal development'}, {id:'longterm', label:'Long-term student success'}, {id:'program', label:'Program engagement'}];
+const DOMAIN_GROUPS = [{id:'academic', label:'Academic progress'}, {id:'personal', label:'Community and personal development'}, {id:'longterm', label:'Long-term student success'}, {id:'program', label:'Program engagement'}, {id:'staff', label:'Staff and employment'}];
 const DOMAINS = [
   {id:'attendance', label:'School attendance', group:'academic', change:true},
   {id:'academics', label:'Grades and academic performance', group:'academic', change:true},
@@ -95,8 +95,21 @@ const DOMAINS = [
   {id:'access', label:'Access to arts education', group:'program'},
   {id:'artistic', label:'Artistic skills', group:'program'},
   {id:'pathways', label:'Career or college interests', group:'longterm'},
+  /* staff and employment outcomes (Staff Impact stories) */
+  {id:'employment', label:'Paid employment at ABG', group:'staff', milestone:true},
+  {id:'first_job', label:'First paid job', group:'staff', milestone:true},
+  {id:'role_growth', label:'Promotion or expanded responsibilities', group:'staff', milestone:true},
+  {id:'pro_skills', label:'Professional or artistic skill development', group:'staff'},
+  {id:'training', label:'Training or mentorship received', group:'staff'},
+  {id:'staff_leadership', label:'Leadership responsibilities', group:'staff'},
+  {id:'mentoring_students', label:'Mentoring or teaching ABG students', group:'staff', milestone:true},
+  {id:'community_contribution', label:'Contribution to arts education and the community', group:'staff'},
+  {id:'further_ed', label:'Further education or certifications', group:'staff', milestone:true},
+  {id:'next_employment', label:'Later or additional employment', group:'staff', milestone:true},
+  {id:'stability', label:'Personal growth, stability and sense of purpose', group:'staff'},
   {id:'other', label:'Other', group:'program'},
 ];
+const STAFF_DOMAINS = DOMAINS.filter(d => d.group === 'staff').map(d => d.id);
 /* milestones counted on the dashboard; each is checked per student from evidence and the metrics card */
 const MILESTONES = [
   {id:'graduated', label:'Graduated high school'},
@@ -227,6 +240,8 @@ const LINK_TYPES = [
   {id:'same_program', label:'Same program'},
   {id:'same_community', label:'Same community'},
   {id:'same_partnership', label:'Same partnership'},
+  /* set only by a person who confirmed it: a Student Impact story and a Staff Impact story about the same individual */
+  {id:'same_person', label:'Same person (student and staff stories)'},
 ];
 const STRUCTURE = [
   {id:'character', label:'Character', hint:'Who is the story about?'},
@@ -264,6 +279,9 @@ const UPDATE_PROMPT = "What has happened since? Share any new developments, even
 const OPENING_Q = name => "Can you walk me through the full story of " + name + ", starting with their background, where they came from, the challenges they faced, how they became involved with ABG, and what their experience has looked like since?";
 const CLOSING_Q = name => "Is there anything else about " + name + "'s experience that you think people should understand about the impact of ABG?";
 const UPDATE_OPENING_Q = name => "What has happened with " + name + " since you last recorded their story? Share any new developments, even small ones.";
+const STAFF_OPENING_Q = name => "Can you tell me about " + (name || 'this staff member') + ", how they first became involved with ABG, and how the organization has impacted their life?";
+const STAFF_CLOSING_Q = name => "Is there anything else about " + name + "'s experience that shows what working with ABG has meant for them, or for the students and community ABG serves?";
+const STAFF_UPDATE_OPENING_Q = name => "What has changed for " + name + " since you last recorded their story? New roles, skills, training, jobs or anything else, even small things.";
 const METRIC_SUGGESTIONS = ['Students served','Schools reached','Workshops completed','Murals or projects completed','Volunteer hours','Volunteers','Families attending events','Program sessions held'];
 /* the standard metrics card: the same measurable fields on every student story */
 const METRIC_FIELDS = [
@@ -287,6 +305,86 @@ const METRIC_STATUS = [
   {id:'reported', label:'Reported', tone:'blue'},
   {id:'estimate', label:'Estimate', tone:'warn'},
 ];
+
+/* ================= staff impact stories =================
+   Two primary story types: Student Impact and Staff Impact. "Former ABG student" is a background attribute of a
+   staff story (staffInfo.formerStudent), never a third type. Stories saved before staff stories existed have no
+   storyType and keep reading as student (or general) stories, so nothing older changes. */
+const STORY_TYPES = [{id:'student', label:'Student Impact', tone:'teal'}, {id:'staff', label:'Staff Impact', tone:'purple'}];
+const STAFF_STATUS = [{id:'current', label:'Current staff member'}, {id:'former', label:'Former staff member'}];
+const EMPLOYMENT_TYPES = [{id:'full_time', label:'Full-time'}, {id:'part_time', label:'Part-time'}, {id:'temporary', label:'Temporary'}, {id:'contract', label:'Contract'}, {id:'volunteer', label:'Volunteer'}, {id:'unknown', label:'Unknown'}];
+const FORMER_STUDENT = [{id:'yes', label:'Yes, former ABG student'}, {id:'no', label:'No'}, {id:'unknown', label:'Unknown'}];
+/* the staff impact card: the same employment and development fields on every staff story, so they add up across
+   people. Every value carries how sure it is (verified, reported, estimate) and, when Claude found it, the passage
+   it came from. A blank field is "not documented", never "no". */
+const STAFF_FIELDS = [
+  {id:'staffStatus', label:'Current or former staff member', short:'Current or former', type:'choice', options:['Current staff','Former staff'], group:'employment'},
+  {id:'role', label:'Current or most recent role at ABG', short:'Role', type:'text', ph:'e.g. Teaching artist', group:'employment'},
+  {id:'firstRole', label:'First position at ABG', short:'First position', type:'text', ph:'e.g. Mural assistant', group:'employment'},
+  {id:'startYear', label:'Year they started working with ABG', short:'Started', type:'text', ph:'e.g. 2019', group:'employment'},
+  {id:'yearsWithAbg', label:'Years working with ABG', short:'Years working with ABG', type:'number', unit:'years', group:'employment'},
+  {id:'opportunityType', label:'Type of opportunity', short:'Opportunity', type:'choice', options:['Paid employment','Paid stipend or internship','Volunteer (unpaid)'], group:'employment'},
+  {id:'employmentType', label:'Employment type', short:'Employment type', type:'choice', options:['Full-time','Part-time','Temporary','Contract','Volunteer'], group:'employment'},
+  {id:'firstJob', label:'ABG was their first paid job', short:'First paid job', type:'choice', options:['Yes','No'], group:'employment'},
+  {id:'positionsHeld', label:'Positions held at ABG', short:'Positions held', type:'number', unit:'positions', group:'employment'},
+  {id:'roleGrowth', label:'Promotion or expanded responsibilities', short:'Role growth', type:'choice', options:['Promoted','Responsibilities expanded','No change'], group:'development'},
+  {id:'skills', label:'Professional or artistic skills developed', short:'Skills developed', type:'text', ph:'e.g. lesson planning, mural design', group:'development'},
+  {id:'trainingReceived', label:'Received training or professional development', short:'Training', type:'choice', options:['Yes','No'], group:'development'},
+  {id:'mentored', label:'Received mentorship at ABG', short:'Mentorship received', type:'choice', options:['Yes','No'], group:'development'},
+  {id:'leadership', label:'Took on leadership responsibilities', short:'Leadership', type:'choice', options:['Yes','No'], group:'development'},
+  {id:'furtherEducation', label:'Further education or certifications', short:'Further education', type:'text', ph:'e.g. art education certificate', group:'development'},
+  {id:'mentorsStudents', label:'Mentors or teaches ABG students', short:'Mentors or teaches students', type:'choice', options:['Yes, mentors students','Yes, teaches or instructs students','No'], group:'community'},
+  {id:'otherEmployment', label:'Went on to other employment', short:'Later employment', type:'text', ph:'e.g. art teacher at a charter school', group:'career'},
+  {id:'inField', label:'Working in the arts, education or nonprofit field', short:'In the field', type:'choice', options:['Yes','No'], group:'career'},
+  {id:'currentStatus', label:'What they are doing now', short:'Doing now', type:'text', ph:'e.g. lead teaching artist at ABG', group:'career'},
+];
+const STAFF_STAGES = [
+  {id: 1, label: 'Background and first involvement'},
+  {id: 2, label: 'Employment opportunities'},
+  {id: 3, label: 'Professional development'},
+  {id: 4, label: 'Personal and community impact'},
+  {id: 5, label: 'Long-term outcomes'},
+];
+/* the student-to-staff journey: only stages the interview supports are kept */
+const JOURNEY_STAGES = [
+  {id:'student', label:'Student participation'},
+  {id:'skills', label:'Skill development'},
+  {id:'employment', label:'Employment opportunity'},
+  {id:'growth', label:'Professional growth'},
+  {id:'community', label:'Community contribution'},
+];
+const STAFF_STAKEHOLDERS = [['donors', 'Donor communications', 'What difference is ABG making in people\'s lives?'], ['grants', 'Grant applications', 'What outcomes justify continued funding?'], ['schools', 'School partnerships', 'What does ABG bring to the schools it works with?'], ['community', 'Community impact reporting', 'How does ABG create opportunity in the community?'], ['consulting', 'Consulting deliverables', 'What does this add to the consulting team\'s analysis?']];
+function blankStaffInfo(){ return {status: '', role: '', startYear: '', employmentType: '', formerStudent: '', firstParticipatedYear: '', programs: '', transitionYear: ''}; }
+function cleanYear(v){ const m = asStr(v).match(/(19|20)\d{2}/); return m ? m[0] : ''; }
+function cleanStaffInfo(raw){
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const fs = pickEnum(r.formerStudent, FORMER_STUDENT, '');
+  return {status: pickEnum(r.status, STAFF_STATUS, ''), role: asStr(r.role), startYear: cleanYear(r.startYear), employmentType: pickEnum(r.employmentType, EMPLOYMENT_TYPES, ''), formerStudent: fs,
+    firstParticipatedYear: fs === 'yes' ? cleanYear(r.firstParticipatedYear) : '', programs: fs === 'yes' ? asStr(r.programs) : '', transitionYear: fs === 'yes' ? cleanYear(r.transitionYear) : ''};
+}
+function isStaffStory(s){ return !!(s && s.storyType === 'staff'); }
+function isFormerStudent(s){ return isStaffStory(s) && (s.staffInfo || {}).formerStudent === 'yes'; }
+function staffInfoText(si){
+  if (!si) return '';
+  const i = cleanStaffInfo(si);
+  return [i.status ? labelOf(STAFF_STATUS, i.status).toLowerCase() : '', i.role ? 'role at ABG: ' + i.role : '', i.startYear ? 'started working with ABG around ' + i.startYear : '',
+    i.employmentType && i.employmentType !== 'unknown' ? 'employment type: ' + labelOf(EMPLOYMENT_TYPES, i.employmentType).toLowerCase() : '',
+    i.formerStudent === 'yes' ? 'previously an ABG student or program participant' + (i.firstParticipatedYear ? ' (first participated around ' + i.firstParticipatedYear + ')' : '') + (i.programs ? ' in ' + i.programs : '') + (i.transitionYear ? '; began working for ABG around ' + i.transitionYear : '') : '',
+    i.formerStudent === 'no' ? 'was not an ABG student before working there' : '',
+    i.formerStudent === 'unknown' || !i.formerStudent ? 'not known whether they were an ABG student before' : ''].filter(Boolean).join('; ');
+}
+/* values Kyle typed on the intake form go on the card as reported values */
+function intakeCard(si){
+  const i = cleanStaffInfo(si); const out = {};
+  const put = (id, value) => { if (value) out[id] = {value, status: 'reported', source: 'intake'}; };
+  put('staffStatus', i.status === 'current' ? 'Current staff' : i.status === 'former' ? 'Former staff' : '');
+  put('role', i.role);
+  put('startYear', i.startYear || i.transitionYear);
+  put('employmentType', i.employmentType && i.employmentType !== 'unknown' ? labelOf(EMPLOYMENT_TYPES, i.employmentType) : '');
+  return out;
+}
+function staffVal(s, id){ const m = ((s && s.staffCard) || {})[id]; const v = m && asStr(m.value); return v ? {value: v, status: pickEnum(m.status, METRIC_STATUS, 'reported'), excerpt: asStr(m.excerpt), source: m.source || ''} : null; }
+function staffKnown(s){ return STAFF_FIELDS.filter(f => staffVal(s, f.id)).length; }
 
 /* ================= utilities ================= */
 const byId = (list, id) => list.find(x => x.id === id);
@@ -322,10 +420,10 @@ function matchOption(f, v){
   return f.options.find(o => norm(o) === k) || f.options.find(o => norm(o).startsWith(k + ' ')) || f.options.find(o => k.startsWith(norm(o) + ' ') && norm(o).length > 3) || '';
 }
 /* cleans one metrics-card map; aiOnly drops "verified", which only ABG staff may set */
-function cleanMetrics(raw, aiOnly){
+function cleanMetrics(raw, aiOnly, fields){
   const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const out = {};
-  METRIC_FIELDS.forEach(f => {
+  (fields || METRIC_FIELDS).forEach(f => {
     let x = r[f.id]; if (x == null) return;
     if (typeof x !== 'object') x = {value: x};
     let v = asStr(x.value).replace(/^(null|unknown)$/i, '');
@@ -335,6 +433,8 @@ function cleanMetrics(raw, aiOnly){
     if (f.type === 'number') { const mm = v.replace(/,/g, '').match(/-?\d+(\.\d+)?/); const n = mm ? toNum(mm[0]) : null; if (aiOnly && n == null) return; if (n != null && (aiOnly || /^\s*(about|around|roughly|approx\.?|~)?\s*-?[\d.,]+\s*\+?\s*[a-z]*\s*$/i.test(v))) v = String(n); }
     if (f.type === 'choice') { const o = matchOption(f, v); if (!o) return; v = o; }
     const m = {value: v, status: status};
+    if (asStr(x.excerpt) && !/^null$/i.test(asStr(x.excerpt))) m.excerpt = asStr(x.excerpt);
+    if (x.source === 'intake') m.source = 'intake';
     if (x._new) m._new = true;
     out[f.id] = m;
   });
@@ -346,7 +446,9 @@ function comparisonText(e){ if (!e || (!asStr(e.before) && !asStr(e.after))) ret
 function isMeasurable(e){ return e.kind === 'numeric' && e.status !== 'future'; }
 function isQualitative(e){ return e.kind !== 'numeric' && e.status !== 'future'; }
 const STATUS_LEGEND = 'Reported means Kyle saw it or someone told him. Estimate means approximate. Anecdotal means an impression. Verified is only for items ABG later confirms against school or program records.';
-function isStudentStory(s){ return !!(s && (s.studentId || asStr(s.alias))); }
+function isStudentStory(s){ return !!(s && s.storyType !== 'staff' && (s.studentId || asStr(s.alias))); }
+function storyTypeOf(s){ return isStaffStory(s) ? 'staff' : isStudentStory(s) ? 'student' : 'general'; }
+function storyTypeLabel(s){ const t = storyTypeOf(s); return t === 'general' ? 'General story' : labelOf(STORY_TYPES, t); }
 function fmtMetric(f, v){
   if (f.type !== 'number') return v;
   const n = toNum(v); if (n == null) return v;
@@ -506,6 +608,81 @@ Reply with only JSON:
  "stage": "1 to 5: the stage your question belongs to",
  "question": "the next question", "target": "which outcome and slot it fills", "why": "a few words on what this adds", "enough": false}`;
 }
+/* Staff Impact interview: Kyle tells the staff member's story, then follow-ups move through employment,
+   professional development, personal and community impact and long-term outcomes. A former ABG student's
+   transition from participant to staff is woven into the same interview, never a separate one. */
+const STAFF_LISTEN_FOR = ['paid employment versus volunteering, stipends or internships', 'first employment opportunity', 'responsibilities and role changes', 'how long they have worked with ABG', 'skills developed', 'training or mentorship received', 'leadership responsibilities', 'confidence, independence and sense of purpose', 'contributions to the students ABG serves (mentoring, teaching)', 'further education or certifications', 'later or other employment', 'continuing in the arts, education or nonprofit work'];
+function staffInterviewPrompt({name, turns, mode, story, asked, target, info, notes, avoid}){
+  const convo = turns.map(t => 'Q (' + t.kind + '): ' + t.q + '\nA: ' + (t.status === 'skipped' ? '[Kyle skipped this question]' : t.a)).join('\n\n');
+  const si = cleanStaffInfo(info || (story && story.staffInfo) || {});
+  const existing = story ? {summary: story.summary, timeline: (story.milestones || []).map(m => (fmtEventDate(m.date) || 'undated') + ': ' + m.label + (m.phase === 'future' ? ' (planned, not yet happened)' : '')),
+    staffCard: Object.fromEntries(STAFF_FIELDS.filter(f => staffVal(story, f.id)).map(f => [f.label, staffVal(story, f.id).value])),
+    evidenceOnFile: (story.evidence || []).slice(0, 12).map(e => labelOf(DOMAINS, domainOf(e)) + ': ' + e.statement + ' [' + labelOf(EVIDENCE_CLASSES, evidenceClass(e)) + ']'),
+    openQuestions: (story.followUps || []).filter(f => f.status === 'open').map(f => f.question)} : null;
+  const formerBlock = si.formerStudent === 'yes' ? `
+${name.toUpperCase()} WAS AN ABG STUDENT BEFORE WORKING THERE
+Weave the transition from participant to staff member into the same interview (never a separate interview). Gaps worth filling, only where Kyle hasn't covered them:
+- what their experience was like when they first participated, and how they benefited from ABG's arts programs
+- artistic, personal or professional skills they developed as a student
+- how they moved from student to staff member, and the first position they received
+- whether ABG gave them their first paid job (ask; never assume it was paid)
+- how their responsibilities have changed, and whether they now mentor or teach students
+- how their relationship with ABG has changed over time
+Never assume they received paid employment, gained a skill or became a mentor unless Kyle says so.`
+    : si.formerStudent === 'no' ? `\n${name} was not an ABG student before working there. Don't ask about earlier participation.`
+    : `\nIt isn't known whether ${name} was an ABG student before working there. If it would matter and the conversation hasn't said, you may ask once, briefly ("Was ${name} ever in an ABG program before working there?"). Never assume they were.`;
+  return `${ABG_CONTEXT}
+
+You are interviewing Kyle about ${name}, someone who works or has worked with ABG. This is a STAFF IMPACT story: how ABG has affected this person's employment, professional development, career opportunities, personal growth and community involvement. Two goals matter equally: a story that keeps ${name}'s humanity, AND credible, specific outcomes for donors, grant providers, school partners and ABG's consulting team.
+${mode === 'update' ? 'This is an UPDATE interview about a staff story already in the journal. Focus on what is new since it was recorded: role changes, new skills or training, new jobs, and planned developments that happened (or didn\'t). Existing record: ' + JSON.stringify(existing) : ''}
+${staffInfoText(si) ? 'Already entered on the intake form (never ask for these again): ' + staffInfoText(si) + '.' : ''}
+${formerBlock}
+
+WHO YOU'RE TALKING TO
+Kyle is ABG's Program Director. He knows ${name} personally. He does NOT need employment records, pay stubs or HR files, and you never ask for them or ask him to verify anything. His firsthand observations are valuable as they are; the journal labels them as observations, not verified statistics.
+
+THE FIVE PHASES (Kyle has already told the story in his own words; your follow-ups move through what is still missing, skipping anything covered)
+1. Background and first involvement: how they got involved, what they were doing before, what brought them to ABG, barriers to employment or professional growth they faced, opportunities ABG gave that they might not otherwise have had.
+2. Employment opportunities: whether ABG provided a PAID position (distinguish paid work from volunteering, stipends and internships), whether it was their first job, responsibilities, how long they have worked with ABG, whether the role grew, whether ABG helped them get other work, and what the job has meant for them.
+3. Professional development: professional or artistic skills, training or mentorship, leadership, confidence and independence, transferable skills, career goals, further education.
+4. Personal and community impact: how the work has affected them personally, their sense of purpose, their contribution to the students ABG serves, whether they have become a mentor, instructor or community leader.
+5. Long-term outcomes: whether they are still with ABG, advancement, other career opportunities, whether they continue in the arts, education or nonprofit work, lasting skills and relationships.
+
+OUTCOMES TO LISTEN FOR (only ones this story points to; never run through a checklist)
+${STAFF_LISTEN_FOR.join(', ')}.
+
+FOR EACH MEANINGFUL OUTCOME, the evidence slots are: initial (what it was like before), change (what changed, with a specific example), when (roughly when), howKnown (Kyle saw it, or ${name} or someone else told him), abgRole (how ABG may have contributed, in Kyle's words). Track them in notes.outcomes. Ask about the most important EMPTY slot of the most meaningful outcome. Never ask about a filled slot or one Kyle said he doesn't know.
+
+FOLLOW-UP EXAMPLES
+- "We brought him on staff." -> "Was that a paid position?"
+- "She's grown so much." -> "What does she do now that she didn't before?"
+- "He's been with us a long time." -> "Roughly what year did he start working with ABG?"
+- "She leads the younger kids now." -> "What does she do with them?"
+- "It changed his life." -> "What was different for him after he started working here?"
+
+RULES
+- Conversational, never a questionnaire. Practical and efficient: the most valuable question each turn.
+- Never lead toward a positive outcome. Ask "Was that a paid position?", not "How much did that job help?". Don't assume ABG caused a change.
+- Ask for specific examples and approximate dates when they would make an outcome credible.
+- Never ask about salary, finances, family circumstances, immigration, health or other sensitive details. If Kyle raises one, don't probe it.
+- Never repeat a question or ask about anything in notes.facts or notes.askedAbout, even partly answered. "I don't know" or a skip closes the topic.
+- Never ask for a last name or identifying details.
+- One question, ideally under 12 words, never more than 18. Plain and natural. No preamble, no praise, no double questions, no "tell me more".
+${avoid ? '- Your last suggestion repeated an earlier question ("' + avoid + '"). Choose a different gap.' : ''}
+
+Follow-up questions asked so far: ${asked}. Aim for about ${target} (usually 4 to 6). Set "enough" to true only when the most meaningful outcomes have their key slots filled or Kyle doesn't know the rest.
+
+PREVIOUS NOTES (empty at the start):
+${JSON.stringify(notes || INTERVIEW_NOTES_SHAPE)}
+
+CONVERSATION SO FAR:
+${convo}
+
+Reply with only JSON:
+{"notes": {"facts": ["short facts already captured, under 10 words each"], "outcomes": [{"outcome": "short name", "area": "one of the outcome areas above", "initial": "or null", "change": "or null", "when": "or null", "howKnown": "or null", "abgRole": "or null"}], "askedAbout": ["topics already asked about, including skipped or don't know"], "stage": 1},
+ "stage": "1 to 5: the phase your question belongs to",
+ "question": "the next question", "target": "which outcome and slot it fills", "why": "a few words on what this adds", "enough": false}`;
+}
 /* rough word-overlap check so the interviewer doesn't repeat itself */
 function questionOverlap(a, b){
   const stop = new Set('the a an and or of to in on did do does was were is are they their them he she his her it that this with for about how what any you your have has had after before abg'.split(' '));
@@ -593,13 +770,98 @@ function analysisPrompt({mode, story, items, others, whenHint, studentName, memo
 categories: ${CATEGORIES.map(c => c.id + ' (' + c.label + ')').join(', ')}
 themes: ${THEMES.map(t => t.id + ' (' + t.label + ')').join(', ')}
 audiences: ${AUDIENCES.map(a => a.id + ' (' + a.label + ': values ' + a.emphasis.split('.')[0] + ')').join('; ')}
-link types: ${LINK_TYPES.map(l => l.id).join(', ')}`,
+link types: ${LINK_TYPES.filter(l => l.id !== 'same_person').map(l => l.id).join(', ')}`,
     others.length ? "OTHER STORIES ALREADY IN THE JOURNAL. Suggest a link only when the entries likely concern the same student, school, mural, program, community or partnership; when unsure, leave it out. Two students can share a first name, so a matching name alone is not enough.\n" + JSON.stringify(others) : "There are no other stories in the journal yet, so possibleLinks must be an empty list.",
     "ENTRIES\n" + entriesText,
     "Reply with only JSON in exactly this shape:\n" + ANALYSIS_SHAPE,
   ].filter(Boolean).join('\n\n');
 }
 
+const STAFF_ANALYSIS_SHAPE = `{
+  "title": "4 to 8 word title in sentence case, e.g. From mural crew to lead teaching artist",
+  "summary": "2 or 3 sentences for library cards",
+  "story": "the Impact Narrative, 200 to 350 words: a compelling but accurate account of the person's involvement with ABG and how it influenced their life: where they were before, how they became involved, the opportunities ABG provided, how they grew, what they contribute now and where they are today. Warm and specific. Leave out any part the interview didn't cover. No exaggeration of ABG's role.",
+  "entrySummary": "1 or 2 sentences on what this specific interview adds",
+  "alias": "the person's first name as given, or null",
+  "overview": {"background": "1 or 2 sentences on their circumstances before or when joining ABG, relevant to the impact, or null", "involvementDate": "when they were involved with or worked at ABG, in Kyle's words, or null"},
+  "staffCard": {"field id": {"value": "the value; for choice fields one of the listed options exactly", "status": "reported | estimate", "excerpt": "short passage copied word for word from the interview that supports it"}},
+  "journey": [{"stage": "student | skills | employment | growth | community", "text": "one sentence on this stage, only from what the interview says", "excerpt": "supporting passage copied word for word"}],
+  "journeySummary": "for a former ABG student only: 2 or 3 sentences on their progression from ABG student to staff member and what it shows about ABG's long-term impact, without exaggerating ABG's role; otherwise null",
+  "isMinor": "yes | no | unknown",
+  "period": "past (months or years ago) | recent",
+  "eventDate": {"text": "when the story mainly took place, in Kyle's words, or null", "iso": "YYYY, YYYY-MM or YYYY-MM-DD, or null", "approximate": true},
+  "program": "ABG program or project they worked in, or null",
+  "community": "school or community, or null",
+  "takeaways": ["Key Outcomes: 3 to 5 of the most important employment, professional development, personal growth and community outcomes, drawn from what Kyle actually said"],
+  "structure": {"character": "text or null", "circumstances": "text or null", "involvement": "text or null", "events": "text or null", "outcomes": "text or null", "longTerm": "text or null"},
+  "categories": ["category ids"],
+  "themes": ["theme ids"],
+  "stakeholders": {"primary": ["up to 3 audience ids, most relevant first"], "donors": "one sentence on how this story supports donor communications, or null", "grants": "one sentence on how it supports grant applications, naming the evidence level, or null", "schools": "one sentence on how it supports school partnerships, or null", "community": "one sentence on how it supports community impact reporting, or null", "consulting": "one sentence on what it adds to the consulting team's deliverables (for example evidence of employment pathways), or null", "why": "Stakeholder relevance: 2 or 3 sentences. Claim only what the evidence supports, and say when outcomes are reported or estimated rather than verified."},
+  "evidence": [{"metric": "short name of the outcome, e.g. Paid position at ABG, First paid job, Promoted to lead artist, Years with ABG, Mentors students, Training received, Later employment", "domain": "${DOMAINS.map(d => d.id).join(' | ')}", "direction": "achieved (a milestone such as being hired or promoted) | improved | same | declined | mixed | unclear (only what Kyle said)", "level": "1 general impression | 2 specific observed change | 3 counted or dated fact (give it)", "category": "category id", "kind": "numeric for durations, counts, dates and before-and-after comparisons | qualitative for observations and testimonials", "statement": "what the evidence shows", "value": null, "unit": "years, months, positions, students... or null", "before": "the situation before, or null", "after": "the situation after, or null", "timeframe": "the period, e.g. 2019 to 2024, or null", "status": "reported | estimate | qualitative | unverified | future", "observer": "abg_staff | student | other", "basis": "how it is known, e.g. Kyle observed directly; the staff member told Kyle", "observation": "the concrete thing seen or heard, or null", "activity": "the ABG program, role or activity involved, or null", "contribution": "how ABG may have contributed, only as Kyle described it, or null", "openQuestion": "what is still unknown, or null", "paid": "yes | no | unknown: for employment outcomes, whether the opportunity was paid, only if the interview says", "inferred": "true only if this outcome is your inference rather than something Kyle stated", "excerpt": "short passage copied word for word from the interview"}],
+  "missingMetrics": [{"metric": "Missing data: an outcome mentioned but not dated, quantified or confirmed (e.g. Start date of first paid position not documented; Whether the role was paid is unknown). Kyle doesn't need records, so phrase record-based items as things ABG could look up later", "why": "how it would strengthen the case", "howToGet": "where it might come from"}],
+  "quotes": [{"text": "the words", "speaker": "first name or role, or Narrator", "kind": "exact | remembered | paraphrase"}],
+  "milestones": [{"date": {"text": "when, or null", "iso": "YYYY or YYYY-MM, or null"}, "label": "what happened (e.g. Joined ABG mural program as a student; Hired as a paid mural assistant; Promoted to lead teaching artist)", "phase": "circumstances | involvement | immediate | short_term | long_term | future", "confirmed": true}],
+  "materials": [{"type": "photo | artwork | video | testimonial | record | survey | other", "description": "what exists and where, as Kyle described it"}],
+  "recommendedFollowUps": ["up to 5 concrete actions, e.g. Confirm the year the paid position began from ABG payroll records"],
+  "followUpQuestions": ["up to 2 questions still open for Kyle, if any"],
+  "possibleLinks": [{"storyId": "id from the other-stories list", "type": "link type id", "reason": "short reason"}],
+  "containsIdentifying": false,
+  "containsSensitive": false
+}`;
+function staffAnalysisPrompt({mode, story, items, others, whenHint, name, staffInfo}){
+  const entriesText = items.map((it, i) => '--- Entry ' + (i + 1) + ' (recorded ' + (fmtDate(it.recordedAt) || 'today') + ') ---\n' + it.text).join('\n\n');
+  const si = cleanStaffInfo(staffInfo || (story && story.staffInfo) || {});
+  const existing = story ? {
+    title: story.title, story: story.story || story.summary, person: story.alias || null, overview: story.overview || {}, when: fmtEventDate(story.eventDate) || null, program: story.program || null,
+    timeline: (story.milestones || []).map(m => ({when: fmtEventDate(m.date) || null, what: m.label, phase: m.phase})), evidence: (story.evidence || []).map(e => e.statement),
+    staffCard: Object.fromEntries(STAFF_FIELDS.filter(f => staffVal(story, f.id)).map(f => [f.id, staffVal(story, f.id).value])), journey: (story.journey || []).map(j => j.stage + ': ' + j.text),
+    missingMetrics: (story.missingMetrics || []).map(m => m.metric), questionsAlreadyAsked: (story.followUps || []).filter(f => f.kind === 'question').map(f => f.question),
+  } : null;
+  return [
+    ABG_CONTEXT + " Kyle (or another ABG adult) narrated the journal " + (items.length > 1 ? 'entries' : 'entry') + " below, usually by voice dictation and often as interview answers (Q/A), so expect missing punctuation and small transcription slips. They describe someone who works or worked with ABG. Turn them into a structured Staff Impact Report. Today is " + todayLocal() + ".",
+    name ? "The person's first name is " + name + ". Use only the first name." : '',
+    staffInfoText(si) ? "Details Kyle entered on the intake form (treat as given): " + staffInfoText(si) + "." : '',
+    si.formerStudent === 'yes' ? "This person was an ABG student before working there. Build the journey from the stages the interview supports (student participation, skill development, employment opportunity, professional growth, community contribution) and write journeySummary. Leave out any stage the interview doesn't support: never assume they were paid, gained a skill or became a mentor." : "This person is not recorded as a former ABG student" + (si.formerStudent === 'no' ? '' : " (it's unknown)") + ". Don't describe them as one unless the entries say so. Use the journey list only for stages after they joined ABG (skills, employment, growth, community), or leave it empty; journeySummary is null unless the entries say they were an ABG student.",
+    mode === 'update' ? "This is an UPDATE to a staff story already in the journal. Treat the existing record as true context and keep its facts.\nEXISTING RECORD:\n" + JSON.stringify(existing) : '',
+    whenHint ? "Kyle says this happened: " + whenHint : '',
+    `RULES
+- Meaningful storytelling and credible measurement matter equally. The story is about a person, not a list of positive outcomes.
+- Employment outcomes: distinguish PAID employment from volunteering, stipends and internships. If the interview doesn't say whether something was paid, don't call it a job or paid position: set "paid" to "unknown" and add a missing-data item. A person and a position are different things: one person can hold several positions.
+- Durations, start years, numbers of positions and other quantities: record them only when Kyle states them, with status "estimate" when approximate ("about", "around", "I think"). Never compute or guess a duration.
+- Outcome domains for staff stories: employment (paid work at ABG), first_job, role_growth (promotion or expanded responsibilities), pro_skills, training (training or mentorship received), staff_leadership, mentoring_students (mentors or teaches ABG students), community_contribution, further_ed, next_employment (later or additional employment, inside or outside ABG), stability (personal growth, stability, confidence or sense of purpose). Use student domains (e.g. confidence, artistic) only for things that happened while they were an ABG student.
+- staffCard: the staff impact card, the same fields on every staff story. Fields: ${STAFF_FIELDS.map(f => f.id + ' (' + f.label + (f.type === 'number' ? ', a number only' : f.type === 'choice' ? ', one of: ' + f.options.join(' / ') : ', short text') + ')').join('; ')}. Include a field only when the entries actually say it; leave the rest out (an unknown is never "No" or zero). Status "reported" when Kyle states it plainly, "estimate" when approximate. Never "verified". Every value needs "excerpt".
+- Evidence types: Kyle's own observation (observer abg_staff); something the person or someone else told him (observer student for the staff member themselves, or other); unconfirmed or inferred (status "unverified", or "inferred": true). Never mark anything verified.
+- Evidence status: "reported" for facts Kyle states plainly; "estimate" for approximate numbers; "qualitative" for non-numeric observations; "unverified" for secondhand or uncertain claims; "future" for hoped-for outcomes. Never "verified".
+- Every evidence item needs "metric", "domain", "direction", "level", "excerpt" (copied word for word from the entries) and "basis".
+- Never invent names, numbers, dates, job titles, pay, outcomes or quotes. Use null or an empty list when information isn't there. Don't record salary or other financial details even if mentioned.
+- Never add a last name or other identifying details.
+- Describe outcomes as observed or reported. Don't say ABG caused an outcome unless Kyle says so.
+- Setbacks and challenges are valid evidence. Don't spin them positive.
+- Quotes: "exact" for words that appear word for word in the entries and were clearly said (Kyle's own quotable statements use speaker "Narrator"); "remembered" when Kyle recalls what someone said; "paraphrase" for statements put in other words. Never create a quote.
+- Milestones fill the person's timeline (first involvement, hired, promoted, began mentoring, left for another job...). Use phase "future" only for possible developments worth checking, with confirmed false.
+- Set "containsSensitive" true whenever the entries mention the justice system, substance use, immigration, health or similar sensitive experiences, and keep those details out of the story.`,
+    mode === 'update' ? `FOR THIS UPDATE: "story", "summary", "takeaways", "stakeholders", "journey" and "journeySummary" are the full updated versions combining the existing record with the new information. "missingMetrics" is the complete current list. "staffCard" contains only fields the new entries state or change. "evidence", "quotes", "milestones", "materials" and "recommendedFollowUps" contain ONLY new items from the new entries. In "structure", give updated text only for parts the new entries change and null for the rest.` : '',
+    `ID LISTS
+categories: ${CATEGORIES.map(c => c.id + ' (' + c.label + ')').join(', ')}
+themes: ${THEMES.map(t => t.id + ' (' + t.label + ')').join(', ')}
+audiences: ${AUDIENCES.map(a => a.id + ' (' + a.label + ')').join('; ')}
+link types: ${LINK_TYPES.filter(l => l.id !== 'same_person').map(l => l.id).join(', ')}`,
+    others.length ? "OTHER STORIES ALREADY IN THE JOURNAL. Suggest a link only when the entries likely concern the same program, school, mural, community or partnership. Never suggest a link because a first name matches: two people can share a first name, and linking a person's student and staff stories is done only by ABG staff who have confirmed it.\n" + JSON.stringify(others) : "There are no other stories in the journal yet, so possibleLinks must be an empty list.",
+    "ENTRIES\n" + entriesText,
+    "Reply with only JSON in exactly this shape:\n" + STAFF_ANALYSIS_SHAPE,
+  ].filter(Boolean).join('\n\n');
+}
+function normalizeJourney(raw, locate){
+  const seen = new Set();
+  return asArr(raw).map(j => {
+    j = j || {};
+    const stage = pickEnum(j.stage, JOURNEY_STAGES, ''); const text = asStr(j.text).replace(/^null$/i, '');
+    if (!stage || !text || seen.has(stage)) return null;
+    seen.add(stage);
+    const excerpt = asStr(j.excerpt).replace(/^null$/i, ''); const loc = excerpt ? locate(excerpt) : {found: false};
+    return {stage, text, excerpt, found: !!loc.found};
+  }).filter(Boolean).sort((a, b) => JOURNEY_STAGES.findIndex(x => x.id === a.stage) - JOURNEY_STAGES.findIndex(x => x.id === b.stage));
+}
 function normalizeAnalysis(raw, ctx){
   const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const items = ctx.items;
@@ -623,6 +885,7 @@ function normalizeAnalysis(raw, ctx){
       metric: nul(e.metric), domain: pickEnum(e.domain, DOMAINS, ''), direction: pickEnum(asStr(e.direction).split(/\s/)[0], DIRECTIONS, 'unclear'), level: [1, 2, 3].includes(lvl) ? lvl : (before && after ? 2 : 1),
       statement: asStr(e.statement), value: value, unit: nul(e.unit), before: before, after: after, timeframe: nul(e.timeframe), observer: pickEnum(e.observer, OBSERVERS, ''),
       status: status, basis: nul(e.basis), observation: nul(e.observation), activity: nul(e.activity), contribution: nul(e.contribution), openQuestion: nul(e.openQuestion), inferred: e.inferred === true || e.inferred === 'true',
+      paid: ['yes', 'no'].includes(asStr(e.paid).toLowerCase()) ? asStr(e.paid).toLowerCase() : '',
       source: {entryId: loc.entryId, excerpt: excerpt, found: loc.found, note: ''}, observed: '' };
   }).filter(e => e.statement);
   const quotes = asArr(r.quotes).slice(0, 12).map(q => {
@@ -642,7 +905,8 @@ function normalizeAnalysis(raw, ctx){
     .map(q => ({id: uid('f'), kind: 'task', question: q, due: '', status: 'open', answer: '', entryId: null, suggested: true})));
   const missingMetrics = asArr(r.missingMetrics).slice(0, 10).map(m => ({id: uid('mm'), metric: nul(m && m.metric), why: nul(m && m.why), howToGet: nul(m && m.howToGet)})).filter(m => m.metric);
   const materials = asArr(r.materials).slice(0, 10).map(m => ({id: uid('mat'), type: pickEnum(m && m.type, MATERIAL_TYPES, 'other'), description: nul(m && m.description)})).filter(m => m.description);
-  const links = asArr(r.possibleLinks).filter(l => l && ctx.storyIds.has(l.storyId)).slice(0, 4)
+  /* "same person" links are never suggested by Claude: only a person who confirmed it can link student and staff stories */
+  const links = asArr(r.possibleLinks).filter(l => l && ctx.storyIds.has(l.storyId) && l.type !== 'same_person').slice(0, 4)
     .map(l => ({storyId: l.storyId, type: pickEnum(l.type, LINK_TYPES, 'same_program'), reason: asStr(l.reason), decision: null}));
   const ed = r.eventDate && typeof r.eventDate === 'object' ? r.eventDate : {};
   const ov = r.overview && typeof r.overview === 'object' ? r.overview : {};
@@ -659,19 +923,25 @@ function normalizeAnalysis(raw, ctx){
     themes: uniq(asArr(r.themes).filter(id => byId(THEMES, id))),
     audiences: uniq(asArr(st.primary).concat(asArr(r.audiences)).filter(id => byId(AUDIENCES, id))),
     stakeholderWhy: nul(st.why),
-    stakeholderValue: {schools: nul(st.schools), donors: nul(st.donors), grants: nul(st.grants)},
+    stakeholderValue: Object.assign({schools: nul(st.schools), donors: nul(st.donors), grants: nul(st.grants)}, ctx.kind === 'staff' ? {community: nul(st.community), consulting: nul(st.consulting)} : {}),
     evidence, quotes, milestones, followUps, missingMetrics, materials, links,
-    metrics: cleanMetrics(r.metricsCard, true),
+    metrics: ctx.kind === 'staff' ? {} : cleanMetrics(r.metricsCard, true),
+    staffCard: ctx.kind === 'staff' ? cleanMetrics(r.staffCard, true, STAFF_FIELDS) : {},
+    journey: ctx.kind === 'staff' ? normalizeJourney(r.journey, locate) : [],
+    journeySummary: ctx.kind === 'staff' ? nul(r.journeySummary) : '',
     containsIdentifying: r.containsIdentifying === true,
     containsSensitive: r.containsSensitive === true || evidence.some(e => e.domain === 'risk'),
   };
 }
 
-async function runAnalysis({sample, mode, story, stories, items, whenHint, studentName, memo, studentInfo, signal}){
+async function runAnalysis({sample, mode, story, stories, items, whenHint, studentName, memo, studentInfo, staffInfo, kind, signal}){
+  const k = kind || (isStaffStory(story) ? 'staff' : 'student');
   const others = stories.filter(s => (!story || s.id !== story.id) && (!s.demo || (story && story.demo)))
     .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0, 80)
-    .map(s => ({id: s.id, title: s.title || null, student: s.alias || null, program: s.program || null, community: s.community || null, summary: trunc(s.summary, 220) || null}));
-  const prompt = analysisPrompt({mode, story, items, others, whenHint, memo: asStr(memo), studentInfo, studentName: studentName || (story && story.alias) || ''});
+    .map(s => ({id: s.id, type: storyTypeLabel(s), title: s.title || null, person: s.alias || null, program: s.program || null, community: s.community || null, summary: trunc(s.summary, 220) || null}));
+  const name = studentName || (story && story.alias) || '';
+  const prompt = k === 'staff' ? staffAnalysisPrompt({mode, story, items, others, whenHint, name, staffInfo})
+    : analysisPrompt({mode, story, items, others, whenHint, memo: asStr(memo), studentInfo, studentName: name});
   let raw;
   try { raw = await sample.json(prompt, {modelTier: 'default', signal}); }
   catch (e) {
@@ -679,16 +949,16 @@ async function runAnalysis({sample, mode, story, stories, items, whenHint, stude
     /* one automatic retry, with a firmer reminder about the format */
     raw = await sample.json(prompt + '\n\nYour previous reply could not be read as JSON. Reply with only the JSON object, starting with { and ending with }. Keep "story" under 350 words.', {modelTier: 'default', signal});
   }
-  return normalizeAnalysis(raw, {items, storyIds: new Set(others.map(o => o.id))});
+  return normalizeAnalysis(raw, {items, kind: k, storyIds: new Set(others.map(o => o.id))});
 }
 
 function searchPrompt(q, stories){
   const index = stories.slice().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0, 250).map(s => ({
-    id: s.id, title: s.title, student: s.alias || null, summary: trunc(s.summary, 220), program: s.program || null, community: s.community || null,
+    id: s.id, type: storyTypeLabel(s), formerAbgStudent: isFormerStudent(s) || undefined, role: isStaffStory(s) ? ((staffVal(s, 'role') || {}).value || (s.staffInfo || {}).role || null) : undefined, title: s.title, person: s.alias || null, summary: trunc(s.summary, 220), program: s.program || null, community: s.community || null,
     when: fmtEventDate(s.eventDate) || null, themes: (s.themes || []).map(t => labelOf(THEMES, t)), usefulFor: (s.audiences || []).map(a => labelOf(AUDIENCES, a)),
     status: labelOf(STATUSES, s.status), evidence: (s.evidence || []).slice(0, 5).map(e => trunc(e.statement, 110) + ' [' + e.status + ']'),
   }));
-  return `Find the stories in this Arts Bridging the Gap journal index that best match the request below. Match on meaning, not only keywords, but only on what the stories actually record: don't treat a story as showing an outcome (improved attendance, for example) unless its summary or evidence says so. If the request is about material for an outside audience (donors, schools, partners), prefer stories with status "Approved for external use" and mention the status in the reason.
+  return `Find the stories in this Arts Bridging the Gap journal index that best match the request below. Stories are either Student Impact stories (about a student), Staff Impact stories (about someone who works or worked with ABG; "formerAbgStudent" marks staff who were ABG students first) or general stories. Match on meaning, not only keywords, but only on what the stories actually record: don't treat a story as showing an outcome (improved attendance, for example) unless its summary or evidence says so. If the request is about material for an outside audience (donors, schools, partners), prefer stories with status "Approved for external use" and mention the status in the reason.
 
 Request: ${q}
 
@@ -709,11 +979,15 @@ function externalName(s){ const p = s.privacy || {}; if (p.permission === 'yes' 
 function adaptPrompt(s, audId, fmtId){
   const a = byId(AUDIENCES, audId), f = byId(FORMATS, fmtId);
   const name = externalName(s);
+  const staff = isStaffStory(s);
+  const who = staff ? 'staff member' : 'student';
   const record = {
-    title: s.title, impactStory: s.story || s.summary, student: name || 'a student (do not use any name)', ageOrGrade: (s.overview || {}).ageOrGrade || null,
+    title: s.title, impactStory: s.story || s.summary, storyType: storyTypeLabel(s), [staff ? 'staffMember' : 'student']: name || 'a ' + who + ' (do not use any name)', ageOrGrade: staff ? undefined : ((s.overview || {}).ageOrGrade || null),
+    role: staff ? ((staffVal(s, 'role') || {}).value || null) : undefined, formerAbgStudent: staff ? isFormerStudent(s) : undefined, studentToStaffJourney: staff && s.journeySummary ? s.journeySummary : undefined,
+    employmentFacts: staff ? STAFF_FIELDS.filter(f => staffVal(s, f.id)).map(f => f.label + ': ' + staffVal(s, f.id).value + ' (' + labelOf(METRIC_STATUS, staffVal(s, f.id).status).toLowerCase() + ')') : undefined,
     when: fmtEventDate(s.eventDate) || null, program: s.program || null, community: needsRedaction(s) ? null : (s.community || null), takeaways: s.takeaways || [],
     evidence: externalEvidence(s).map(e => ({type: e.kind === 'numeric' ? 'measurable outcome' : 'qualitative', statement: e.statement, number: toNum(e.value), unit: e.unit || null, before: e.before || null, after: e.after || null, period: e.timeframe || null, status: labelOf(EVIDENCE_STATUS, e.status), observedBy: e.observer ? labelOf(OBSERVERS, e.observer) : null, basis: e.basis || null})),
-    quotesYouMayUse: (s.quotes || []).filter(q => q.approved).map(q => ({text: q.text, speaker: q.speaker === s.alias && !name ? 'the student' : (q.speaker === s.alias ? name : q.speaker), kind: q.kind})),
+    quotesYouMayUse: (s.quotes || []).filter(q => q.approved).map(q => ({text: q.text, speaker: q.speaker === s.alias && !name ? 'the ' + who : (q.speaker === s.alias ? name : q.speaker), kind: q.kind})),
     timeline: sortMilestones(s.milestones || []).map(m => ({when: fmtEventDate(m.date) || null, what: m.label, status: m.phase === 'future' ? 'pending, not yet documented' : (m.confirmed ? 'confirmed' : 'unconfirmed')})),
     whyItMatters: s.stakeholderWhy || null,
   };
@@ -731,11 +1005,11 @@ Rules:
 - Use quotes only from quotesYouMayUse, word for word. Present remembered quotes as recalled by ABG staff.
 - Describe outcomes as observed or reported. Don't claim ABG caused them unless the record says so.
 - Pending timeline items are not accomplishments. Mention them only as next steps, if at all.
-- ${needsSensitiveCare(s) ? 'Do not mention gang involvement, the justice system, substance use or other sensitive or stigmatizing experiences, even if the story text does; consent to share them is not documented. ' : ''}${name ? 'Refer to the student only as ' + name + '.' : 'Do not name the student; say "a student" or similar.'}${realName ? ' The record may mention the name ' + realName + ' elsewhere; never use it.' : ''} Leave out identifying details.
+${staff ? '- This is a Staff Impact story about someone who works or worked with ABG. Call paid work a job or position only where the record says it was paid, and present durations and roles as reported by ABG staff, not as verified employment records.\n' : ''}- ${needsSensitiveCare(s) ? 'Do not mention gang involvement, the justice system, substance use or other sensitive or stigmatizing experiences, even if the story text does; consent to share them is not documented. ' : ''}${name ? 'Refer to the ' + who + ' only as ' + name + '.' : 'Do not name the ' + who + '; say "a ' + who + '" or similar.'}${realName ? ' The record may mention the name ' + realName + ' elsewhere; never use it.' : ''} Leave out identifying details.
 - Plain text, no Markdown symbols. Warm, specific and professional. Avoid clichés such as "transformative journey".
 
 Record:
-${realName ? scrubName(JSON.stringify(record), realName, name || 'the student') : JSON.stringify(record)}`;
+${realName ? scrubName(JSON.stringify(record), realName, name || 'the ' + who) : JSON.stringify(record)}`;
 }
 
 function reportPrompt(stories, metrics){
@@ -743,7 +1017,9 @@ function reportPrompt(stories, metrics){
   const S = approved.map((s, i) => {
     const name = externalName(s);
     const obj = {
-      ref: 'S' + (i + 1), title: s.title, student: name || 'a student (no name)', when: fmtEventDate(s.eventDate) || null, program: s.program || null,
+      ref: 'S' + (i + 1), storyType: storyTypeLabel(s), title: s.title, [isStaffStory(s) ? 'staffMember' : 'student']: name || (isStaffStory(s) ? 'a staff member (no name)' : 'a student (no name)'), when: fmtEventDate(s.eventDate) || null, program: s.program || null,
+      formerAbgStudent: isStaffStory(s) ? isFormerStudent(s) : undefined, studentToStaffJourney: isStaffStory(s) && s.journeySummary ? s.journeySummary : undefined,
+      employmentFacts: isStaffStory(s) ? STAFF_FIELDS.filter(f => staffVal(s, f.id)).map(f => f.label + ': ' + staffVal(s, f.id).value + ' (' + staffVal(s, f.id).status + ')') : undefined,
       community: needsRedaction(s) ? null : (s.community || null), impactStory: trunc(s.story || s.summary, 1800), takeaways: s.takeaways || [],
       themes: (s.themes || []).map(t => labelOf(THEMES, t)), audiences: (s.audiences || []).map(a => labelOf(AUDIENCES, a)), whyItMatters: s.stakeholderWhy || null,
       sensitiveDetailsAllowed: !needsSensitiveCare(s),
@@ -754,9 +1030,11 @@ function reportPrompt(stories, metrics){
       spansYears: yearRange(s) || null,
     };
     let json = JSON.stringify(obj);
-    if (s.alias && s.alias !== name) json = scrubName(json, s.alias, name || 'the student');
+    if (s.alias && s.alias !== name) json = scrubName(json, s.alias, name || (isStaffStory(s) ? 'the staff member' : 'the student'));
     return json;
   });
+  const staffN = stories.filter(isStaffStory).length;
+  const staffSummary = staffN ? staffImpactStats(stories).summary : null;
   const M = metrics.map((m, i) => ({ref: 'M' + (i + 1), label: m.label, value: m.value, unit: m.unit || null, period: m.period || null, source: m.source || null}));
   const themeCounts = THEMES.map(t => ({theme: t.label, storiesMentioning: stories.filter(s => (s.themes || []).includes(t.id)).length})).filter(x => x.storiesMentioning > 0);
   const audienceCounts = AUDIENCES.map(a => ({audience: a.label, approvedStoriesRelevant: approved.filter(s => (s.audiences || []).includes(a.id)).length}));
@@ -781,8 +1059,7 @@ Use these sections, in order:
 3. Selected approved student narratives
 4. Verified numerical evidence
 5. Long-term student outcomes
-6. Relevance to stakeholder groups
-7. Missing data and recommended follow-ups
+${staffN ? '6. Staff and employment impact (from the staff summary below; include the student-to-staff pathway if it has any former students)\n7. Relevance to stakeholder groups\n8. Missing data and recommended follow-ups' : '6. Relevance to stakeholder groups\n7. Missing data and recommended follow-ups'}
 
 Rules:
 - Use only the data below. Don't invent numbers, outcomes, names or quotes. No return-on-investment or cost figures.
@@ -792,7 +1069,8 @@ Rules:
 - Keep storytelling clearly separate from validated numbers.
 - Never add together numbers from different stories; several stories can describe the same student or program.
 - Describe outcomes as observed or reported, not as caused by ABG unless a story says so. Pending timeline items are not accomplishments.
-- Refer to students only by the name given in each story's "student" field.
+- Refer to students only by the name given in each story's "student" field, and staff members only by the name in "staffMember".
+- Staff figures count unique staff members documented in this journal, not all ABG employees, and documented opportunities, not every job ABG has created. A person and a position are different: never present the number of people as the number of jobs. Unknown values are not zero.
 - For stories with sensitiveDetailsAllowed false, never mention gang involvement, the justice system, substance use or other stigmatizing experiences, even if the impact story text does.
 - Milestone counts describe students documented in this journal, which were selectively collected. Report them as counts ("4 of the 12 students documented"), never as rates for all ABG students.
 - Student metrics card summaries describe only the students documented in this journal, drawn from all stories (approved or not) with no names. Always say how many students a finding rests on (e.g. "4 of the 6 students documented") and whether the values are verified, reported or estimated. Never present them as rates for all ABG students. Use them in sections 1, 5 and 7; in section 4 only if every value behind a finding is verified.
@@ -807,7 +1085,7 @@ Verified program metrics: ${JSON.stringify(M)}
 Student metrics card summaries: ${JSON.stringify(cardSummary)}
 Milestones (students documented in this journal, not ABG-wide rates): ${JSON.stringify(milestoneStats(stories).rows.filter(r => r.n).map(r => ({milestone: r.mi.label, students: r.n, of: milestoneStats(stories).N, kyleObserved: r.observed, reportedToKyle: r.reported})))}
 Impact by category (one count per student; percentages must use studentsWithData as the denominator; say "of the N students with data"): ${JSON.stringify(byCategory)}
-Approved stories: [${S.join(',')}]`;
+${staffSummary ? 'Staff and employment summary (unique staff members documented in this journal; counts, not rates): ' + JSON.stringify(staffSummary) + '\n' : ''}Approved stories: [${S.join(',')}]`;
 }
 
 /* ================= draft building ================= */
@@ -821,9 +1099,18 @@ function newStoryFromAnalysis(a, opts){
     takeaways: a.takeaways, structure: a.structure, evidence: a.evidence, missingMetrics: a.missingMetrics, quotes: a.quotes, milestones: a.milestones,
     materials: a.materials, followUps: a.followUps, metrics: a.metrics || {}, analysis: {state: 'done', at: nowISO()},
   });
-  const si = opts.studentInfo || {};
-  s.overview = Object.assign({}, s.overview, {gender: si.gender || '', demographics: si.demographics || ''});
-  if (si.school) s.community = si.school;
+  if (opts.kind === 'staff') {
+    s.storyType = 'staff'; s.studentId = null; s.staffId = opts.staffId || null;
+    s.staffInfo = cleanStaffInfo(opts.staffInfo);
+    /* values typed on the intake form win over Claude's reading of the same field */
+    s.staffCard = Object.assign({}, a.staffCard || {}, intakeCard(s.staffInfo));
+    s.journey = a.journey || []; s.journeySummary = a.journeySummary || '';
+    s.overview = {ageOrGrade: '', background: a.overview.background, involvementDate: a.overview.involvementDate};
+  } else {
+    const si = opts.studentInfo || {};
+    s.overview = Object.assign({}, s.overview, {gender: si.gender || '', demographics: si.demographics || ''});
+    if (si.school) s.community = si.school;
+  }
   s._suggest = a.links;
   s.privacy = {minor: a.isMinor, identifying: a.containsIdentifying ? 'yes' : 'unknown', permission: 'unknown', external: 'unknown', redact: a.containsIdentifying ? 'yes' : 'unknown', sensitive: a.containsSensitive ? 'yes' : 'unknown', sensitiveConsent: 'unknown'};
   return s;
@@ -835,7 +1122,7 @@ function mergeUpdate(base, a){
   if (a.story) d.story = a.story;
   if (a.takeaways.length) d.takeaways = a.takeaways;
   if (a.stakeholderWhy) d.stakeholderWhy = a.stakeholderWhy;
-  d.stakeholderValue = Object.assign({}, d.stakeholderValue || {}); ['schools', 'donors', 'grants'].forEach(k => { if (a.stakeholderValue && a.stakeholderValue[k]) d.stakeholderValue[k] = a.stakeholderValue[k]; });
+  d.stakeholderValue = Object.assign({}, d.stakeholderValue || {}); ['schools', 'donors', 'grants', 'community', 'consulting'].forEach(k => { if (a.stakeholderValue && a.stakeholderValue[k]) d.stakeholderValue[k] = a.stakeholderValue[k]; });
   d.overview = Object.assign({ageOrGrade: '', background: '', involvementDate: ''}, d.overview || {});
   ['ageOrGrade', 'background', 'involvementDate'].forEach(k => { if (!d.overview[k] && a.overview[k]) d.overview[k] = a.overview[k]; });
   d.structure = d.structure || {};
@@ -860,12 +1147,18 @@ function mergeUpdate(base, a){
   d.followUps = (d.followUps || []).concat(a.followUps.filter(f => !seen.has(norm(f.question))).map(mark));
   d.metrics = Object.assign({}, d.metrics || {});
   Object.keys(a.metrics || {}).forEach(k => { const cur = d.metrics[k]; if (cur && cur.status === 'verified' && asStr(cur.value)) return; if (cur && norm(cur.value) === norm(a.metrics[k].value)) return; d.metrics[k] = Object.assign({}, a.metrics[k], {_new: true}); });
+  if (isStaffStory(d)) {
+    d.staffCard = Object.assign({}, d.staffCard || {});
+    Object.keys(a.staffCard || {}).forEach(k => { const cur = d.staffCard[k]; if (cur && cur.status === 'verified' && asStr(cur.value)) return; if (cur && norm(cur.value) === norm(a.staffCard[k].value)) return; d.staffCard[k] = Object.assign({}, a.staffCard[k], {_new: true}); });
+    if ((a.journey || []).length) d.journey = a.journey;
+    if (a.journeySummary) d.journeySummary = a.journeySummary;
+  }
   if (d.status === 'approved') { d.status = 'needs_verification'; d._wasApproved = true; }
   d.analysis = {state: 'done', at: nowISO()};
   return d;
 }
 function buildReviewDraft(p){
-  const {mode, base, analysis, whenHint, approx, me, followupId, answered, entry, studentId, studentName, studentInfo} = p;
+  const {mode, base, analysis, whenHint, approx, me, followupId, answered, entry, studentId, studentName, studentInfo, kind, staffId, staffInfo} = p;
   if (mode === 'edit') return base ? Object.assign(blankStory({}), clone(base)) : null;
   if (mode === 'update') {
     if (!base) return null;
@@ -874,8 +1167,9 @@ function buildReviewDraft(p){
     if (followupId) d.followUps = d.followUps.map(f => f.id === followupId ? Object.assign({}, f, {status: 'done', answer: analysis.entrySummary || '', entryId: entry ? entry.id : null}) : f);
     return d;
   }
-  const d = newStoryFromAnalysis(analysis, {whenHint, approx, me, studentId, studentName, studentInfo});
-  if (base) Object.assign(d, {id: base.id, createdAt: base.createdAt, createdBy: base.createdBy, entryCount: base.entryCount || 1, status: base.status || 'draft', drafts: base.drafts || [], links: base.links || [], studentId: base.studentId || null, alias: base.alias || d.alias, publicName: base.publicName || ''});
+  const k = kind || (isStaffStory(base) ? 'staff' : 'student');
+  const d = newStoryFromAnalysis(analysis, {whenHint, approx, me, studentId: k === 'staff' ? null : studentId, studentName, studentInfo, kind: k, staffId: staffId || (base && base.staffId) || null, staffInfo: staffInfo || (base && base.staffInfo) || null});
+  if (base) Object.assign(d, {id: base.id, createdAt: base.createdAt, createdBy: base.createdBy, entryCount: base.entryCount || 1, status: base.status || 'draft', drafts: base.drafts || [], links: base.links || [], studentId: k === 'staff' ? null : (base.studentId || null), alias: base.alias || d.alias, publicName: base.publicName || ''});
   return d;
 }
 function finalizeStory(d, me){
@@ -893,6 +1187,13 @@ function finalizeStory(d, me){
   s.materials = s.materials.filter(m => asStr(m.description));
   s.takeaways = (s.takeaways || []).map(t => asStr(t)).filter(Boolean);
   s.metrics = cleanMetrics(s.metrics, false); Object.keys(s.metrics).forEach(k => { delete s.metrics[k]._new; });
+  if (isStaffStory(s)) {
+    s.staffInfo = cleanStaffInfo(s.staffInfo);
+    s.staffCard = cleanMetrics(s.staffCard, false, STAFF_FIELDS); Object.keys(s.staffCard).forEach(k => { delete s.staffCard[k]._new; });
+    s.journey = asArr(s.journey).filter(j => j && byId(JOURNEY_STAGES, j.stage) && asStr(j.text)).map(j => ({stage: j.stage, text: asStr(j.text), excerpt: asStr(j.excerpt), found: !!j.found}));
+    s.journeySummary = asStr(s.journeySummary);
+    s.studentId = null;
+  }
   s.eventDate = Object.assign({text: '', iso: '', approximate: false}, s.eventDate || {});
   s.eventDate.iso = cleanIso(s.eventDate.iso);
   s.alias = asStr(s.alias); s.publicName = asStr(s.publicName);
@@ -916,9 +1217,10 @@ function toCSV(cols, rows){ return '﻿' + [cols.map(c => csvCell(c[0])).join(',
 const lbls = (list, ids) => (ids || []).map(id => labelOf(list, id)).join('; ');
 function storiesCSV(stories){
   return toCSV([
-    ['Story ID', s => s.id], ['Student record ID', s => s.studentId], ['Student first name', s => s.alias], ['Public alias', s => s.publicName], ['Title', s => s.title], ['Status', s => labelOf(STATUSES, s.status)], ['Type', s => s.period === 'past' ? 'Historical' : 'Recent'],
+    ['Story ID', s => s.id], ['Story type', s => storyTypeLabel(s)], ['Student record ID', s => s.studentId], ['Staff record ID', s => s.staffId], ['First name', s => s.alias], ['Public alias', s => s.publicName], ['Title', s => s.title], ['Status', s => labelOf(STATUSES, s.status)], ['Type', s => s.period === 'past' ? 'Historical' : 'Recent'],
+    ['Staff role', s => isStaffStory(s) ? ((staffVal(s, 'role') || {}).value || (s.staffInfo || {}).role || '') : ''], ['Current or former staff', s => isStaffStory(s) ? labelOf(STAFF_STATUS, (s.staffInfo || {}).status) : ''], ['Former ABG student', s => isStaffStory(s) ? (labelOf(FORMER_STUDENT, (s.staffInfo || {}).formerStudent) || 'Unknown') : ''],
     ['When it happened', s => fmtEventDate(s.eventDate)], ['Sort date', s => s.eventDate && s.eventDate.iso], ['Approximate date', s => s.eventDate && s.eventDate.approximate ? 'Yes' : 'No'],
-    ['Gender', s => (s.overview || {}).gender ? labelOf(GENDERS, s.overview.gender) : ''], ['Age or grade', s => (s.overview || {}).ageOrGrade], ['Other details', s => (s.overview || {}).demographics], ['Program', s => s.program], ['Metrics known', s => isStudentStory(s) ? metricsKnown(s) + ' of ' + METRIC_FIELDS.length : ''], ['School or community', s => s.community], ['Summary', s => s.summary], ['Impact story', s => s.story],
+    ['Gender', s => (s.overview || {}).gender ? labelOf(GENDERS, s.overview.gender) : ''], ['Age or grade', s => (s.overview || {}).ageOrGrade], ['Other details', s => (s.overview || {}).demographics], ['Program', s => s.program], ['Metrics known', s => isStudentStory(s) ? metricsKnown(s) + ' of ' + METRIC_FIELDS.length : isStaffStory(s) ? staffKnown(s) + ' of ' + STAFF_FIELDS.length + ' (staff card)' : ''], ['School or community', s => s.community], ['Summary', s => s.summary], ['Impact story', s => s.story],
     ['Key takeaways', s => (s.takeaways || []).join(' | ')], ['Impact categories', s => lbls(CATEGORIES, s.categories)], ['Themes', s => lbls(THEMES, s.themes)], ['Useful for', s => lbls(AUDIENCES, s.audiences)], ['Why it matters to them', s => s.stakeholderWhy],
     ['Journal entries', s => s.entryCount || 1], ['Evidence items', s => (s.evidence || []).length], ['Verified evidence', s => evidenceCounts(s).verified || 0], ['Missing metrics', s => (s.missingMetrics || []).map(m => m.metric).join(' | ')],
     ['Open follow-ups', s => openQuestions(s).length + openTasks(s).length],
@@ -930,11 +1232,32 @@ function storiesCSV(stories){
 /* the outcome category an outcome record counts toward */
 function outcomeCategoryOf(e){ const d = domainOf(e); return ACTIVE_OUTCOMES.find(o => o.domains.includes(d)) || null; }
 function outcomeCategoryLabel(e){ const o = outcomeCategoryOf(e); return o ? o.label : labelOf(DOMAINS, domainOf(e)); }
+/* the staff part of a structured impact record: every field present, null when not documented */
+function staffRecord(s, n){
+  const si = cleanStaffInfo(s.staffInfo);
+  return {firstName: n(s.alias), staffRecordId: n(s.staffId), currentOrFormer: si.status ? labelOf(STAFF_STATUS, si.status) : null, roleAtIntake: n(si.role), startYearAtIntake: n(si.startYear),
+    employmentType: si.employmentType && si.employmentType !== 'unknown' ? labelOf(EMPLOYMENT_TYPES, si.employmentType) : null,
+    formerAbgStudent: si.formerStudent === 'yes' ? true : si.formerStudent === 'no' ? false : null, firstParticipatedYear: n(si.firstParticipatedYear), programsAsStudent: n(si.programs), transitionYear: n(si.transitionYear),
+    linkedStudentStoryIds: (s.links || []).filter(l => l.type === 'same_person').map(l => l.storyId),
+    staffCard: Object.fromEntries(STAFF_FIELDS.map(f => { const v = staffVal(s, f.id); return [f.id, v ? {label: f.label, value: f.type === 'number' ? toNum(v.value) : v.value, certainty: labelOf(METRIC_STATUS, v.status), supportingStatement: n(v.excerpt), source: v.source === 'intake' ? 'Intake form' : 'Interview'} : null]; })),
+    studentToStaffJourney: (s.journey || []).length ? (s.journey || []).map(j => ({stage: labelOf(JOURNEY_STAGES, j.stage), description: n(j.text), supportingStatement: n(j.excerpt)})) : null,
+    journeySummary: n(s.journeySummary)};
+}
+/* one row per documented staff member (several stories about one person are combined, never double-counted) */
+function staffCSV(stories){
+  const ps = staffProfiles(stories);
+  const cols = [['Staff code', p => p.code], ['First name', p => p.name], ['Stories', p => p.stories.length], ['Former ABG student', p => labelOf(FORMER_STUDENT, p.info.formerStudent) || 'Unknown'], ['First participated', p => p.info.firstParticipatedYear], ['Programs as a student', p => p.info.programs], ['Began working for ABG', p => p.info.transitionYear]]
+    .concat([].concat.apply([], STAFF_FIELDS.map(f => [[f.label, p => p.card[f.id] ? p.card[f.id].value : 'Not documented'], [f.short + ': how sure', p => p.card[f.id] ? labelOf(METRIC_STATUS, p.card[f.id].status) : '']])))
+    .concat([['Linked to a Student Impact story', p => p.linked.length ? 'Yes' : 'No'], ['Approved for external use', p => p.stories.some(x => x.status === 'approved') ? 'Yes' : 'No'], ['Summary', p => p.latest.summary]]);
+  return toCSV(cols, ps);
+}
 /* Structured Impact Records: one per story, every field present, null when not known */
 function impactRecords(stories){
   const n = v => { const t = v == null ? '' : String(v).trim(); return t ? t : null; };
   return stories.map(s => ({
-    storyId: s.id, demo: !!s.demo, student: n(s.alias), studentRecordId: n(s.studentId), title: n(s.title), status: labelOf(STATUSES, s.status),
+    storyId: s.id, demo: !!s.demo, storyType: storyTypeLabel(s), student: isStaffStory(s) ? null : n(s.alias), studentRecordId: n(s.studentId), title: n(s.title), status: labelOf(STATUSES, s.status),
+    approvedForExternalUse: s.status === 'approved',
+    staff: isStaffStory(s) ? staffRecord(s, n) : null,
     program: n(s.program), schoolOrCommunity: n(s.community), when: n(fmtEventDate(s.eventDate)), recorded: n(s.createdAt), lastUpdated: n(s.updatedAt),
     outcomes: (s.evidence || []).map(e => ({
       outcomeCategory: e.status === 'future' ? null : outcomeCategoryLabel(e), impactArea: labelOf(DOMAINS, domainOf(e)), outcomeDescription: n(e.statement), change: e.direction ? labelOf(DIRECTIONS, e.direction) : null,
@@ -1006,6 +1329,92 @@ function studentProfiles(stories){
     out.push({key, studentId: list[0].studentId || null, name: asStr(latest.alias), stories: ss, latest, metrics, first: ss[0].createdAt || ''});
   });
   return out.sort((a, b) => a.first.localeCompare(b.first) || a.key.localeCompare(b.key));
+}
+/* ---------- staff counting rules ----------
+   Staff members are deduplicated by staff record (a story without one counts once on its own). Several stories
+   about one person are combined: each staff-card field keeps the most certain value on file. A blank field is
+   "not documented" and is never counted as "no" or zero. An outcome counts when the staff card states it (any
+   certainty) or an outcome record in that area shows achievement or a positive change and isn't unconfirmed.
+   People and positions are counted separately: one person can hold several positions. */
+function staffKey(s){ return s.staffId || ('story:' + s.id); }
+function staffProfiles(stories){
+  const groups = new Map();
+  stories.filter(isStaffStory).forEach(s => { const k = staffKey(s); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); });
+  const out = [];
+  groups.forEach((list, key) => {
+    const ss = list.slice().sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+    const byNew = ss.slice().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    const latest = byNew[0];
+    const card = {};
+    STAFF_FIELDS.forEach(f => {
+      let best = null;
+      ss.forEach(s => { const m = staffVal(s, f.id); if (!m) return; const r = MS_RANK[m.status] || 0; if (!best || r > best.r || (r === best.r && (s.updatedAt || '') > (best.at || ''))) best = {value: m.value, status: m.status, excerpt: m.excerpt, storyId: s.id, r, at: s.updatedAt || ''}; });
+      if (best) card[f.id] = {value: best.value, status: best.status, excerpt: best.excerpt, storyId: best.storyId};
+    });
+    const infos = byNew.map(s => cleanStaffInfo(s.staffInfo));
+    const pick = k => (infos.find(i => i[k]) || {})[k] || '';
+    const fsv = infos.some(i => i.formerStudent === 'yes') ? 'yes' : infos.some(i => i.formerStudent === 'no') ? 'no' : 'unknown';
+    const info = {status: pick('status'), role: pick('role'), startYear: pick('startYear'), employmentType: pick('employmentType'), formerStudent: fsv,
+      firstParticipatedYear: fsv === 'yes' ? pick('firstParticipatedYear') : '', programs: fsv === 'yes' ? pick('programs') : '', transitionYear: fsv === 'yes' ? pick('transitionYear') : ''};
+    const linked = uniq([].concat.apply([], ss.map(s => (s.links || []).filter(l => l.type === 'same_person').map(l => l.storyId))));
+    out.push({key, staffId: list[0].staffId || null, name: asStr(latest.alias), stories: ss, latest, card, info, linked, first: ss[0].createdAt || ''});
+  });
+  out.sort((a, b) => a.first.localeCompare(b.first) || a.key.localeCompare(b.key));
+  out.forEach((p, i) => { p.code = 'Staff ' + String(i + 1).padStart(2, '0'); });
+  return out;
+}
+const cardIs = (p, id, test) => { const c = p.card[id]; return c && test(c.value) ? [{field: id, c}] : []; };
+const STAFF_SIGNALS = [
+  {id: 'paid', label: 'Paid opportunity documented', desc: 'Paid employment, a paid stipend or a paid internship, as stated in the interview or on the staff card.', card: p => cardIs(p, 'opportunityType', v => /^Paid/.test(v)), domains: ['employment', 'first_job'], needPaid: true},
+  {id: 'firstJob', label: 'ABG was their first paid job', card: p => cardIs(p, 'firstJob', v => v === 'Yes'), domains: ['first_job'], needPaid: true},
+  {id: 'current', label: 'Currently working with ABG', desc: 'Staff card says current staff (retention).', card: p => cardIs(p, 'staffStatus', v => v === 'Current staff'), domains: []},
+  {id: 'advanced', label: 'Promoted or given expanded responsibilities', card: p => cardIs(p, 'roleGrowth', v => v === 'Promoted' || v === 'Responsibilities expanded'), domains: ['role_growth']},
+  {id: 'otherJob', label: 'Went on to other or additional employment', card: p => cardIs(p, 'otherEmployment', v => !!v), domains: ['next_employment']},
+  {id: 'skills', label: 'Professional or artistic skill development', card: p => cardIs(p, 'skills', v => !!v), domains: ['pro_skills']},
+  {id: 'training', label: 'Training or mentorship received', card: p => cardIs(p, 'trainingReceived', v => v === 'Yes').concat(cardIs(p, 'mentored', v => v === 'Yes')), domains: ['training']},
+  {id: 'leadership', label: 'Leadership responsibilities', card: p => cardIs(p, 'leadership', v => v === 'Yes'), domains: ['staff_leadership']},
+  {id: 'furtherEd', label: 'Further education or certifications', card: p => cardIs(p, 'furtherEducation', v => !!v), domains: ['further_ed']},
+  {id: 'inField', label: 'Working in the arts, education or nonprofit field', card: p => cardIs(p, 'inField', v => v === 'Yes'), domains: []},
+  {id: 'mentoring', label: 'Mentors or teaches ABG students', card: p => cardIs(p, 'mentorsStudents', v => /^Yes/.test(v)), domains: ['mentoring_students']},
+  {id: 'community', label: 'Contributes to arts education and the community', card: () => [], domains: ['community_contribution', 'mentoring_students']},
+  {id: 'personal', label: 'Personal growth, stability or sense of purpose', card: () => [], domains: ['stability']},
+];
+function staffSignal(p, sig){
+  const items = [];
+  sig.card(p).forEach(x => { const f = byId(STAFF_FIELDS, x.field); items.push({s: p.stories.find(s => s.id === x.c.storyId) || p.latest, line: {text: f.short + ': ' + fmtMetric(f, x.c.value), tag: 'Staff card · ' + labelOf(METRIC_STATUS, x.c.status)}, cls: x.c.status === 'verified' ? 'verified' : 'observed'}); });
+  p.stories.forEach(s => (s.evidence || []).forEach(e => {
+    if (e.status === 'future' || !sig.domains.includes(domainOf(e)) || !POSITIVE(e.direction) || evidenceClass(e) === 'unconfirmed') return;
+    if (sig.needPaid && e.paid !== 'yes') return;
+    items.push({s, line: insLine(e), cls: evidenceClass(e)});
+  }));
+  return {hit: items.length > 0, items, verified: items.some(x => x.cls === 'verified')};
+}
+function staffImpactStats(stories){
+  const profiles = staffProfiles(stories);
+  const N = profiles.length;
+  const sig = {};
+  STAFF_SIGNALS.forEach(g => { sig[g.id] = profiles.map(p => ({p, r: staffSignal(p, g)})).filter(x => x.r.hit); });
+  const has = (id, p) => sig[id].some(x => x.p === p);
+  const durations = profiles.map(p => ({p, n: p.card.yearsWithAbg ? toNum(p.card.yearsWithAbg.value) : null})).filter(x => x.n != null);
+  const positions = profiles.map(p => ({p, n: p.card.positionsHeld ? toNum(p.card.positionsHeld.value) : null})).filter(x => x.n != null);
+  const avg = list => list.length ? round1(list.reduce((t, x) => t + x.n, 0) / list.length) : null;
+  const former = profiles.filter(p => p.info.formerStudent === 'yes');
+  const unknownBg = profiles.filter(p => p.info.formerStudent === 'unknown');
+  const thisYear = new Date().getFullYear();
+  const span = p => { const y = toNum(p.info.firstParticipatedYear); return y && p.card.staffStatus && p.card.staffStatus.value === 'Current staff' ? thisYear - y : null; };
+  const longTerm = former.filter(p => (span(p) || 0) >= 5);
+  const formerPaid = former.filter(p => has('paid', p));
+  const formerMentor = former.filter(p => has('mentoring', p));
+  const formerPro = former.filter(p => ['advanced', 'otherJob', 'inField', 'leadership', 'furtherEd'].some(id => has(id, p)));
+  const formerMentorOrPro = former.filter(p => formerMentor.includes(p) || formerPro.includes(p));
+  const count = id => sig[id].length;
+  const summary = {staffDocumented: N, note: 'Unique staff members documented in this journal; not all ABG employees and not every job ABG has created. Unknown values are not counted.',
+    paidOpportunitiesDocumented: count('paid'), positionsDocumented: positions.length ? {total: positions.reduce((t, x) => t + x.n, 0), staffWithAKnownCount: positions.length} : null,
+    employmentDurationYears: durations.length ? {staffWithAKnownDuration: durations.length, average: avg(durations), shortest: Math.min.apply(null, durations.map(x => x.n)), longest: Math.max.apply(null, durations.map(x => x.n))} : null,
+    firstPaidJobAtAbg: count('firstJob'), currentlyWithAbg: count('current'), promotedOrExpandedResponsibilities: count('advanced'), laterOrAdditionalEmployment: count('otherJob'),
+    skillDevelopment: count('skills'), trainingOrMentorship: count('training'), leadership: count('leadership'), furtherEducation: count('furtherEd'), inArtsEducationOrNonprofitField: count('inField'), mentorsOrTeachesStudents: count('mentoring'),
+    formerAbgStudentsWhoBecameStaff: former.length, formerStudentsWithPaidOpportunity: formerPaid.length, formerStudentsMentoringOrTeaching: formerMentor.length, formerStudentsWithLaterProfessionalOutcomes: formerPro.length, staffWithUnknownStudentBackground: unknownBg.length};
+  return {profiles, N, sig, durations, positions, avgYears: avg(durations), former, unknownBg, longTerm, span, formerPaid, formerMentor, formerPro, formerMentorOrPro, summary};
 }
 function statusCounts(vals){ const c = {verified: 0, reported: 0, estimate: 0}; vals.forEach(v => { c[v.status] = (c[v.status] || 0) + 1; }); return c; }
 function round1(n){ return Math.round(n * 10) / 10; }
@@ -1192,15 +1601,27 @@ function evLine(e, swap){
 }
 function storyMarkdown(s, entries){
   const ov = s.overview || {};
-  const out = ['# ' + s.title, '', 'INTERNAL STUDENT IMPACT REPORT. Contains full transcripts. Status: ' + labelOf(STATUSES, s.status) + '.', ''];
-  out.push('## Student overview');
-  [['Student', s.alias], ['Gender', ov.gender ? labelOf(GENDERS, ov.gender) : ''], ['Age or grade', ov.ageOrGrade], ['School or community', s.community], ['Other details', ov.demographics], ['Background', ov.background], ['ABG program', s.program], ['When involved', ov.involvementDate || fmtEventDate(s.eventDate)]]
-    .filter(r => r[1]).forEach(r => out.push('- **' + r[0] + ':** ' + r[1]));
+  const staff = isStaffStory(s);
+  const out = ['# ' + s.title, '', 'INTERNAL ' + (staff ? 'STAFF' : 'STUDENT') + ' IMPACT REPORT. Contains full transcripts. Status: ' + labelOf(STATUSES, s.status) + '.', ''];
+  if (staff) {
+    const si = cleanStaffInfo(s.staffInfo);
+    out.push('## Staff overview');
+    [['Staff member', s.alias], ['Story type', 'Staff Impact' + (si.formerStudent === 'yes' ? ' (former ABG student)' : '')], ['Current or former', labelOf(STAFF_STATUS, si.status)], ['Role at ABG', si.role], ['Started working with ABG', si.startYear], ['Employment type', si.employmentType ? labelOf(EMPLOYMENT_TYPES, si.employmentType) : ''],
+      ['Former ABG student', labelOf(FORMER_STUDENT, si.formerStudent) || 'Unknown'], ['First participated', si.firstParticipatedYear], ['Programs as a student', si.programs], ['Began working for ABG', si.transitionYear], ['Background', ov.background], ['ABG program', s.program]]
+      .filter(r => r[1]).forEach(r => out.push('- **' + r[0] + ':** ' + r[1]));
+    out.push('', '**Staff impact card** (blank fields are not documented, not "no")');
+    STAFF_FIELDS.forEach(f => { const m = staffVal(s, f.id); out.push('- ' + f.label + ': ' + (m ? fmtMetric(f, m.value) + ' [' + labelOf(METRIC_STATUS, m.status) + ']' + (m.excerpt ? ' (passage: "' + m.excerpt + '")' : '') : 'Not documented')); });
+    if ((s.journey || []).length || s.journeySummary) { out.push('', '**Student-to-staff journey**'); (s.journey || []).forEach(j => out.push('- ' + labelOf(JOURNEY_STAGES, j.stage) + ': ' + j.text)); if (s.journeySummary) out.push('', s.journeySummary); }
+  } else {
+    out.push('## Student overview');
+    [['Student', s.alias], ['Gender', ov.gender ? labelOf(GENDERS, ov.gender) : ''], ['Age or grade', ov.ageOrGrade], ['School or community', s.community], ['Other details', ov.demographics], ['Background', ov.background], ['ABG program', s.program], ['When involved', ov.involvementDate || fmtEventDate(s.eventDate)]]
+      .filter(r => r[1]).forEach(r => out.push('- **' + r[0] + ':** ' + r[1]));
+  }
   out.push('');
   const withPassage = e => evLine(e) + (e.source && e.source.excerpt ? ' (passage: "' + e.source.excerpt + '")' : (e.source && e.source.note ? ' (record: ' + e.source.note + ')' : ''));
   const live = (s.evidence || []).filter(e => e.status !== 'future'), fut = (s.evidence || []).filter(e => e.status === 'future');
   const cmp = live.filter(hasComparison), rest = live.filter(e => !hasComparison(e));
-  out.push('## A. Student success story', '', s.story || s.summary || 'Not written yet.', '');
+  out.push(staff ? '## A. Impact narrative' : '## A. Student success story', '', s.story || s.summary || 'Not written yet.', '');
   if ((s.takeaways || []).length) { out.push('**Key impact takeaways**'); s.takeaways.forEach(t => out.push('- ' + t)); out.push(''); }
   out.push('## B. Measurable outcomes', '');
   const msi = storyMilestoneItems(s);
@@ -1221,7 +1642,7 @@ function storyMarkdown(s, entries){
   out.push('');
   out.push('## E. Stakeholder value', '');
   const sv = s.stakeholderValue || {};
-  [['schools', 'School administrators'], ['donors', 'Donors'], ['grants', 'Grant providers']].forEach(([k, l]) => { if (sv[k]) out.push('- **' + l + ':** ' + sv[k]); });
+  (staff ? STAFF_STAKEHOLDERS : [['schools', 'School administrators'], ['donors', 'Donors'], ['grants', 'Grant providers']]).forEach(([k, l]) => { if (sv[k]) out.push('- **' + l + ':** ' + sv[k]); });
   out.push('', s.stakeholderWhy || '', '');
   if ((s.audiences || []).length) out.push('**Most useful for:** ' + s.audiences.map(a => labelOf(AUDIENCES, a)).join(', '), '');
   if ((s.milestones || []).length) { out.push('## Student impact timeline'); sortMilestones(s.milestones).forEach(m => out.push('- ' + labelOf(PHASES, m.phase) + ' · ' + (fmtEventDate(m.date) || 'Date unknown') + ': ' + m.label + (m.phase === 'future' ? ' (pending)' : ''))); out.push(''); }
@@ -1395,6 +1816,7 @@ const ICONS = {
   monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
   compass: '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>',
+  briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7M3 12.5h18M10.5 12.5v2h3v-2"/>',
   users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.2 5 2.6 5 5.8"/>',
 };
 function Icon({name, size}){ const s = size || 20; return html`<svg className="ic" width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{__html: ICONS[name] || ''}}></svg>`; }
@@ -1814,9 +2236,11 @@ function InsightsOverview({list, filterBar, period}){
       </button>`; })}</div>`}
     </section>
 
+    <${StaffImpactSection} list=${list} period=${period} />
+
     <details className="sec ins-rules"><summary><span>How these numbers are counted</span><${Icon} name="chev" size=${18} /></summary><div className="sec-body small">
       <p><strong>Reporting period:</strong> stories first recorded ${period}. Filters narrow it further.</p>
-      <p><strong>Students:</strong> each student is counted once, by student record. A story without a student record counts once under its first name. General stories (not about one student) count as stories but not students.</p>
+      <p><strong>Students:</strong> each student is counted once, by student record. A story without a student record counts once under its first name. General stories (not about one student) count as stories but not students. Staff Impact stories are counted in their own section, never as students.</p>
       <p><strong>Denominators:</strong> student figures are out of the ${N} students documented in this view; evidence figures are out of the ${R} outcome records in this view.</p>
       <p><strong>Outcomes:</strong> a student counts once per area when at least one outcome record shows achievement, improvement, or a mixed or unspecified positive change, or when their metrics card says so (source not recorded, so it counts as unconfirmed). No-change and declines are shown separately. Planned or hoped-for outcomes are never counted.</p>
       <p><strong>Evidence types:</strong> verified by documentation (only when staff checked a document), directly observed by staff, reported by the student or a third party, or unconfirmed or inferred. Kyle's confident account alone is never treated as verified.</p>
@@ -1824,12 +2248,98 @@ function InsightsOverview({list, filterBar, period}){
     </div></details>
   </div>`;
 }
+/* ---------- Staff & Employment Impact ---------- */
+function StaffImpactSection({list, period}){
+  const {nav, storiesLoaded, openSheet, readOnly} = useApp();
+  const st = useMemo(() => staffImpactStats(list), [list]);
+  const N = st.N;
+  const show = (title, rule, rows) => openSheet(close => html`<${BehindSheet} title=${title} rule=${rule} rows=${rows} close=${close} />`);
+  const of = (n, d) => d ? n + ' of ' + d : '0';
+  const sigRows = id => st.sig[id].map(x => ({story: x.p.latest, lines: x.r.items.map(i => i.line)}));
+  const sig = id => byId(STAFF_SIGNALS, id);
+  const openSig = (id, denom, subset) => { const rows = st.sig[id].filter(x => !subset || subset.includes(x.p)); show(sig(id).label, of(rows.length, denom) + ' staff members documented' + (subset ? ' who were ABG students first' : '') + '. ' + (sig(id).desc || '') + ' Counted from the staff card or outcome records that are not unconfirmed.', rows.map(x => ({story: x.p.latest, lines: x.r.items.map(i => i.line)}))); };
+  const verifiedN = id => st.sig[id].filter(x => x.r.verified).length;
+  const stat = (icon, tone, value, label, sub, onClick, id) => html`<button className="stat-card ins-stat" id=${id} onClick=${onClick}><span className=${'stat-ic tone-' + tone}><${Icon} name=${icon} size=${26} /></span><span className="stat-text"><b className="tnum">${storiesLoaded ? value : '–'}</b><span className="stat-label">${label}</span><small className="muted">${sub}</small></span></button>`;
+  const peopleRows = ps => ps.map(p => ({story: p.latest, lines: p.stories.length > 1 ? [{text: p.stories.length + ' stories, counted once'}] : []}));
+  if (N === 0) return html`<section className="ins-section staff-ins" aria-labelledby="h-staff">
+    <h2 id="h-staff" className="ins-h">Staff & Employment Impact</h2>
+    <section className="card ins-card staff-empty">
+      <div><h3>No Staff Impact stories ${period === 'at any time' ? 'yet' : 'in this view'}</h3><p className="small muted">Staff Impact stories record how ABG creates jobs, builds professional skills and supports careers, including for people who first came to ABG as students. Their employment and development outcomes will be counted here, one person at a time.</p></div>
+      ${!readOnly ? html`<div><button className="btn btn-purple btn-sm" onClick=${() => nav('interview', {kind: 'staff'})}><${Icon} name="plus" size=${16} /> Capture a Staff Impact Story</button></div>` : null}
+    </section>
+  </section>`;
+  const durTxt = st.durations.length ? st.avgYears + ' yrs' : 'Not documented';
+  const durSub = st.durations.length ? 'Average for ' + of(st.durations.length, N) + ' staff with a known duration' + (st.durations.length > 1 ? ' (' + Math.min.apply(null, st.durations.map(x => x.n)) + ' to ' + Math.max.apply(null, st.durations.map(x => x.n)) + ' years)' : '') : 'No durations stated yet';
+  const devRows = [['skills', 'Professional or artistic skill development'], ['training', 'Training or mentorship received'], ['leadership', 'Leadership responsibilities'], ['advanced', 'Promotions or expanded responsibilities'], ['furtherEd', 'Further education or certifications']];
+  const empRows = [['firstJob', 'ABG was their first paid job'], ['current', 'Currently working with ABG'], ['otherJob', 'Went on to other or additional employment'], ['inField', 'Working in the arts, education or nonprofit field'], ['mentoring', 'Mentor or teach ABG students'], ['community', 'Contribute to arts education and the community']];
+  const posTotal = st.positions.reduce((t, x) => t + x.n, 0);
+  const F = st.former.length;
+  const featured = list.filter(isStaffStory).slice().sort((a, b) => ((b.status === 'approved') - (a.status === 'approved')) || ((isFormerStudent(b) ? 1 : 0) - (isFormerStudent(a) ? 1 : 0)) || (outcomeCount(b) - outcomeCount(a)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const seen = new Set(); const highlights = featured.filter(s => { const k = staffKey(s); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 3);
+  const pstage = (label, n, sub, rows, title, rule, tone) => html`<li className=${'pw-stage tone-' + tone}><button className="pw-btn" onClick=${() => show(title, rule, rows)}><span className="pw-n tnum">${n}</span><span className="pw-label">${label}</span><small className="muted">${sub}</small></button></li>`;
+  return html`<section className="ins-section staff-ins" aria-labelledby="h-staff">
+    <h2 id="h-staff" className="ins-h">Staff & Employment Impact</h2>
+    <p className="tiny muted ins-hint">Counts describe the ${N} staff member${N === 1 ? '' : 's'} documented in this journal (${period}), not all ABG employees or every job ABG has created. Each person counts once, however many stories they have. Details that aren't documented are never counted as "no".</p>
+
+    <h3 className="ins-sub">Employment overview</h3>
+    <div className="ins-stats">
+      ${stat('briefcase', 'purple', N, 'Staff members documented', 'Unique people with a Staff Impact story', () => show('Staff members documented', N + ' unique staff members in this view, one per staff record.', peopleRows(st.profiles)), 'si-staff')}
+      ${stat('check', 'teal', of(st.sig.paid.length, N), 'Paid opportunities documented', (verifiedN('paid') ? verifiedN('paid') + ' verified by records; ' : '') + 'the rest as reported in interviews' + (st.positions.length ? '. ' + posTotal + ' position' + (posTotal === 1 ? '' : 's') + ' held, where known (' + st.positions.length + ' people)' : ''), () => openSig('paid', N), 'si-paid')}
+      ${stat('calendar', 'blue', durTxt, 'Employment duration', durSub, () => show('Employment duration', 'Years working with ABG, from the staff card. Only people with a stated duration are included; nobody is counted as zero.', st.durations.map(x => ({story: x.p.latest, lines: [{text: x.n + ' year' + (x.n === 1 ? '' : 's') + ' working with ABG', tag: 'Staff card · ' + labelOf(METRIC_STATUS, x.p.card.yearsWithAbg.status)}]}))), 'si-dur')}
+      ${stat('bars', 'orange', of(st.sig.advanced.length, N), 'Career advancement', 'Promoted or given expanded responsibilities', () => openSig('advanced', N), 'si-adv')}
+    </div>
+
+    <div className="ins-charts">
+      <section className="card ins-card">
+        <div><h3>Professional development</h3><p className="small muted">Staff members with each outcome, of ${N} documented</p></div>
+        <ul className="ms-list">${devRows.map(([id, label]) => html`<li key=${id}><button className="ms-btn" onClick=${() => openSig(id, N)}><span>${label}</span><b className="tnum">${st.sig[id].length}<small className="muted"> of ${N}</small></b></button></li>`)}</ul>
+      </section>
+      <section className="card ins-card">
+        <div><h3>Employment and community</h3><p className="small muted">Retention, first jobs, later careers and contributions to students</p></div>
+        <ul className="ms-list">${empRows.map(([id, label]) => html`<li key=${id}><button className="ms-btn" onClick=${() => openSig(id, N)}><span>${label}</span><b className="tnum">${st.sig[id].length}<small className="muted"> of ${N}</small></b></button></li>`)}</ul>
+      </section>
+    </div>
+
+    <section className="card ins-card pathway-card">
+      <div><h3>Student-to-Staff pathways</h3><p className="small muted">Former ABG students who became staff. ${F ? 'Each stage counts only what is documented; not everyone completes every stage.' : ''}</p></div>
+      ${F === 0 ? html`<p className="empty-note">No staff members in this view are recorded as former ABG students.${st.unknownBg.length ? ' ' + st.unknownBg.length + ' staff member' + (st.unknownBg.length === 1 ? "'s" : "s'") + ' student background is unknown; update their stories if you learn it.' : ''}</p>` : html`
+        <ol className="pathway" aria-label="Student to staff to mentor or professional">
+          ${pstage('Student', F, 'Former ABG students documented', peopleRows(st.former), 'Former ABG students who became staff', F + ' staff members are recorded as former ABG students or program participants.', 'teal')}
+          ${pstage('Staff', F, st.formerPaid.length + ' with a paid opportunity documented', st.formerPaid.map(p => ({story: p.latest, lines: (st.sig.paid.find(x => x.p === p) || {r: {items: []}}).r.items.map(i => i.line)})), 'Paid transitions into ABG employment', of(st.formerPaid.length, F) + ' former students have a paid opportunity documented. The others may have been paid; it just is not documented.', 'purple')}
+          ${pstage('Mentor / Professional', st.formerMentorOrPro.length, st.formerMentor.length + ' mentor or teach students', st.formerMentorOrPro.map(p => ({story: p.latest, lines: ['mentoring', 'advanced', 'otherJob', 'inField', 'leadership', 'furtherEd'].map(id => st.sig[id].find(x => x.p === p)).filter(Boolean).map(x => x.r.items[0].line)})), 'Mentors and professionals', of(st.formerMentorOrPro.length, F) + ' former students mentor or teach students, advanced at ABG, took on leadership, pursued further education or other work, or work in the arts, education or nonprofit field.', 'orange')}
+        </ol>
+        <ul className="cls-list pw-facts">
+          <li><button className="ms-btn" onClick=${() => openSig('mentoring', F, st.former)}><span>Former students serving as mentors or instructors</span><b className="tnum">${of(st.formerMentor.length, F)}</b></button></li>
+          <li><button className="ms-btn" onClick=${() => show('Long-term involvement', 'Current staff whose first participation as a student was at least 5 years ago (from the intake form).', st.longTerm.map(p => ({story: p.latest, lines: [{text: 'First participated around ' + p.info.firstParticipatedYear + '; with ABG about ' + st.span(p) + ' years'}]})))}><span>Involved with ABG for 5+ years since first participating</span><b className="tnum">${of(st.longTerm.length, F)}</b></button></li>
+          <li><button className="ms-btn" onClick=${() => show('Linked to a Student Impact story', 'Staff stories linked to the same person’s Student Impact story by someone who confirmed it.', st.former.filter(p => p.linked.length).map(p => ({story: p.latest, lines: []})))}><span>Linked to their Student Impact story</span><b className="tnum">${of(st.former.filter(p => p.linked.length).length, F)}</b></button></li>
+        </ul>`}
+    </section>
+
+    <section className="card ins-card">
+      <div className="sec-head"><div><h3>Staff success stories</h3><p className="small muted">Highlights from this view, approved stories first. One per person.</p></div><button className="btn btn-quiet btn-sm view-all" onClick=${() => nav('library')}>View all stories <span aria-hidden="true">→</span></button></div>
+      <div className="fs-grid">${highlights.map(s => { const p = st.profiles.find(x => x.key === staffKey(s)); const tags = p ? STAFF_SIGNALS.filter(g => st.sig[g.id].some(x => x.p === p)).slice(0, 3) : []; return html`<button className="fs-card" key=${s.id} onClick=${() => nav('story', {id: s.id})}>
+        ${storyArt(s.id)}
+        <span className="fs-main"><strong>${s.alias || s.title}${s.demo ? html` <${DemoPill} />` : null}</strong><small className="muted">${[(staffVal(s, 'role') || {}).value || (s.staffInfo || {}).role, isFormerStudent(s) ? 'Student → Staff' : ''].filter(Boolean).join(' · ')}</small><span className="fs-sum">${s.summary || s.title}</span></span>
+        ${tags.length ? html`<span className="fs-tags">${tags.map(g => html`<span className="pill tone-purple" key=${g.id}>${g.label}</span>`)}</span>` : null}
+      </button>`; })}</div>
+    </section>
+
+    <details className="sec ins-rules"><summary><span>How staff numbers are counted</span><${Icon} name="chev" size=${18} /></summary><div className="sec-body small">
+      <p><strong>People, not positions:</strong> each staff member counts once, by staff record, however many stories they have. Positions held are counted separately and only where a number was stated.</p>
+      <p><strong>Documented, not total:</strong> these are the staff members ABG chose to record. The figures are not ABG's total number of employees or every job ABG has created.</p>
+      <p><strong>Paid opportunities:</strong> counted only when the staff card says paid employment or a paid stipend or internship, or an outcome record says the role was paid. Volunteer roles are not counted as paid.</p>
+      <p><strong>Unknowns:</strong> a detail that isn't documented is left out of the count. It is never treated as "no" or zero.</p>
+      <p><strong>Evidence:</strong> a staff-card value counts at its stated certainty (verified, reported or estimate). Outcome records count when they show achievement or a positive change and are not unconfirmed or inferred. Kyle's firsthand observations are reported, not verified employment records.</p>
+      <p><strong>Former students:</strong> from the "previously an ABG student" answer on each staff story. "Unknown" is never counted as yes.</p>
+    </div></details>
+  </section>`;
+}
 function DashboardView({tab: initial}){
   const {stories, nav} = useApp();
   const demoN = stories.filter(x => x.demo).length;
   const [tab, setTab] = useState(initial || 'overview');
   const [range, setRange] = useState(() => lsGet('abg-ins-range') || '12m');
-  const [f, setF] = useState({program: '', grade: '', school: '', outcome: ''});
+  const [f, setF] = useState({type: '', program: '', grade: '', school: '', outcome: ''});
   const setFilter = (k, v) => setF(x => Object.assign({}, x, {[k]: v}));
   useEffect(() => { lsSet('abg-ins-range', range); }, [range]);
   if (tab === 'reports') return html`<div className="view">
@@ -1840,14 +2350,14 @@ function DashboardView({tab: initial}){
   const since = days ? new Date(Date.now() - days * 864e5).toISOString() : '';
   const period = since ? 'from ' + fmtDate(since) + ' to today' : 'at any time';
   const inRange = stories.filter(s => !since || (s.createdAt || '') >= since);
-  const list = inRange.filter(s => (!f.program || s.program === f.program) && (!f.school || s.community === f.school) && (!f.grade || gradeBucket(s) === f.grade) && (!f.outcome || storyOutcomes(s).has(f.outcome)));
+  const list = inRange.filter(s => (!f.type || storyTypeOf(s) === f.type) && (!f.program || s.program === f.program) && (!f.school || s.community === f.school) && (!f.grade || gradeBucket(s) === f.grade) && (!f.outcome || storyOutcomes(s).has(f.outcome)));
   const programs = uniq(stories.map(s => asStr(s.program))).sort();
   const schools = uniq(stories.map(s => asStr(s.community))).sort();
   const active = Object.values(f).some(Boolean);
   const sel = (k, label, opts) => html`<label className="ins-filter"><span className="sr-only">${label}</span><select className="select" aria-label=${label} value=${f[k]} onChange=${e => setFilter(k, e.target.value)}><option value="">${label}</option>${opts.map(o => html`<option key=${o[0]} value=${o[0]}>${o[1]}</option>`)}</select></label>`;
   return html`<div className="view insights2">
     <div className="ins-top">
-      <header className="ins-hello"><p className="eyebrow">Impact Insights</p><h1>Stories that show what's possible.</h1><p className="lede">Explore the outcomes in your journal entries, how well each one is supported, and the student stories behind every number.</p></header>
+      <header className="ins-hello"><p className="eyebrow">Impact Insights</p><h1>Stories that show what's possible.</h1><p className="lede">Explore student and staff outcomes in your journal, how well each one is supported, and the stories behind every number.</p></header>
       <div className="ins-controls">
         <label className="range-pick"><${Icon} name="calendar" size=${18} /><select aria-label="Date range" value=${range} onChange=${e => setRange(e.target.value)}>${RANGES.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select></label>
         <button className="btn btn-ghost btn-sm" onClick=${() => setTab('reports')}><${Icon} name="file" size=${16} /> Reports and exports</button>
@@ -1856,11 +2366,12 @@ function DashboardView({tab: initial}){
     ${demoN > 0 ? html`<p className="notice small demo-note"><${DemoPill} /> <span>Includes ${demoN} fictional demo stor${demoN === 1 ? 'y' : 'ies'} so you can see how Insights work. They're left out of reports and exports. <button className="link-btn" onClick=${() => nav('settings')}>Manage demo stories</button></span></p>` : null}
     <${InsightsOverview} list=${list} period=${period} filterBar=${html`<div className="filter-bar">
       <span className="filter-label">Filter by:</span>
+      ${sel('type', 'Story type', [['student', 'Student Impact'], ['staff', 'Staff Impact']])}
       ${sel('program', 'Program', programs.map(p => [p, p]))}
       ${sel('grade', 'Grade level', GRADE_BUCKETS.map(g => [g.id, g.label]))}
       ${sel('school', 'School', schools.map(p => [p, p]))}
       ${sel('outcome', 'Outcome', ACTIVE_OUTCOMES.map(o => [o.id, o.label]))}
-      ${active ? html`<button className="btn btn-quiet btn-sm" onClick=${() => setF({program: '', grade: '', school: '', outcome: ''})}>Clear</button>` : null}
+      ${active ? html`<button className="btn btn-quiet btn-sm" onClick=${() => setF({type: '', program: '', grade: '', school: '', outcome: ''})}>Clear</button>` : null}
     </div>`} />
     <details className="sec ins-more"><summary><span>More evidence details: milestones, metrics card, themes<span className="count">All stories</span></span><${Icon} name="chev" size=${18} /></summary>
       <div className="sec-body"><${InsightsView} embedded=${true} /></div>
@@ -1874,12 +2385,15 @@ function StoryCard({story, why}){
   const ec = evidenceCounts(story);
   const updates = Math.max(0, (story.entryCount || 1) - 1);
   const ev = fmtEventDate(story.eventDate);
-  const meta = [ev ? ev + (story.eventDate && story.eventDate.approximate ? ' (approx.)' : '') : '', story.program].filter(Boolean).join(' · ');
+  const role = isStaffStory(story) ? ((staffVal(story, 'role') || {}).value || (story.staffInfo || {}).role || '') : '';
+  const meta = [role, ev ? ev + (story.eventDate && story.eventDate.approximate ? ' (approx.)' : '') : '', story.program].filter(Boolean).join(' · ');
   const auds = (story.audiences || []).slice(0, 3).map(a => (byId(AUDIENCES, a) || {}).short || a);
+  const keyOutcomes = isStaffStory(story) ? STAFF_SIGNALS.filter(g => ['paid', 'advanced', 'mentoring', 'otherJob', 'leadership', 'skills'].includes(g.id)).filter(g => staffSignal({card: Object.fromEntries(STAFF_FIELDS.filter(f => staffVal(story, f.id)).map(f => [f.id, Object.assign({storyId: story.id}, staffVal(story, f.id))])), stories: [story], latest: story}, g).hit).slice(0, 3) : [];
   const open = () => nav('story', {id: story.id});
   return html`<div className="card story-card" role="button" tabIndex="0" onClick=${open} onKeyDown=${e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}>
     <div className="sc-top">
       ${story.demo ? html`<${DemoPill} />` : null}
+      <${TypePill} story=${story} />
       <${StatusPill} status=${story.status} />
       ${story.period === 'past' ? html`<${Pill} tone="orange">Historical<//>` : null}
       ${updates > 0 ? html`<${Pill} tone="blue">${updates} update${updates > 1 ? 's' : ''}<//>` : null}
@@ -1889,7 +2403,8 @@ function StoryCard({story, why}){
     ${meta ? html`<p className="small muted">${meta}</p>` : null}
     ${story.summary ? html`<p className="clamp">${story.summary}</p>` : html`<p className="small muted">Not analyzed yet.</p>`}
     ${why ? html`<p className="why small"><${Icon} name="spark" size=${16} /> <span>${why}</span></p>` : null}
-    ${(story.themes || []).length > 0 ? html`<div className="chips">${story.themes.slice(0, 3).map(t => html`<span className="chip static small" key=${t}>${labelOf(THEMES, t)}</span>`)}</div>` : null}
+    ${keyOutcomes.length ? html`<div className="chips">${keyOutcomes.map(g => html`<span className="chip static small chip-staff" key=${g.id}>${g.label}</span>`)}</div>`
+      : (story.themes || []).length > 0 ? html`<div className="chips">${story.themes.slice(0, 3).map(t => html`<span className="chip static small" key=${t}>${labelOf(THEMES, t)}</span>`)}</div>` : null}
     ${auds.length ? html`<p className="small muted">Useful for ${auds.join(', ')}</p>` : null}
     <div className="sc-foot small muted tnum">
       <span>Updated ${fmtDate(story.updatedAt || story.createdAt)}</span>
@@ -1919,7 +2434,7 @@ function RecentStoryRow({story, i}){
   const tone = ROW_TONES[i % ROW_TONES.length];
   const ov = story.overview || {};
   const name = story.alias || story.title || 'Untitled story';
-  const meta = [story.program, ov.ageOrGrade || ov.demographics].filter(Boolean).join(' · ');
+  const meta = (isStaffStory(story) ? ['Staff Impact', (staffVal(story, 'role') || {}).value || (story.staffInfo || {}).role, isFormerStudent(story) ? 'former ABG student' : ''] : [story.program, ov.ageOrGrade || ov.demographics]).filter(Boolean).join(' · ');
   const n = outcomeCount(story);
   const open = () => nav('story', {id: story.id});
   return html`<div className="recent-row" role="button" tabIndex="0" onClick=${open} onKeyDown=${e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}>
@@ -1934,6 +2449,7 @@ function HomeView(){
   const first = firstNameOf(caps.me && caps.me.name) || firstNameOf(window.__platform && window.__platform.email) || firstNameOf(caps.me && caps.me.email);
   const recent = stories.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5);
   const studentsN = studentProfiles(stories).length;
+  const staffN = staffProfiles(stories).length;
   const outcomesN = stories.reduce((t, s) => t + outcomeCount(s), 0);
   const stat = (icon, tone, label, value, sub, to) => html`<button className="stat-card" onClick=${() => nav(to)}><span className=${'stat-ic tone-' + tone}><${Icon} name=${icon} size=${26} /></span><span className="stat-text"><span className="stat-label">${label}</span><b className="tnum">${storiesLoaded ? value : '–'}</b><small className="muted">${sub}</small></span></button>`;
   return html`<div className="view home">
@@ -1947,7 +2463,7 @@ function HomeView(){
       <div className="hero-copy">
         <p className="hero-eyebrow">Rooted in story. Driven by love.</p>
         <h2 className="hero-title">Let's capture a story.</h2>
-        <p className="hero-text">Share a student experience. We'll guide you through the details and outcomes that matter.</p>
+        <p className="hero-text">Share a student's or staff member's experience. We'll guide you through the details and outcomes that matter.</p>
         <div className="hero-actions"><button className="btn btn-purple btn-lg" disabled=${readOnly} onClick=${() => nav('interview')}><${Icon} name="plus" size=${20} /> Capture a New Story</button>
         <button className="btn btn-quiet" onClick=${() => nav('guide')}><${Icon} name="compass" size=${18} /> Interview Guide</button></div>
       </div>
@@ -1956,7 +2472,8 @@ function HomeView(){
     ${stories.some(x => x.demo) ? html`<p className="notice small demo-note"><${DemoPill} /> <span>Stories marked Demo are fictional examples showing how a recorded story becomes impact evidence. <button className="link-btn" onClick=${() => nav('insights')}>See them in Impact Insights</button> or <button className="link-btn" onClick=${() => nav('settings')}>manage demo stories</button>.</span></p>` : null}
     <div className="stat-row">
       ${stat('openbook', 'purple', 'Stories captured', stories.length, 'Journal entries', 'library')}
-      ${stat('users', 'teal', 'Students featured', studentsN, 'Unique first names', 'library')}
+      ${stat('users', 'teal', 'Students featured', studentsN, 'Unique students', 'library')}
+      ${staffN ? stat('briefcase', 'blue', 'Staff featured', staffN, 'Unique staff members', 'insights') : null}
       ${stat('bars', 'orange', 'Outcomes recorded', outcomesN, 'Reported outcomes', 'insights')}
     </div>
     <section className="recent">
@@ -1999,10 +2516,22 @@ const GUIDE_CHECKLIST = [
   {id: 'privacy', text: 'First name only; skip last names, addresses and private details that aren\'t needed'},
   {id: 'sharing', text: 'Whether the family has said the story can be shared outside ABG'},
 ];
+const GUIDE_STAFF = {
+  before: ['Choose Capture a Story, then Staff Impact Story.', "Enter the staff member's first name and whatever background you know: current or former, their role, roughly when they started, and the employment type. All of it is optional except the first name.", 'Say whether they were an ABG student or program participant before working there. If yes, add roughly when, which program, and when they started working for ABG. "Unknown" is fine.'],
+  during: ["Tell their story naturally, the way you'd tell a colleague.", 'How they became involved with ABG, and what they were doing before.', 'The employment and professional opportunities ABG gave them. Say whether a role was paid, a stipend, an internship or volunteer work, if you know.', 'Specific examples of growth, achievements or career progress: a new responsibility, a skill, a promotion, students they now mentor.', 'Answer the follow-up questions as accurately as you can.', 'Say "I don\'t know" when you don\'t. The interviewer moves on.'],
+  after: ['Read the summary and transcript.', 'Check the outcomes Claude found, and how you know each one.', 'Correct anything that is inaccurate, including the staff card fields.', 'Save the story to the Impact Journal.', 'See the new outcomes under Staff & Employment Impact in Impact Insights.'],
+  prompts: [
+    {title: 'Opening', prompt: STAFF_OPENING_Q('___')},
+    {title: 'Employment', prompt: '___ started working with ABG around ___ as a ___. It was (paid / a stipend / volunteer). Before that, they were ___.'},
+    {title: 'Growth', prompt: 'Since then, they have learned ___ and taken on ___. A specific example is ___.'},
+    {title: 'Former student', prompt: '___ first joined ABG as a student in ___ around ___. They moved into working for ABG when ___.'},
+    {title: 'Today', prompt: 'Today, ___ is ___. They contribute to our students by ___.'},
+  ],
+};
 function GuideSec({id, title, sub, open, children}){
   return html`<details className="sec guide-sec" id=${'g-' + id} open=${open}><summary><span>${title}${sub ? html`<span className="count">${sub}</span>` : null}</span><${Icon} name="chev" size=${18} /></summary><div className="sec-body">${children}</div></details>`;
 }
-function GuideContent({compact}){
+function GuideContent({compact, kind}){
   const [checked, setChecked] = useState(() => { try { return JSON.parse(lsGet('abg-guide-check') || '{}') || {}; } catch (e) { return {}; } });
   const tick = (k, v) => { const n = Object.assign({}, checked, {[k]: v}); setChecked(n); lsSet('abg-guide-check', JSON.stringify(n)); };
   const done = GUIDE_CHECKLIST.filter(c => checked[c.id]).length;
@@ -2013,9 +2542,22 @@ function GuideContent({compact}){
         <div className="guide-card"><h3>How stories become evidence</h3><p>The journal pulls out the changes you describe and how you know them. Those add up in Impact Insights and reports for donors, grants and schools.</p></div>
         <div className="guide-card"><h3>Just talk</h3><p>Speak naturally, the way you'd tell a colleague. You don't need every answer. "I don't know" is a perfectly good answer.</p></div>
         <div className="guide-card"><h3>Protect privacy</h3><p>Use first names only. Stories stay internal until someone approves them, and names are shared outside ABG only with permission.</p></div>
+        <div className="guide-card"><h3>Two kinds of story</h3><p>A Student Impact Story is about a student's growth. A Staff Impact Story is about how ABG has shaped someone's work and career, including staff who were once ABG students.</p></div>
       </div>
     <//>
-    <${GuideSec} id="script" title="Guided storytelling script" sub="5 prompts, optional" open=${compact}>
+    <${GuideSec} id="staff" title="Staff Impact Stories" sub="before, during, after" open=${!!compact && kind === 'staff'}>
+      <p className="small">ABG's impact reaches beyond the classroom: jobs, professional growth and careers, sometimes for people who first came to ABG as students. A Staff Impact Story records that.</p>
+      <div className="guide-cards guide-staff">
+        <div className="guide-card"><h3>Before the interview</h3><ol className="small guide-list">${GUIDE_STAFF.before.map(t => html`<li key=${t}>${t}</li>`)}</ol></div>
+        <div className="guide-card"><h3>During the interview</h3><ul className="small guide-list">${GUIDE_STAFF.during.map(t => html`<li key=${t}>${t}</li>`)}</ul></div>
+        <div className="guide-card"><h3>After the interview</h3><ol className="small guide-list">${GUIDE_STAFF.after.map(t => html`<li key=${t}>${t}</li>`)}</ol></div>
+      </div>
+      <p className="notice small guide-warn"><strong>You don't need employment records.</strong> Your firsthand observations are exactly what the journal needs. They are saved as staff-reported observations and are never presented as formally verified employment statistics. Mark something Verified only after checking it against a record.</p>
+      <details className="guide-step"><summary><span className="step-title">Optional prompts for a staff story</span><${Icon} name="chev" size=${16} /></summary>
+        <div className="step-body">${GUIDE_STAFF.prompts.map(x => html`<div key=${x.title} className="gs-prompt"><p className="eyebrow">${x.title}</p><blockquote className="guide-prompt">${x.prompt}</blockquote><div className="row-btns"><${CopyButton} text=${x.prompt} label="Copy prompt" /></div></div>`)}</div>
+      </details>
+    <//>
+    <${GuideSec} id="script" title=${'Guided storytelling script' + (kind === 'staff' ? ' (student stories)' : '')} sub="5 prompts, optional" open=${!!compact && kind !== 'staff'}>
       <p className="small muted">Use these as a guide if it helps. You don't need to read them word for word, follow the order, or fill every blank.</p>
       <ol className="guide-steps">${GUIDE_STEPS.map((st, i) => html`<li key=${st.id}><details className="guide-step" open=${i === 0}>
         <summary><span className="step-num">${i + 1}</span><span className="step-title">${st.title}</span><${Icon} name="chev" size=${16} /></summary>
@@ -2059,7 +2601,7 @@ function GuideView(){
     <header className="ins-hello guide-head">
       <p className="eyebrow">Interview Guide</p>
       <h1>Record a story with confidence.</h1>
-      <p className="lede">Short tips for telling a student's story in a way that's true to them and useful for ABG's impact reporting.</p>
+      <p className="lede">Short tips for telling a student's or staff member's story in a way that's true to them and useful for ABG's impact reporting.</p>
       <div className="row-btns"><button className="btn btn-purple" disabled=${readOnly} onClick=${() => nav('interview')}><${Icon} name="plus" size=${18} /> Capture a Story</button></div>
     </header>
     <${GuideContent} />
@@ -2067,11 +2609,11 @@ function GuideView(){
   </div>`;
 }
 /* side panel during capture: a sibling of the recorder, so opening or closing it never touches a recording */
-function GuidePanel({onClose}){
+function GuidePanel({onClose, kind}){
   useEffect(() => { const k = e => { if (e.key === 'Escape') onClose(); }; document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k); }, []);
   return html`<aside className="guide-panel" role="complementary" aria-label="Interview Guide">
     <div className="gp-head"><div><p className="eyebrow">Interview Guide</p><p className="small muted">Your recording keeps going while this is open.</p></div><button className="icon-btn" onClick=${onClose} aria-label="Close guide"><${Icon} name="close" /></button></div>
-    <div className="gp-body"><${GuideContent} compact=${true} /></div>
+    <div className="gp-body"><${GuideContent} compact=${true} kind=${kind} /></div>
   </aside>`;
 }
 function GuideButton({open, onToggle}){
@@ -2272,12 +2814,13 @@ async function markBacklogRecorded(db, backlogId, storyId, studentId){
   if (!backlogId) return;
   try { await db.collection('backlog').doc(backlogId).update({status: 'recorded', storyId: storyId, studentId: studentId || null, recordedAt: nowISO()}); } catch (e) { /* the list item was removed; the story is still saved */ }
 }
-async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, approx, newStudent, studentId, studentName, followupId, backlogId, studentInfo}){
+async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, approx, newStudent, studentId, studentName, followupId, backlogId, studentInfo, kind, newStaff, staffId, staffInfo}){
   const db = caps.db; const me = caps.me || {};
   const sid = story ? story.id : uid('s');
   const ed = Object.assign({}, entry, {storyId: sid}); delete ed.id;
   const ok = await safeWrite(async () => {
     if (newStudent) { const sd = Object.assign({}, newStudent); delete sd.id; await db.collection('students').doc(newStudent.id).set(sd); }
+    if (newStaff) { const sd = Object.assign({}, newStaff); delete sd.id; await db.collection('staff').doc(newStaff.id).set(sd); }
     await db.collection('entries').doc(entry.id).set(ed);
     if (story) {
       const patch = {entryCount: (story.entryCount || 1) + 1, updatedAt: nowISO(), updatedBy: me.id || null};
@@ -2285,9 +2828,10 @@ async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, app
       await db.collection('stories').doc(sid).update(patch);
     } else {
       const s = blankStory(me);
-      s.title = title; s.alias = studentName || ''; s.studentId = studentId || null;
+      s.title = title; s.alias = studentName || ''; s.studentId = kind === 'staff' ? null : (studentId || null);
       s.eventDate = {text: whenText || '', iso: '', approximate: !!approx};
-      if (studentInfo) { s.overview = Object.assign({}, s.overview, {gender: studentInfo.gender || '', demographics: studentInfo.demographics || ''}); if (studentInfo.school) s.community = studentInfo.school; }
+      if (kind === 'staff') { s.storyType = 'staff'; s.staffId = staffId || null; s.staffInfo = cleanStaffInfo(staffInfo); s.staffCard = intakeCard(s.staffInfo); s.journey = []; s.journeySummary = ''; }
+      else if (studentInfo) { s.overview = Object.assign({}, s.overview, {gender: studentInfo.gender || '', demographics: studentInfo.demographics || ''}); if (studentInfo.school) s.community = studentInfo.school; }
       const sd = Object.assign({}, s); delete sd.id;
       await db.collection('stories').doc(sid).set(sd);
     }
@@ -2381,7 +2925,7 @@ function ComposerView({params}){
 /* ================= student interview ================= */
 function turnsToText(turns){ return turns.map(t => 'Q: ' + t.q + '\nA: ' + (t.status === 'skipped' ? '(skipped)' : t.a)).join('\n\n'); }
 function InterviewView({params}){
-  const {caps, stories, students, storiesLoaded, settings, nav, readOnly, safeWrite, showToast} = useApp();
+  const {caps, stories, students, staffPeople, storiesLoaded, settings, nav, readOnly, safeWrite, showToast} = useApp();
   const storyId = params.storyId || null;
   const story = storyId ? stories.find(s => s.id === storyId) : null;
   const mode = storyId ? 'update' : 'new';
@@ -2389,7 +2933,11 @@ function InterviewView({params}){
   const init = useMemo(() => { try { return JSON.parse(lsGet(draftKey) || 'null') || null; } catch (e) { return null; } }, [draftKey]);
   const fresh = !init || (params.followupId && init.followupId !== params.followupId) || (params.backlogId && init.backlogId !== params.backlogId);
   const I = fresh ? {} : init;
-  const [step, setStep] = useState(I.step || (mode === 'update' ? 'interview' : 'name'));
+  const presetKind = I.kind || params.kind || (params.backlogId ? 'student' : '');
+  const [step, setStep] = useState(I.step || (mode === 'update' ? 'interview' : presetKind ? 'name' : 'type'));
+  const [kind, setKind] = useState(presetKind);
+  const [si, setSi] = useState(I.si || blankStaffInfo());
+  const [staffP, setStaffP] = useState(I.staffP || null);
   const [first, setFirst] = useState(I.first || asStr(params.firstName));
   const [pick, setPick] = useState(I.pick || '');
   const [note, setNote] = useState(I.note || '');
@@ -2414,22 +2962,29 @@ function InterviewView({params}){
   const aCtl = useRef(null);
   const restored = !fresh && (I.turns || []).length > 0;
 
+  const K = mode === 'update' ? (isStaffStory(story) ? 'staff' : 'student') : (kind || 'student');
+  const staff = K === 'staff';
   const storyStudent = story && story.studentId ? students.find(x => x.id === story.studentId) : null;
-  const name = mode === 'update' ? ((storyStudent && storyStudent.firstName) || (story && story.alias) || 'this student') : ((student && student.firstName) || asStr(first));
+  const name = mode === 'update' ? (staff ? ((story && story.alias) || 'this staff member') : ((storyStudent && storyStudent.firstName) || (story && story.alias) || 'this student'))
+    : staff ? ((staffP && staffP.firstName) || asStr(first)) : ((student && student.firstName) || asStr(first));
+  const openQ = n => staff ? STAFF_OPENING_Q(n) : OPENING_Q(n);
+  const closeQ = n => staff ? STAFF_CLOSING_Q(n) : CLOSING_Q(n);
+  const staffInfoNow = mode === 'update' ? cleanStaffInfo(story && story.staffInfo) : cleanStaffInfo(si);
+  const setInfo = (k, v) => setSi(x => Object.assign({}, x, {[k]: v}));
   const followupId = params.followupId || I.followupId || null;
   const backlogId = mode === 'new' ? (params.backlogId || I.backlogId || null) : null;
   const memo = backlogId ? asStr(params.memory || I.memo) : '';
 
   useEffect(() => {
-    if (mode === 'update' && story && !current && turns.length === 0) setCurrent({q: params.prompt || UPDATE_OPENING_Q(name), kind: 'opening'});
+    if (mode === 'update' && story && !current && turns.length === 0) setCurrent({q: params.prompt || (staff ? STAFF_UPDATE_OPENING_Q(name) : UPDATE_OPENING_Q(name)), kind: 'opening'});
   }, [story && story.id]);
   useEffect(() => {
     const t = setTimeout(() => {
-      if (step === 'name' && !asStr(first)) { lsDel(draftKey); return; }
-      lsSet(draftKey, JSON.stringify({step, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips, followupId, backlogId, memo, notes, at: Date.now()}));
+      if ((step === 'name' || step === 'type') && !asStr(first)) { lsDel(draftKey); return; }
+      lsSet(draftKey, JSON.stringify({step, kind, si, staffP, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips, followupId, backlogId, memo, notes, at: Date.now()}));
     }, 350);
     return () => clearTimeout(t);
-  }, [step, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips, notes]);
+  }, [step, kind, si, staffP, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips, notes]);
   const storyStudentInfo = story ? {gender: (story.overview || {}).gender || '', school: story.community || '', demographics: (story.overview || {}).demographics || ''} : null;
   const studentInfo = mode === 'update' ? storyStudentInfo : (student ? {gender: student.gender || '', school: student.school || '', demographics: student.demographics || ''} : null);
   useEffect(() => () => { if (qCtl.current) qCtl.current.abort(); if (aCtl.current) aCtl.current.abort(); VOICE.stop(); }, []);
@@ -2441,8 +2996,8 @@ function InterviewView({params}){
   }, [current && current.q, voiceOn, loadingQ, busy, step]);
   function toggleVoice(){ const on = !voiceOn; setVoiceOn(on); lsSet('abg-voice', on ? 'on' : 'off'); if (!on) VOICE.stop(); }
 
-  const matches = useMemo(() => { const k = norm(first); return k ? students.filter(x => x.nameKey === k && !x.demo) : []; }, [students, first]);
-  const storiesFor = sid => stories.filter(s => s.studentId === sid);
+  const matches = useMemo(() => { const k = norm(first); return k ? (staff ? (staffPeople || []) : students).filter(x => x.nameKey === k && !x.demo) : []; }, [students, staffPeople, first, staff]);
+  const storiesFor = sid => stories.filter(s => staff ? s.staffId === sid : s.studentId === sid);
   const asked = turns.filter(t => t.kind === 'followup').length;
 
   function begin(){
@@ -2450,6 +3005,13 @@ function InterviewView({params}){
     if (!fn) return;
     fn = fn.charAt(0).toUpperCase() + fn.slice(1);
     let st;
+    if (staff) {
+      if (pick && pick !== 'new') { const ex = (staffPeople || []).find(x => x.id === pick); st = {id: ex.id, firstName: ex.firstName, existing: true}; }
+      else st = {id: uid('sf'), firstName: fn, nameKey: norm(fn), note: asStr(note), createdAt: nowISO(), createdBy: (caps.me && caps.me.id) || null, existing: false};
+      setSi(cleanStaffInfo(si)); setStaffP(st); setStep('interview'); setPhase('asking');
+      setCurrent({q: STAFF_OPENING_Q(st.firstName), kind: 'opening'});
+      return;
+    }
     const info = {gender, school: asStr(school), demographics: asStr(demo)};
     if (pick && pick !== 'new') { const ex = students.find(x => x.id === pick); st = Object.assign({id: ex.id, firstName: ex.firstName, existing: true}, {gender: info.gender || ex.gender || '', school: info.school || ex.school || '', demographics: info.demographics || ex.demographics || ''}); }
     else st = Object.assign({id: uid('st'), firstName: fn, nameKey: norm(fn), note: asStr(note), createdAt: nowISO(), createdBy: (caps.me && caps.me.id) || null, existing: false}, info);
@@ -2457,11 +3019,13 @@ function InterviewView({params}){
     setCurrent({q: OPENING_Q(st.firstName), kind: 'opening'});
   }
   async function fetchNext(nt){
-    if (!caps.sample) { setCurrent({q: CLOSING_Q(name), kind: 'closing'}); return; }
+    if (!caps.sample) { setCurrent({q: closeQ(name), kind: 'closing'}); return; }
     setErr(''); setLoadingQ(true); setCurrent(null);
     const ctl = new AbortController(); qCtl.current = ctl;
     try {
-      const ask = avoid => caps.sample.json(interviewPrompt({name, turns: nt, mode, story, memo, info: studentInfo, notes, avoid, asked: nt.filter(t => t.kind === 'followup').length, target}), {modelTier: 'default', cache: false, signal: ctl.signal});
+      const pr = avoid => staff ? staffInterviewPrompt({name, turns: nt, mode, story, info: staffInfoNow, notes, avoid, asked: nt.filter(t => t.kind === 'followup').length, target})
+        : interviewPrompt({name, turns: nt, mode, story, memo, info: studentInfo, notes, avoid, asked: nt.filter(t => t.kind === 'followup').length, target});
+      const ask = avoid => caps.sample.json(pr(avoid), {modelTier: 'default', cache: false, signal: ctl.signal});
       let r = await ask('');
       let q = asStr(r && r.question);
       if (!q) throw {code: 'invalid_json'};
@@ -2483,12 +3047,12 @@ function InterviewView({params}){
     setTurns(nt); setAnswer(''); setClips([]);
     if (current.kind === 'closing') { setCurrent(null); setPhase('done'); finish(nt); return; }
     const n = nt.filter(x => x.kind === 'followup').length;
-    if (!caps.sample) { setCurrent({q: CLOSING_Q(name), kind: 'closing'}); return; }
+    if (!caps.sample) { setCurrent({q: closeQ(name), kind: 'closing'}); return; }
     if (n >= target) { setCurrent(null); setPhase('choice'); return; }
     fetchNext(nt);
   }
   function another(){ setPhase('asking'); setTarget(asked + 1); fetchNext(turns); }
-  function wrapUp(){ setPhase('asking'); if (qCtl.current) qCtl.current.abort(); setLoadingQ(false); setErr(''); setCurrent({q: CLOSING_Q(name), kind: 'closing'}); }
+  function wrapUp(){ setPhase('asking'); if (qCtl.current) qCtl.current.abort(); setLoadingQ(false); setErr(''); setCurrent({q: closeQ(name), kind: 'closing'}); }
   function finishNow(){
     let nt = turns;
     if (current && asStr(answer)) { nt = turns.concat([{q: current.q, kind: current.kind, category: current.category || '', a: answer.trim(), status: 'answered', at: nowISO(), audio: clips}]); setTurns(nt); setAnswer(''); setClips([]); }
@@ -2498,22 +3062,29 @@ function InterviewView({params}){
   }
   function makeEntry(nt){
     return {id: uid('e'), storyId: story ? story.id : null, recordedAt: (nt[0] && nt[0].at) || nowISO(), eventDateText: asStr(when), eventApprox: false, prompt: nt[0] ? nt[0].q : '',
-      transcript: turnsToText(nt), turns: nt, audio: nt.reduce((a, t) => a.concat(t.audio || []), []), transcriptEdited: null, summary: '', takeaways: [], source: mode === 'update' ? 'interview-update' : 'interview', analyzed: false,
+      transcript: turnsToText(nt), turns: nt, audio: nt.reduce((a, t) => a.concat(t.audio || []), []), transcriptEdited: null, summary: '', takeaways: [], source: mode === 'update' ? 'interview-update' : 'interview', analyzed: false, storyType: K,
       createdBy: (caps.me && caps.me.id) || null};
   }
   async function finish(nt){
-    if (!nt.some(t => t.status === 'answered')) { setErr('Answer at least the opening question before finishing.'); setPhase('asking'); setCurrent({q: nt[0] ? nt[0].q : OPENING_Q(name), kind: 'opening'}); setTurns([]); return; }
+    if (!nt.some(t => t.status === 'answered')) { setErr('Answer at least the opening question before finishing.'); setPhase('asking'); setCurrent({q: nt[0] ? nt[0].q : openQ(name), kind: 'opening'}); setTurns([]); return; }
     if (!caps.sample) return;
     setErr(''); setBusy('analyze');
     const ctl = new AbortController(); aCtl.current = ctl;
     const entry = makeEntry(nt);
     const items = [{id: entry.id, text: entry.transcript, recordedAt: entry.recordedAt}];
     try {
-      const analysis = await runAnalysis({sample: caps.sample, mode, story, stories, items, whenHint: asStr(when), studentName: name, memo, studentInfo, signal: ctl.signal});
+      const analysis = await runAnalysis({sample: caps.sample, mode, story, stories, items, whenHint: asStr(when), studentName: name, memo, studentInfo, staffInfo: staffInfoNow, kind: K, signal: ctl.signal});
       aCtl.current = null;
+      if (staff) {
+        const nf = mode === 'new' && staffP && !staffP.existing ? Object.assign({}, staffP) : null;
+        if (nf) delete nf.existing;
+        nav('review', {mode, kind: 'staff', storyId: story ? story.id : null, analysis, entry, items, draftKey, whenHint: asStr(when), followupId,
+          staffId: mode === 'new' ? staffP.id : (story.staffId || null), studentName: name, newStaff: nf, staffInfo: staffInfoNow, returnTo: {name: 'interview', params}});
+        return;
+      }
       const ns = student && !student.existing ? Object.assign({}, student) : null;
       if (ns) delete ns.existing;
-      nav('review', {mode, storyId: story ? story.id : null, analysis, entry, items, draftKey, whenHint: asStr(when), followupId,
+      nav('review', {mode, kind: 'student', storyId: story ? story.id : null, analysis, entry, items, draftKey, whenHint: asStr(when), followupId,
         studentId: mode === 'new' ? student.id : (story.studentId || null), studentName: name, newStudent: ns, backlogId, studentInfo, returnTo: {name: 'interview', params}});
     } catch (e) {
       aCtl.current = null; setBusy(null);
@@ -2525,25 +3096,98 @@ function InterviewView({params}){
     const nt = turns.length ? turns : [];
     if (!nt.some(t => t.status === 'answered')) return;
     setBusy('save');
-    const ns = student && !student.existing ? Object.assign({}, student) : null;
+    const ns = !staff && student && !student.existing ? Object.assign({}, student) : null;
     if (ns) delete ns.existing;
-    const sid = await saveRawEntry({caps, safeWrite, story, entry: makeEntry(nt), title: name + "'s story", whenText: asStr(when), newStudent: ns, studentId: student ? student.id : null, studentName: name, followupId, backlogId, studentInfo});
+    const nf = staff && mode === 'new' && staffP && !staffP.existing ? Object.assign({}, staffP) : null;
+    if (nf) delete nf.existing;
+    const sid = await saveRawEntry({caps, safeWrite, story, entry: makeEntry(nt), title: name + (staff ? "'s staff story" : "'s story"), whenText: asStr(when), newStudent: ns, studentId: !staff && student ? student.id : null, studentName: name, followupId, backlogId, studentInfo,
+      kind: K, newStaff: nf, staffId: staff && staffP ? staffP.id : null, staffInfo: staffInfoNow});
     setBusy(null);
     if (sid) { lsDel(draftKey); showToast('Interview saved'); nav('story', {id: sid}); }
   }
-  function startOver(){ lsDel(draftKey); setClips([]); setStep(mode === 'update' ? 'interview' : 'name'); setTurns([]); setAnswer(''); setPhase('asking'); setErr(''); setTarget(mode === 'update' ? 3 : 5); setStudent(null); setFirst(''); setPick(''); setNote(''); setWhen(''); setGender(''); setSchool(''); setDemo(''); setNotes(null);
-    setCurrent(mode === 'update' ? {q: params.prompt || UPDATE_OPENING_Q(name), kind: 'opening'} : null); }
+  function startOver(){ lsDel(draftKey); setClips([]); setStep(mode === 'update' ? 'interview' : (params.kind || params.backlogId) ? 'name' : 'type'); setTurns([]); setAnswer(''); setPhase('asking'); setErr(''); setTarget(mode === 'update' ? 3 : 5); setStudent(null); setFirst(''); setPick(''); setNote(''); setWhen(''); setGender(''); setSchool(''); setDemo(''); setNotes(null);
+    setSi(blankStaffInfo()); setStaffP(null); if (mode === 'new') setKind(params.kind || (params.backlogId ? 'student' : ''));
+    setCurrent(mode === 'update' ? {q: params.prompt || (staff ? STAFF_UPDATE_OPENING_Q(name) : UPDATE_OPENING_Q(name)), kind: 'opening'} : null); }
   const back = () => story ? nav('story', {id: story.id}) : nav('home');
 
   if (readOnly) return html`<div className="view"><${FocusHeader} title="Record a Story" onBack=${() => nav('home')} /><p className="notice">You have view-only access to this journal. Ask the person who shared it for Editor access to record stories.</p></div>`;
   if (storyId && !story) return html`<div className="view"><${FocusHeader} title="Add Story Update" onBack=${() => nav('library')} />${storiesLoaded ? html`<p className="notice">This story isn't in the journal anymore.</p>` : html`<div className="skeleton"></div>`}</div>`;
+
+  /* step 0: which kind of story */
+  if (step === 'type') {
+    const choose = k => { setKind(k); setPick(''); setStep('name'); };
+    return html`<div className="view interview">
+      <${FocusHeader} title="Capture a Story" sub="What kind of story is this?" onBack=${back} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+      ${guideOpen ? html`<${GuidePanel} onClose=${() => setGuideOpen(false)} />` : null}
+      <div className="type-grid" role="group" aria-label="Story type">
+        <button type="button" className="type-card tone-teal-soft" id="type-student" onClick=${() => choose('student')}>
+          <span className="type-ic"><${Icon} name="users" size=${26} /></span>
+          <span className="type-text"><strong>Student Impact Story</strong><span>How ABG has shaped a student's education, artistic growth, personal development and future opportunities.</span></span>
+          <${Icon} name="chev" size=${20} />
+        </button>
+        <button type="button" className="type-card tone-purple-soft" id="type-staff" onClick=${() => choose('staff')}>
+          <span className="type-ic"><${Icon} name="briefcase" size=${26} /></span>
+          <span className="type-text"><strong>Staff Impact Story</strong><span>How ABG has shaped someone's employment, professional development, career, personal growth and community involvement. Includes staff who were once ABG students.</span></span>
+          <${Icon} name="chev" size=${20} />
+        </button>
+      </div>
+      <p className="small muted">Recording a program, mural or partnership instead? <button className="btn btn-quiet btn-sm" onClick=${() => nav('record')}>Record a general story</button></p>
+    </div>`;
+  }
+
+  /* step 1, staff: demographic and background intake */
+  if (step === 'name' && staff) {
+    const fn = asStr(first);
+    const needPick = matches.length > 0 && !pick;
+    const programs = uniq((settings.programs || []).concat(stories.filter(x => !x.demo).map(x => x.program)));
+    const yearInput = (id, label, key, hint) => html`<${Field} label=${label} hint=${hint}><input id=${id} className="input" inputMode="numeric" maxLength="4" placeholder="e.g. 2018" value=${si[key] || ''} onChange=${e => setInfo(key, e.target.value.replace(/\D/g, '').slice(0, 4))} /><//>`;
+    return html`<div className="view interview">
+      <${FocusHeader} title="New Staff Impact Story" sub="Step 1 of 3: Staff member information" onBack=${() => { setStep('type'); setPick(''); }} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+      ${guideOpen ? html`<${GuidePanel} kind="staff" onClose=${() => setGuideOpen(false)} />` : null}
+      <section className="card name-card">
+        <h2 className="intake-h">Basic information</h2>
+        <${Field} label="Staff member's first name"><input id="iv-first" className="input input-lg" autoComplete="off" placeholder="Enter their first name" value=${first} onChange=${e => { setFirst(e.target.value.replace(/\s{2,}/g, ' ')); setPick(''); }} /><//>
+        <p className="small muted"><${Icon} name="lock" size=${14} /> First name only, never a last name. Everything below is optional.</p>
+        ${matches.length > 0 ? html`<div className="field"><span className="field-label">There ${matches.length === 1 ? 'is already a staff member' : 'are already staff members'} named ${fn} in the journal. Is this the same person?</span>
+          <div className="pick-list">
+            ${matches.map(m => { const ss = storiesFor(m.id); return html`<label key=${m.id} className=${'pick' + (pick === m.id ? ' on' : '')}><input type="radio" name="iv-pick" checked=${pick === m.id} onChange=${() => setPick(m.id)} /><span><strong>${m.firstName}</strong>${m.note ? ' · ' + m.note : ''}<br /><span className="small muted">${ss.length ? ss.map(s => s.title).slice(0, 2).join('; ') : 'No stories yet'}</span></span></label>`; })}
+            <label className=${'pick' + (pick === 'new' ? ' on' : '')}><input type="radio" name="iv-pick" checked=${pick === 'new'} onChange=${() => setPick('new')} /><span><strong>A different person named ${fn}</strong><br /><span className="small muted">Kept as a separate record, so they're counted separately.</span></span></label>
+          </div>
+          ${pick && pick !== 'new' ? html`<p className="small muted">They'll be counted once in Impact Insights, however many stories they have.</p>` : null}
+        </div>` : null}
+        ${pick === 'new' ? html`<${Field} label="How to tell them apart (internal only)" hint="e.g. teaching artist since 2020. Never shown in external materials."><input id="iv-note" className="input" value=${note} onChange=${e => setNote(e.target.value)} /><//>` : null}
+        <div className="field"><span className="field-label">Current or former staff member</span>
+          <div className="seg" role="group" aria-label="Current or former staff member">${STAFF_STATUS.map(o => html`<button type="button" key=${o.id} className="seg-btn" aria-pressed=${si.status === o.id} onClick=${() => setInfo('status', si.status === o.id ? '' : o.id)}>${o.id === 'current' ? 'Current' : 'Former'}</button>`)}</div>
+        </div>
+        <div className="row">
+          <${Field} label="Role or position at ABG"><input id="iv-role" className="input" autoComplete="off" placeholder="e.g. Teaching artist" value=${si.role} onChange=${e => setInfo('role', e.target.value)} /><//>
+          ${yearInput('iv-start', 'Year they started working with ABG', 'startYear', 'Approximate is fine.')}
+        </div>
+        <${Field} label="Employment type, if known"><select id="iv-emp" className="select" value=${si.employmentType} onChange=${e => setInfo('employmentType', e.target.value)}><option value="">Not entered</option>${EMPLOYMENT_TYPES.map(o => html`<option key=${o.id} value=${o.id}>${o.label}</option>`)}</select><//>
+        <h2 className="intake-h">Student-to-staff background</h2>
+        <div className="field"><span className="field-label" id="iv-former-l">Was this staff member previously an ABG student or program participant?</span>
+          <div className="seg seg-wrap" role="group" aria-labelledby="iv-former-l">${FORMER_STUDENT.map(o => html`<button type="button" key=${o.id} id=${'iv-former-' + o.id} className="seg-btn" aria-pressed=${si.formerStudent === o.id} onClick=${() => setInfo('formerStudent', si.formerStudent === o.id ? '' : o.id)}>${o.label}</button>`)}</div>
+        </div>
+        ${si.formerStudent === 'yes' ? html`<div className="intake-former">
+          <div className="row">
+            ${yearInput('iv-first-year', 'Year they first participated in ABG', 'firstParticipatedYear', 'Approximate is fine.')}
+            ${yearInput('iv-transition', 'Year they began working for ABG', 'transitionYear', 'Approximate is fine.')}
+          </div>
+          <${Field} label="Program(s) they participated in"><input id="iv-programs" className="input" list="dl-iv-programs" autoComplete="off" placeholder="e.g. School Mural Program" value=${si.programs} onChange=${e => setInfo('programs', e.target.value)} /><//>
+          <datalist id="dl-iv-programs">${programs.map(p => html`<option key=${p} value=${p}></option>`)}</datalist>
+          <p className="small muted">The interview will also ask about their time as a student and how they moved into working for ABG. If they have a Student Impact Story, you can link it from this story's page after saving, once you've confirmed it's the same person.</p>
+        </div>` : null}
+        <button className="btn btn-primary btn-lg" id="iv-begin" disabled=${!fn || needPick} onClick=${begin}><${Icon} name="mic" size=${20} /> Start interview</button>
+      </section>
+    </div>`;
+  }
 
   /* step 1: first name */
   if (step === 'name') {
     const fn = asStr(first);
     const needPick = matches.length > 0 && !pick;
     return html`<div className="view interview">
-      <${FocusHeader} title="New Story" sub="Step 1 of 3: Student information" onBack=${backlogId ? () => nav('backlog') : back} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+      <${FocusHeader} title="New Student Impact Story" sub="Step 1 of 3: Student information" onBack=${backlogId ? () => nav('backlog') : params.kind ? back : () => { setStep('type'); setPick(''); }} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
       ${guideOpen ? html`<${GuidePanel} onClose=${() => setGuideOpen(false)} />` : null}
       ${memo ? html`<p className="memo-note"><${Icon} name="users" size=${16} /><span><strong>From your student list:</strong> ${memo}</span></p>` : null}
       <section className="card name-card">
@@ -2565,7 +3209,6 @@ function InterviewView({params}){
         <${Field} label="Other details (optional)" hint="Grade or age, or anything else useful for reporting."><input id="iv-demo" className="input" placeholder="e.g. 7th grade, age 12" value=${demo} onChange=${e => setDemo(e.target.value)} /><//>
         <button className="btn btn-primary btn-lg" disabled=${!fn || needPick} onClick=${begin}><${Icon} name="mic" size=${20} /> Start interview</button>
       </section>
-      <p className="small muted">Recording a program or mural instead? <button className="btn btn-quiet btn-sm" onClick=${() => nav('record')}>Record a program or mural story</button></p>
     </div>`;
   }
 
@@ -2573,10 +3216,12 @@ function InterviewView({params}){
   if (busy === 'analyze') return html`<div className="view"><${FocusHeader} title=${'Interview: ' + name} onBack=${() => aCtl.current && aCtl.current.abort()} /><${Analyzing} title=${'Claude is writing ' + name + "'s story"} onStop=${() => aCtl.current && aCtl.current.abort()} /></div>`;
 
   const answeredCount = turns.filter(t => t.status === 'answered').length;
-  const stageLabel = !current ? '' : current.kind === 'opening' ? (mode === 'update' ? 'Story update' : 'Opening story') : current.kind === 'closing' ? 'Closing question' : 'Follow-up ' + (asked + 1) + ' of about ' + Math.max(target, asked + 1) + (current.stage ? ' · ' + labelOf(INTERVIEW_STAGES, current.stage) : '');
+  const stageLabel = !current ? '' : current.kind === 'opening' ? (mode === 'update' ? 'Story update' : 'Opening story') : current.kind === 'closing' ? 'Closing question' : 'Follow-up ' + (asked + 1) + ' of about ' + Math.max(target, asked + 1) + (current.stage ? ' · ' + labelOf(staff ? STAFF_STAGES : INTERVIEW_STAGES, current.stage) : '');
   return html`<div className="view interview">
-    <${FocusHeader} title=${(mode === 'update' ? 'Story update: ' : 'Interview: ') + name} sub=${mode === 'update' ? story.title : 'Step 2 of 3: Interview'} onBack=${back} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
-    ${guideOpen ? html`<${GuidePanel} onClose=${() => setGuideOpen(false)} />` : null}
+    <${FocusHeader} title=${(mode === 'update' ? 'Story update: ' : 'Interview: ') + name} sub=${mode === 'update' ? story.title : 'Step 2 of 3: ' + (staff ? 'Staff Impact interview' : 'Interview')} onBack=${back} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+    ${guideOpen ? html`<${GuidePanel} kind=${K} onClose=${() => setGuideOpen(false)} />` : null}
+    ${(() => { const bits = staff && mode === 'new' && turns.length === 0 ? [staffInfoNow.status ? labelOf(STAFF_STATUS, staffInfoNow.status) : '', staffInfoNow.role, staffInfoNow.startYear ? 'since ' + staffInfoNow.startYear : '', staffInfoNow.formerStudent === 'yes' ? 'former ABG student' : staffInfoNow.formerStudent === 'no' ? 'not a former ABG student' : ''].filter(Boolean) : [];
+      return bits.length ? html`<p className="memo-note"><${Icon} name="briefcase" size=${16} /><span><strong>From the intake:</strong> ${bits.join(' · ')}. The interviewer won't ask for these again.</span></p>` : null; })()}
     ${restored ? html`<p className="small muted">Restored your unsaved interview from this device. <button className="btn btn-quiet btn-sm" onClick=${startOver}>Start over</button></p>` : null}
     ${memo && turns.length === 0 ? html`<p className="memo-note"><${Icon} name="users" size=${16} /><span><strong>Your note:</strong> ${memo}</span></p>` : null}
     ${turns.length > 0 ? html`<details className="sec convo"><summary><span>Conversation so far<span className="count">${turns.length} ${turns.length === 1 ? 'answer' : 'answers'}</span></span><${Icon} name="chev" size=${18} /></summary>
@@ -2590,7 +3235,7 @@ function InterviewView({params}){
     </section>`
     : phase === 'done' ? html`<section className="card">
       <h2>Interview complete</h2>
-      <p className="muted">${answeredCount} answers recorded. Claude turns them into ${name}'s Student Impact Report, which you review before anything is saved.</p>
+      <p className="muted">${answeredCount} answers recorded. Claude turns them into ${name}'s ${staff ? 'Staff' : 'Student'} Impact Report, which you review before anything is saved.</p>
       ${err ? html`<p className="error" role="alert">${err}</p>` : null}
       ${!caps.sample ? html`<p className="notice small">Claude isn't available in this view, so the interview will be saved without a report. You can analyze it later from the story page.</p>` : null}
       <div className="row-btns">
@@ -2611,7 +3256,7 @@ function InterviewView({params}){
           : null}
         ${err ? html`<div className="error" role="alert">${err}<div className="row-btns" style=${{marginTop: '8px'}}><button className="btn btn-ghost btn-sm" onClick=${() => fetchNext(turns)}>Try again</button><button className="btn btn-ghost btn-sm" onClick=${wrapUp}>Wrap up instead</button></div></div>` : null}
       </section>
-      ${current ? html`<${DictationBox} id="iv-answer" value=${answer} onChange=${setAnswer} compact=${current.kind !== 'opening'} label=${current.q} onAudio=${c => setClips(x => x.concat([c]))} onBusy=${setRecBusy} placeholder=${current.kind === 'opening' ? 'Press Record and take your time: background, challenges, how they found ABG, and what has happened since. Or type here.' : 'Press Record to answer, type here, or skip this one.'} />
+      ${current ? html`<${DictationBox} id="iv-answer" value=${answer} onChange=${setAnswer} compact=${current.kind !== 'opening'} label=${current.q} onAudio=${c => setClips(x => x.concat([c]))} onBusy=${setRecBusy} placeholder=${current.kind === 'opening' ? (staff ? 'Press Record and take your time: how they got involved, the opportunities ABG gave them, how they have grown, and where they are now. Or type here.' : 'Press Record and take your time: background, challenges, how they found ABG, and what has happened since. Or type here.') : 'Press Record to answer, type here, or skip this one. "I don\'t know" is a fine answer.'} />
         ${current.kind === 'opening' ? html`<p className="tip small muted"><${Icon} name="mic" size=${16} /><span>Nobody will interrupt. You can pause and resume, and follow-up questions come after you finish.</span></p>` : null}` : null}
       <div className="savebar"><div className="inner">
         ${answeredCount > 0 || (current && asStr(answer)) ? html`<button className="btn btn-quiet" onClick=${finishNow} disabled=${(loadingQ && !answeredCount) || recBusy}>Finish interview</button>` : null}
@@ -2628,7 +3273,7 @@ function PrivacyPanel({value, onChange, disabled, live}){
   const [tick, setTick] = useState(false);
   const [pub, setPub] = useState(value.publicName || '');
   useEffect(() => { if (live) setPub(value.publicName || ''); }, [value.publicName]);
-  const pubInput = html`<${Field} label="Public alias" hint=${'Used in external materials instead of ' + (value.alias ? value.alias : 'the first name') + '. The first name appears externally only when publication permission is documented. Leave blank to say "a student".'}>
+  const pubInput = html`<${Field} label="Public alias" hint=${'Used in external materials instead of ' + (value.alias ? value.alias : 'the first name') + '. The first name appears externally only when publication permission is documented. Leave blank to say "' + (isStaffStory(value) ? 'a staff member' : 'a student') + '".'}>
     <input id="pv-alias" className="input" disabled=${disabled} placeholder="e.g. Student A, or a pseudonym" value=${pub}
       onChange=${e => { setPub(e.target.value); if (!live) onChange({publicName: e.target.value}); }}
       onBlur=${() => { if (live && asStr(pub) !== asStr(value.publicName)) onChange({publicName: asStr(pub)}); }} /><//>`;
@@ -2720,6 +3365,9 @@ function StoryEditor({draft, setDraft, items, mode}){
   const ed = draft.eventDate || {text: '', iso: '', approximate: false};
   const ov = draft.overview || {};
   const addBtn = (label, fn) => html`<button type="button" className="btn btn-quiet btn-sm" style=${{justifySelf: 'start'}} onClick=${() => upd(fn)}><${Icon} name="plus" size=${16} /> ${label}</button>`;
+  const staff = isStaffStory(draft);
+  const si = Object.assign(blankStaffInfo(), draft.staffInfo || {});
+  const setSi = (k, v) => upd(n => { n.staffInfo = Object.assign(blankStaffInfo(), n.staffInfo || {}, {[k]: v}); });
   const trash = (label, fn) => html`<button type="button" className="icon-btn" aria-label=${label} onClick=${() => upd(fn)}><${Icon} name="trash" size=${18} /></button>`;
 
   return html`<div className="editor">
@@ -2728,7 +3376,7 @@ function StoryEditor({draft, setDraft, items, mode}){
       <p className="small muted">The original transcript is kept exactly as recorded. You can correct it later from the story page, and the original stays on file.</p>
     <//>` : null}
 
-    <${Sec} title="Student success story" open=${true}>
+    <${Sec} title=${staff ? 'Impact narrative' : 'Student success story'} open=${true}>
       <${Field} label="Title"><input id="ed-title" className="input" value=${draft.title} onChange=${val((n, v) => { n.title = v; })} /><//>
       <${Field} label=${'Full impact story (' + words(draft.story) + ' words)'} hint="Aim for 200 to 350 words."><textarea id="ed-story" className="textarea" rows="14" value=${draft.story || ''} onChange=${val((n, v) => { n.story = v; })}></textarea><//>
       <${Field} label="Short summary" hint="Shown on library cards."><textarea id="ed-summary" className="textarea" rows="3" value=${draft.summary} onChange=${val((n, v) => { n.summary = v; })}></textarea><//>
@@ -2738,7 +3386,30 @@ function StoryEditor({draft, setDraft, items, mode}){
       </div>
     <//>
 
-    <${Sec} title="Student overview" open=${true}>
+    ${staff ? html`<${Sec} title="Staff overview" open=${true}>
+      <div className="row">
+        <${Field} label="Staff member's first name" hint="First name or pseudonym only."><input id="ed-alias" className="input" value=${draft.alias || ''} onChange=${val((n, v) => { n.alias = v; })} /><//>
+        <${Field} label="Current or former"><select id="ed-sstatus" className="select" value=${si.status} onChange=${e => setSi('status', e.target.value)}><option value="">Not recorded</option>${STAFF_STATUS.map(o => html`<option key=${o.id} value=${o.id}>${o.label}</option>`)}</select><//>
+      </div>
+      <div className="row">
+        <${Field} label="Role or position at ABG (intake)"><input id="ed-srole" className="input" value=${si.role} onChange=${e => setSi('role', e.target.value)} /><//>
+        <${Field} label="Year started working with ABG"><input id="ed-sstart" className="input" inputMode="numeric" value=${si.startYear} onChange=${e => setSi('startYear', e.target.value.replace(/\D/g, '').slice(0, 4))} /><//>
+        <${Field} label="Employment type"><select id="ed-semp" className="select" value=${si.employmentType} onChange=${e => setSi('employmentType', e.target.value)}><option value="">Not recorded</option>${EMPLOYMENT_TYPES.map(o => html`<option key=${o.id} value=${o.id}>${o.label}</option>`)}</select><//>
+      </div>
+      <div className="row">
+        <${Field} label="Previously an ABG student or program participant?"><select id="ed-sformer" className="select" value=${si.formerStudent} onChange=${e => setSi('formerStudent', e.target.value)}><option value="">Not recorded</option>${FORMER_STUDENT.map(o => html`<option key=${o.id} value=${o.id}>${o.label}</option>`)}</select><//>
+        ${si.formerStudent === 'yes' ? html`<${Field} label="First participated"><input id="ed-sfirst" className="input" inputMode="numeric" value=${si.firstParticipatedYear} onChange=${e => setSi('firstParticipatedYear', e.target.value.replace(/\D/g, '').slice(0, 4))} /><//>
+        <${Field} label="Began working for ABG"><input id="ed-strans" className="input" inputMode="numeric" value=${si.transitionYear} onChange=${e => setSi('transitionYear', e.target.value.replace(/\D/g, '').slice(0, 4))} /><//>` : null}
+      </div>
+      ${si.formerStudent === 'yes' ? html`<${Field} label="Program(s) they participated in as a student"><input id="ed-sprog" className="input" list="dl-programs" value=${si.programs} onChange=${e => setSi('programs', e.target.value)} /><//>` : null}
+      <${Field} label="Relevant background" hint="Only what helps explain ABG's impact. No financial or sensitive details."><textarea id="ed-bg" className="textarea" rows="2" value=${ov.background || ''} onChange=${val((n, v) => { n.overview = Object.assign({}, n.overview, {background: v}); })}></textarea><//>
+      <div className="row">
+        <${Field} label="ABG program"><input id="ed-program" className="input" list="dl-programs" value=${draft.program || ''} onChange=${val((n, v) => { n.program = v; })} /><//>
+        <${Field} label="When it happened"><input id="ed-when" className="input" placeholder="e.g. 2019 to now" value=${ed.text || ''} onChange=${val((n, v) => { n.eventDate = Object.assign({}, n.eventDate, {text: v}); })} /><//>
+        <${Field} label="Sort date" hint="YYYY, YYYY-MM or YYYY-MM-DD"><input id="ed-iso" className="input" inputMode="numeric" value=${ed.iso || ''} onChange=${val((n, v) => { n.eventDate = Object.assign({}, n.eventDate, {iso: v}); })} /><//>
+      </div>
+      <datalist id="dl-programs">${programs.map(p => html`<option key=${p} value=${p}></option>`)}</datalist>
+    <//>` : html`<${Sec} title="Student overview" open=${true}>
       <div className="row">
         <${Field} label="Student's first name" hint="First name or pseudonym only."><input id="ed-alias" className="input" value=${draft.alias || ''} onChange=${val((n, v) => { n.alias = v; })} /><//>
         <${Field} label="Age or grade when involved"><input id="ed-age" className="input" value=${ov.ageOrGrade || ''} onChange=${val((n, v) => { n.overview = Object.assign({}, n.overview, {ageOrGrade: v}); })} /><//>
@@ -2765,10 +3436,14 @@ function StoryEditor({draft, setDraft, items, mode}){
       </div>
       <datalist id="dl-programs">${programs.map(p => html`<option key=${p} value=${p}></option>`)}</datalist>
       <datalist id="dl-communities">${communities.map(p => html`<option key=${p} value=${p}></option>`)}</datalist>
-    <//>
+    <//>`}
 
     <${Sec} title="Measurable outcomes" count=${(draft.evidence || []).filter(isMeasurable).length + ' items'} open=${true}>
       <p className="small muted">Specific metrics and before-and-after comparisons. ${STATUS_LEGEND} Mark something Verified only after checking it against a record.</p>
+      ${staff ? html`<div className="field"><span className="field-label">Staff impact card <span className="muted">(${staffKnown(draft)} of ${STAFF_FIELDS.length} documented)</span></span>
+        <p className="small muted">The same employment and development fields on every staff story, so they add up across people. Leave a field blank if it isn't documented: blank is never counted as "no" or zero.${mode === 'update' ? ' Values this update changed have an orange edge.' : ''}</p>
+        <${MetricsCardEdit} metrics=${draft.staffCard} fields=${STAFF_FIELDS} onChange=${m => upd(n => { n.staffCard = m; })} />
+      </div>` : null}
       ${isStudentStory(draft) ? html`<div className="field"><span className="field-label">Student metrics card <span className="muted">(${metricsKnown(draft)} of ${METRIC_FIELDS.length} known)</span></span>
         <p className="small muted">The same fields on every student story, so they add up across students. Leave a field blank if it's unknown.${mode === 'update' ? ' Values this update changed have an orange edge.' : ''}</p>
         <${MetricsCardEdit} metrics=${draft.metrics} onChange=${m => upd(n => { n.metrics = m; })} />
@@ -2849,16 +3524,29 @@ function StoryEditor({draft, setDraft, items, mode}){
 
     <//>
 
-    <${Sec} title="Stakeholder value" open=${true}>
-      <p className="small muted">Why this student's experience matters, without overstating that ABG caused it.</p>
-      ${[['schools', 'School administrators', 'How does ABG benefit students at our school?'], ['donors', 'Donors', 'What difference is our contribution making?'], ['grants', 'Grant providers', 'Can ABG demonstrate outcomes that justify continued funding?']].map(([k, l, q]) => html`<${Field} key=${k} label=${l} hint=${q}><textarea className="textarea" rows="2" value=${(draft.stakeholderValue || {})[k] || ''} onChange=${val((n, v) => { n.stakeholderValue = Object.assign({}, n.stakeholderValue, {[k]: v}); })}></textarea><//>`)}
+    ${staff ? html`<${Sec} title="Student-to-staff journey" count=${(draft.journey || []).length} open=${(draft.journey || []).length > 0}>
+      <p className="small muted">Only stages the interview supports. Remove any stage that isn't right; never add one that didn't happen.</p>
+      ${(draft.journey || []).map((j, i) => html`<div className="ms-edit" key=${j.stage + i}>
+        <div className="row">
+          <${Field} label="Stage"><select className="select" value=${j.stage} onChange=${val((n, v) => { n.journey[i].stage = v; })}>${JOURNEY_STAGES.map(x => html`<option key=${x.id} value=${x.id}>${x.label}</option>`)}</select><//>
+          <${Field} label="What happened"><input className="input" value=${j.text} onChange=${val((n, v) => { n.journey[i].text = v; })} /><//>
+        </div>
+        <div className="row-between">${j.excerpt ? html`<p className=${'small ' + (j.found ? 'muted' : 'warn-note')}>“${trunc(j.excerpt, 140)}”${j.found ? '' : ' Not found word for word in the transcript.'}</p>` : html`<span></span>`}${trash('Remove stage', n => { n.journey.splice(i, 1); })}</div>
+      </div>`)}
+      ${(draft.journey || []).length < JOURNEY_STAGES.length ? addBtn('Add stage', n => { const used = new Set((n.journey || []).map(j => j.stage)); const st = JOURNEY_STAGES.find(x => !used.has(x.id)); n.journey = (n.journey || []).concat([{stage: st.id, text: '', excerpt: '', found: false}]); }) : null}
+      <${Field} label="Journey summary" hint="For a former ABG student: their progression from student to staff, without exaggerating ABG's role."><textarea id="ed-journey" className="textarea" rows="3" value=${draft.journeySummary || ''} onChange=${val((n, v) => { n.journeySummary = v; })}></textarea><//>
+    <//>` : null}
+
+    <${Sec} title=${staff ? 'Stakeholder relevance' : 'Stakeholder value'} open=${true}>
+      <p className="small muted">${staff ? "How this person's experience can support ABG's communications and the consulting team's work, without overstating ABG's role." : "Why this student's experience matters, without overstating that ABG caused it."}</p>
+      ${(staff ? STAFF_STAKEHOLDERS : [['schools', 'School administrators', 'How does ABG benefit students at our school?'], ['donors', 'Donors', 'What difference is our contribution making?'], ['grants', 'Grant providers', 'Can ABG demonstrate outcomes that justify continued funding?']]).map(([k, l, q]) => html`<${Field} key=${k} label=${l} hint=${q}><textarea className="textarea" rows="2" value=${(draft.stakeholderValue || {})[k] || ''} onChange=${val((n, v) => { n.stakeholderValue = Object.assign({}, n.stakeholderValue, {[k]: v}); })}></textarea><//>`)}
       <${Field} label="Summary" hint="Two or three sentences connecting the outcomes to all three audiences."><textarea id="ed-why" className="textarea" rows="3" value=${draft.stakeholderWhy || ''} onChange=${val((n, v) => { n.stakeholderWhy = v; })}></textarea><//>
       <div className="field"><span className="field-label">Most useful for</span><${ChipGroup} options=${AUDIENCES} value=${draft.audiences} label="Most useful for" onChange=${v => upd(n => { n.audiences = v; })} /></div>
       <div className="field"><span className="field-label">Impact categories</span><${ChipGroup} options=${CATEGORIES} value=${draft.categories} label="Impact categories" onChange=${v => upd(n => { n.categories = v; })} /></div>
       <div className="field"><span className="field-label">Impact themes</span><${ChipGroup} options=${THEMES} value=${draft.themes} label="Impact themes" onChange=${v => upd(n => { n.themes = v; })} /></div>
     <//>
 
-    <${Sec} title="Student impact timeline" count=${(draft.milestones || []).length}>
+    <${Sec} title=${staff ? 'Staff impact timeline' : 'Student impact timeline'} count=${(draft.milestones || []).length}>
       <p className="small muted">From initial circumstances to long-term outcomes. Future follow-up items are never shown as accomplishments.</p>
       ${(draft.milestones || []).map((m, i) => html`<div className=${'ms-edit' + (m._new ? ' is-new' : '')} key=${m.id}>
         <${Field} label="What happened"><input className="input" value=${m.label} onChange=${val((n, v) => { n.milestones[i].label = v; })} /><//>
@@ -2934,6 +3622,12 @@ function QuickReview({draft, setDraft, mode}){
       </div>
       <datalist id="qr-programs">${programs.map(p => html`<option key=${p} value=${p}></option>`)}</datalist>
     </section>
+    ${isStaffStory(draft) ? (() => { const known = STAFF_FIELDS.filter(f => (draft.staffCard || {})[f.id] && asStr(draft.staffCard[f.id].value)).map(f => f.id); return html`<section className="card qr-card">
+      <h2>Employment and development details <span className="count">${known.length} of ${STAFF_FIELDS.length}</span></h2>
+      <p className="small muted">What the interview and intake form documented. Correct anything that's wrong, and change "Reported" to "Estimate" if it was approximate. Blank fields stay "not documented"; fill them in under All details if you know them.</p>
+      ${known.length ? html`<${MetricsCardEdit} metrics=${draft.staffCard} fields=${STAFF_FIELDS} only=${known} onChange=${m => upd(n => { n.staffCard = m; })} />` : html`<p className="empty-note">Nothing documented yet. That's fine: unknown details are never counted as "no".</p>`}
+      ${(draft.journey || []).length ? html`<h3 className="qr-sub">Student-to-staff journey</h3><ol className="journey-mini">${draft.journey.map(j => html`<li key=${j.stage}><strong>${labelOf(JOURNEY_STAGES, j.stage)}:</strong> ${j.text}</li>`)}</ol>` : null}
+    </section>`; })() : null}
     <section className="card qr-card">
       <h2>Outcomes found <span className="count">${now.length}</span></h2>
       <p className="small muted">Remove anything the interview doesn't really support, and say how you know each one. "Confirmed by a document" is only for things you've seen in writing, like a report card or certificate.</p>
@@ -2943,11 +3637,11 @@ function QuickReview({draft, setDraft, mode}){
   </div>`;
 }
 function ReviewView({params}){
-  const {caps, stories, students, nav, safeWrite, showToast} = useApp();
-  const {mode, storyId, analysis, entry, items, draftKey, whenHint, approx, followupId, answered, analyzedEntryIds, returnTo, studentId, studentName, newStudent, backlogId, studentInfo} = params;
+  const {caps, stories, students, staffPeople, nav, safeWrite, showToast} = useApp();
+  const {mode, storyId, analysis, entry, items, draftKey, whenHint, approx, followupId, answered, analyzedEntryIds, returnTo, studentId, studentName, newStudent, backlogId, studentInfo, kind, staffId, newStaff, staffInfo} = params;
   const base = storyId ? stories.find(s => s.id === storyId) : null;
   const me = caps.me || {};
-  const [draft, setDraft] = useState(() => buildReviewDraft({mode, base, analysis, whenHint, approx, me, followupId, answered, entry, studentId, studentName, studentInfo}));
+  const [draft, setDraft] = useState(() => buildReviewDraft({mode, base, analysis, whenHint, approx, me, followupId, answered, entry, studentId, studentName, studentInfo, kind, staffId, staffInfo}));
   const [saving, setSaving] = useState(false);
   const back = () => { if (returnTo) nav(returnTo.name, returnTo.params || {}); else if (storyId) nav('story', {id: storyId}); else nav('home'); };
   if (!draft) return html`<div className="view"><${FocusHeader} title="Review" onBack=${() => nav('library')} /><p className="notice">This story isn't in the journal anymore.</p></div>`;
@@ -2964,6 +3658,11 @@ function ReviewView({params}){
       else if (s.studentId && s.alias) {
         const st = students.find(x => x.id === s.studentId);
         if (st && st.firstName !== s.alias) await db.collection('students').doc(st.id).update({firstName: s.alias, nameKey: norm(s.alias)});
+      }
+      if (newStaff) { const sd = Object.assign({}, newStaff, {firstName: s.alias || newStaff.firstName, nameKey: norm(s.alias || newStaff.firstName)}); delete sd.id; await db.collection('staff').doc(newStaff.id).set(sd); }
+      else if (s.staffId && s.alias) {
+        const sp = (staffPeople || []).find(x => x.id === s.staffId);
+        if (sp && sp.firstName !== s.alias) await db.collection('staff').doc(sp.id).update({firstName: s.alias, nameKey: norm(s.alias)});
       }
       if (entry) {
         const ed = Object.assign({}, entry, {storyId: s.id, summary: (analysis && analysis.entrySummary) || '', takeaways: (analysis && analysis.takeaways) || [], analyzed: true});
@@ -2984,13 +3683,13 @@ function ReviewView({params}){
     setSaving(false);
     if (ok) { if (draftKey) lsDel(draftKey); showToast(mode === 'edit' ? 'Changes saved' : 'Story saved'); nav('story', {id: s.id}); }
   }
-  const title = mode === 'edit' ? 'Edit story' : mode === 'update' ? 'Review the update' : 'Student Impact Report';
+  const title = mode === 'edit' ? 'Edit story' : mode === 'update' ? 'Review the update' : isStaffStory(draft) ? 'Staff Impact Report' : 'Student Impact Report';
   return html`<div className="view review">
     <${FocusHeader} title=${title} sub=${mode === 'update' && base ? base.title : mode === 'new' ? 'Step 3 of 3' + (draft.alias ? ': ' + draft.alias : '') : (draft.alias || null)} onBack=${back} />
     ${mode !== 'edit' ? html`<p className="review-note"><${Icon} name="spark" size=${16} /><span>Claude drafted this from your words. Nothing is saved until you press Save, and nothing is approved for outside use until you approve it.${mode === 'update' ? ' New items are marked with an orange edge.' : ''}</span></p>` : null}
     ${mode === 'edit' ? html`<${StoryEditor} draft=${draft} setDraft=${setDraft} items=${items || []} mode=${mode} />` : html`
       <${QuickReview} draft=${draft} setDraft=${setDraft} mode=${mode} />
-      <details className="sec all-details"><summary><span>All details (optional)<span className="count">transcript, metrics card, timeline, privacy</span></span><${Icon} name="chev" size=${18} /></summary>
+      <details className="sec all-details"><summary><span>All details (optional)<span className="count">${isStaffStory(draft) ? 'transcript, staff card, journey, timeline, privacy' : 'transcript, metrics card, timeline, privacy'}</span></span><${Icon} name="chev" size=${18} /></summary>
         <div className="sec-body"><${StoryEditor} draft=${draft} setDraft=${setDraft} items=${items || []} mode=${mode} /></div>
       </details>`}
     <div className="savebar"><div className="inner">
@@ -3268,7 +3967,7 @@ function TurnsView({turns}){
   return html`<div className="view" style=${{gap: '12px'}}>${turns.map((t, i) => html`<div className="turn" key=${i}><p className="turn-q">${t.q}</p><p className=${'turn-a transcript' + (t.status === 'skipped' ? ' muted' : '')}>${t.status === 'skipped' ? 'Skipped' : t.a}</p>${(t.audio || []).map((c, j) => html`<${AudioClip} key=${c.path} path=${c.path} label=${'Play recording' + ((t.audio || []).length > 1 ? ' ' + (j + 1) : '') + (c.seconds ? ' (' + mmss(c.seconds) + ')' : '')} />`)}</div>`)}</div>`;
 }
 function StoryView({id}){
-  const {caps, stories, students, storiesLoaded, nav, openSheet, safeWrite, showToast, readOnly, role} = useApp();
+  const {caps, stories, students, staffPeople, storiesLoaded, nav, openSheet, safeWrite, showToast, readOnly, role} = useApp();
   const story = stories.find(s => s.id === id);
   const [entries, setEntries] = useState(null);
   const [openEntry, setOpenEntry] = useState(null);
@@ -3311,7 +4010,21 @@ function StoryView({id}){
   const updates = Math.max(0, (story.entryCount || 1) - 1);
   const filledStructure = STRUCTURE.filter(f => (story.structure || {})[f.id]);
   const primaryAud = (story.audiences || []).slice(0, 3);
-  const updateTarget = (story.studentId || story.alias) ? 'interview' : 'record';
+  const updateTarget = (story.studentId || story.alias || isStaffStory(story)) ? 'interview' : 'record';
+  const staff = isStaffStory(story);
+  const si = cleanStaffInfo(story.staffInfo);
+  const staffPerson = staff && story.staffId ? (staffPeople || []).find(x => x.id === story.staffId) : null;
+  const staffSiblings = staff && story.staffId ? stories.filter(s => s.staffId === story.staffId && s.id !== id) : [];
+  const samePerson = linked.filter(l => l.type === 'same_person');
+  const staffRows = [
+    ['Staff member', (story.alias || 'Not recorded') + (staffPerson && staffPerson.note ? ' (' + staffPerson.note + ')' : '')],
+    ['Story type', 'Staff Impact'], ['Current or former', si.status ? labelOf(STAFF_STATUS, si.status) : ''], ['Role at ABG', (staffVal(story, 'role') || {}).value || si.role],
+    ['Started working with ABG', si.startYear || (staffVal(story, 'startYear') || {}).value], ['Employment type', si.employmentType ? labelOf(EMPLOYMENT_TYPES, si.employmentType) : ''],
+    ['Former ABG student', si.formerStudent ? labelOf(FORMER_STUDENT, si.formerStudent) : 'Not recorded'],
+    ['First participated in ABG', si.firstParticipatedYear], ['Programs as a student', si.programs], ['Began working for ABG', si.transitionYear],
+    ['Background', ov.background], ['ABG program', story.program],
+    ['Recorded', fmtDate(story.createdAt) + (updates > 0 ? ' · last update ' + fmtDate(story.updatedAt) : '')],
+  ].filter(r => r[1]);
   const overviewRows = [
     ['Student', (story.alias || 'Not recorded') + (student && student.note ? ' (' + student.note + ')' : '')],
     ['Gender', ov.gender ? labelOf(GENDERS, ov.gender) : ''], ['Age or grade', ov.ageOrGrade], ['School or community', story.community], ['Other details', ov.demographics], ['Background', ov.background], ['ABG program', story.program],
@@ -3366,12 +4079,13 @@ function StoryView({id}){
     <header className="story-head">
       <div className="chips">
         ${story.demo ? html`<${DemoPill} />` : null}
+        <${TypePill} story=${story} />
         <${StatusPill} status=${story.status} />
         ${story.period === 'past' ? html`<${Pill} tone="orange">Historical<//>` : null}
         ${updates > 0 ? html`<${Pill} tone="blue">${updates} update${updates > 1 ? 's' : ''}<//>` : null}
         ${yearSpan(story) >= 1 ? html`<${Pill} tone="teal">${yearRange(story)}<//>` : null}
       </div>
-      ${story.alias ? html`<p className="eyebrow">${story.alias}${student && student.note ? ' · ' + student.note : ''}</p>` : null}
+      ${story.alias ? html`<p className="eyebrow">${story.alias}${staff ? ((staffVal(story, 'role') || {}).value || si.role ? ' · ' + ((staffVal(story, 'role') || {}).value || si.role) : '') : (student && student.note ? ' · ' + student.note : '')}</p>` : null}
       <h1>${story.title || 'Untitled story'}</h1>
       ${!readOnly ? html`<div className="row-btns">
         <button className="btn btn-primary" onClick=${() => nav(updateTarget, {storyId: id})}><${Icon} name="mic" size=${18} /> Add Story Update</button>
@@ -3392,16 +4106,22 @@ function StoryView({id}){
       <button className="btn btn-primary btn-sm" onClick=${() => openSheet(close => html`<${AnswerSheet} storyId=${id} close=${close} />`)}>Answer</button>
     </div>` : null}
 
-    <section className="card">
+    ${staff ? html`<section className="card">
+      <h2>Staff overview</h2>
+      <dl className="overview">${staffRows.map(r => html`<div key=${r[0]}><dt>${r[0]}</dt><dd>${r[1]}</dd></div>`)}</dl>
+      ${staffSiblings.length ? html`<p className="small muted">Other stories about this staff member (counted once in Insights): ${staffSiblings.map(s => html`<button key=${s.id} className="btn btn-quiet btn-sm" onClick=${() => nav('story', {id: s.id})}>${s.title}</button>`)}</p>` : null}
+      <${SamePersonLinks} story=${story} links=${samePerson} readOnly=${readOnly} />
+    </section>` : html`<section className="card">
       <h2>Student overview</h2>
       <dl className="overview">${overviewRows.map(r => html`<div key=${r[0]}><dt>${r[0]}</dt><dd>${r[1]}</dd></div>`)}</dl>
       ${siblings.length ? html`<p className="small muted">Other stories about this student: ${siblings.map((s, i) => html`<button key=${s.id} className="btn btn-quiet btn-sm" onClick=${() => nav('story', {id: s.id})}>${s.title}</button>`)}</p>` : null}
-    </section>
+      ${samePerson.length ? html`<p className="small"><${Pill} tone="purple">Later joined ABG staff<//> ${samePerson.map(l => html`<button key=${l.storyId} className="btn btn-quiet btn-sm" onClick=${() => nav('story', {id: l.storyId})}>${l.other.title}</button>`)}</p>` : null}
+    </section>`}
 
     <section className="card prose">
-      <h2>Student success story</h2>
+      <h2>${staff ? 'Impact narrative' : 'Student success story'}</h2>
       ${story.story ? story.story.split(/\n{2,}/).map((p, i) => html`<p key=${i}>${p}</p>`) : story.summary ? html`<p>${story.summary}</p>` : html`<p className="muted">No story written yet.</p>`}
-      ${(story.takeaways || []).length > 0 ? html`<h3>Key impact takeaways</h3><ul className="takeaways">${story.takeaways.map((t, i) => html`<li key=${i}>${t}</li>`)}</ul>` : null}
+      ${(story.takeaways || []).length > 0 ? html`<h3>${staff ? 'Key outcomes' : 'Key impact takeaways'}</h3><ul className="takeaways">${story.takeaways.map((t, i) => html`<li key=${i}>${t}</li>`)}</ul>` : null}
       ${(story.themes || []).length > 0 ? html`<div className="chips">${story.themes.map(c => html`<span key=${c} className="chip static">${labelOf(THEMES, c)}</span>`)}</div>` : null}
     </section>
 
@@ -3410,9 +4130,17 @@ function StoryView({id}){
       ${milestoneItems.length ? html`<div className="ev-group"><div className="ev-group-head"><h3>Key milestones</h3><span className="count">${milestoneItems.length}</span></div>
         <ul className="ms-list">${milestoneItems.map(x => html`<li key=${x.key}><span className="ms-check" aria-hidden="true">✓</span><span><strong>${x.label}</strong>${x.detail ? html` <span className="muted">· ${x.detail}</span>` : null}</span>${x.e ? html`<${EvLabel} e=${x.e} />` : html`<${MetricPill} status=${x.status} />`}</li>`)}</ul>
       </div>` : null}
-      ${comparisons.length ? html`<${OutcomeTable} rows=${comparisons.map(r => r.e)} />` : html`<p className="empty-note small">No before-and-after comparisons yet, such as how the student acted when they started versus now, or a change a teacher mentioned.</p>`}
+      ${comparisons.length ? html`<${OutcomeTable} rows=${comparisons.map(r => r.e)} />` : html`<p className="empty-note small">${staff ? 'No before-and-after comparisons yet, such as their role when they started versus now.' : 'No before-and-after comparisons yet, such as how the student acted when they started versus now, or a change a teacher mentioned.'}</p>`}
       ${isStudentStory(story) ? html`<${MetricsCardView} story=${story} readOnly=${readOnly} embedded=${true} onEdit=${editStory} />` : null}
+      ${staff ? html`<${StaffCardView} story=${story} readOnly=${readOnly} onEdit=${editStory} />` : null}
     </section>
+
+    ${staff && ((story.journey || []).length || story.journeySummary || isFormerStudent(story)) ? html`<section className="card">
+      <h2>Student-to-staff journey</h2>
+      <p className="small muted">Only the stages this story supports. A missing stage means it isn't documented, not that it didn't happen.</p>
+      <${JourneyPath} journey=${story.journey || []} />
+      ${story.journeySummary ? html`<p>${story.journeySummary}</p>` : isFormerStudent(story) && !(story.journey || []).length ? html`<p className="empty-note small">Marked as a former ABG student, but the journey isn't documented yet. Add a story update about their time as a student and how they joined the staff.</p>` : null}
+    </section>` : null}
 
     <section className="card">
       <div className="sec-head"><h2>Supporting evidence</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddEvidenceSheet} storyId=${id} close=${close} kind="qualitative" />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
@@ -3462,17 +4190,18 @@ function StoryView({id}){
     </section>
 
     <section className="card">
-      <h2>Stakeholder value</h2>
-      ${['schools', 'donors', 'grants'].some(k => (story.stakeholderValue || {})[k]) ? html`<dl className="sv-list">
-        ${[['schools', 'School administrators'], ['donors', 'Donors'], ['grants', 'Grant providers']].map(([k, l]) => (story.stakeholderValue || {})[k] ? html`<div key=${k}><dt>${l}</dt><dd>${story.stakeholderValue[k]}</dd></div>` : null)}
+      <h2>${staff ? 'Stakeholder relevance' : 'Stakeholder value'}</h2>
+      ${(() => { const svl = staff ? STAFF_STAKEHOLDERS : [['schools', 'School administrators'], ['donors', 'Donors'], ['grants', 'Grant providers']]; const any = svl.some(([k]) => (story.stakeholderValue || {})[k]); return html`
+      ${any ? html`<dl className="sv-list">
+        ${svl.map(([k, l]) => (story.stakeholderValue || {})[k] ? html`<div key=${k}><dt>${l}</dt><dd>${story.stakeholderValue[k]}</dd></div>` : null)}
       </dl>` : null}
-      ${story.stakeholderWhy ? html`<p>${story.stakeholderWhy}</p>` : (!['schools', 'donors', 'grants'].some(k => (story.stakeholderValue || {})[k]) ? html`<p className="muted">Not written yet.</p>` : null)}
+      ${story.stakeholderWhy ? html`<p>${story.stakeholderWhy}</p>` : (!any ? html`<p className="muted">Not written yet.</p>` : null)}`; })()}
       ${primaryAud.length ? html`<p className="small"><strong>Most useful for:</strong> ${primaryAud.map(a => labelOf(AUDIENCES, a)).join(', ')}</p>` : null}
       ${!readOnly ? html`<div><button className="btn btn-ghost btn-sm" onClick=${adapt}><${Icon} name="spark" size=${16} /> Adapt story for audience</button></div>` : null}
     </section>
 
     <section className="card">
-      <h2>Student timeline</h2>
+      <h2>${staff ? 'Staff timeline' : 'Student timeline'}</h2>
       <p className="small muted">From initial challenges to the latest update. Planned milestones are kept separate until they happen.</p>
       <${Timeline} milestones=${ms.filter(m => m.phase !== 'future')} entries=${entries || []} />
       ${(() => {
@@ -3544,8 +4273,9 @@ function StoryView({id}){
 }
 
 /* ================= student metrics card ================= */
-function MetricsCardEdit({metrics, onChange}){
+function MetricsCardEdit({metrics, onChange, fields, only}){
   const m = metrics || {};
+  const list = (fields || METRIC_FIELDS).filter(f => !only || only.includes(f.id));
   const set = (id, patch) => {
     const cur = Object.assign({value: '', status: 'reported'}, m[id] || {});
     const nx = Object.assign({}, cur, patch); delete nx._new;
@@ -3553,10 +4283,10 @@ function MetricsCardEdit({metrics, onChange}){
     if (!String(nx.value == null ? '' : nx.value).trim()) delete out[id]; else out[id] = nx;
     onChange(out);
   };
-  return html`<div className="mc-edit">${METRIC_FIELDS.map(f => {
+  return html`<div className="mc-edit">${list.map(f => {
     const x = m[f.id] || {}; const v = x.value == null ? '' : String(x.value);
     return html`<div className=${'mc-row' + (x._new ? ' is-new' : '')} key=${f.id}>
-      <label className="mc-label" htmlFor=${'mc-' + f.id}>${f.label}</label>
+      <label className="mc-label" htmlFor=${'mc-' + f.id}>${f.label}${x.excerpt ? html`<small className="mc-src muted" title=${x.excerpt}>“${trunc(x.excerpt, 90)}”</small>` : x.source === 'intake' ? html`<small className="mc-src muted">From the intake form</small>` : null}</label>
       <div className="mc-inputs">
         ${f.type === 'choice'
           ? html`<select id=${'mc-' + f.id} className="select select-sm mc-val" value=${v} onChange=${e => set(f.id, {value: e.target.value})}><option value="">Unknown</option>${f.options.map(o => html`<option key=${o} value=${o}>${o}</option>`)}</select>`
@@ -3576,6 +4306,71 @@ function MetricsCardView({story, readOnly, onEdit, embedded}){
     <p className="small muted">The same measurable fields on every student story. Unknown fields are worth asking about in the next update.</p>
     <dl className="mc-view">${rows.map(r => html`<div key=${r.f.id} className=${r.m ? '' : 'is-unknown'}><dt>${r.f.label}</dt><dd>${r.m ? html`<span>${fmtMetric(r.f, r.m.value)}</span> <${MetricPill} status=${r.m.status} />` : html`<span className="muted">Unknown</span>`}</dd></div>`)}</dl>
   </section>`;
+}
+/* ================= staff story pieces ================= */
+function TypePill({story}){
+  const t = storyTypeOf(story);
+  if (t === 'general') return null;
+  return html`${t === 'staff' ? html`<${Pill} tone="purple">Staff Impact<//>` : html`<${Pill} tone="teal">Student Impact<//>`}${isFormerStudent(story) ? html`<span className="pill tone-path" title="This staff member was an ABG student first">Student → Staff</span>` : null}`;
+}
+const STAFF_CARD_GROUPS = [{id: 'employment', label: 'Employment'}, {id: 'development', label: 'Professional development'}, {id: 'community', label: 'Community contribution'}, {id: 'career', label: 'Career'}];
+function StaffCardView({story, readOnly, onEdit}){
+  const n = staffKnown(story);
+  return html`<section className="ev-group mc-embedded">
+    <div className="sec-head"><h3>Staff impact card</h3><div className="row-btns"><span className="small muted tnum">${n} of ${STAFF_FIELDS.length} documented</span>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${onEdit}><${Icon} name="edit" size=${16} /> Correct or fill in</button>` : null}</div></div>
+    <p className="small muted">The same employment and development fields on every staff story. "Not documented" means the interview didn't say; it is never counted as "no". Reported values are Kyle's observations, not verified employment records.</p>
+    ${STAFF_CARD_GROUPS.map(g => html`<div key=${g.id}><p className="eyebrow sc-group">${g.label}</p>
+      <dl className="mc-view">${STAFF_FIELDS.filter(f => f.group === g.id).map(f => { const m = staffVal(story, f.id); return html`<div key=${f.id} className=${m ? '' : 'is-unknown'}><dt>${f.label}</dt><dd>${m ? html`<span>${fmtMetric(f, m.value)}</span> <${MetricPill} status=${m.status} />${m.excerpt ? html`<small className="mc-src muted">“${trunc(m.excerpt, 120)}”</small>` : m.source === 'intake' ? html`<small className="mc-src muted">From the intake form</small>` : null}` : html`<span className="muted">Not documented</span>`}</dd></div>`; })}</dl>
+    </div>`)}
+  </section>`;
+}
+function JourneyPath({journey}){
+  const by = {}; (journey || []).forEach(j => { by[j.stage] = j; });
+  return html`<ol className="journey">${JOURNEY_STAGES.map((st, i) => { const j = by[st.id]; return html`<li key=${st.id} className=${'jn' + (j ? ' on' : '')}>
+    <span className="jn-dot" aria-hidden="true">${j ? '✓' : i + 1}</span>
+    <span className="jn-text"><strong>${st.label}</strong>${j ? html`<span>${j.text}</span>` : html`<span className="muted">Not documented</span>`}</span>
+  </li>`; })}</ol>`;
+}
+/* links a Staff Impact story to the same person's Student Impact story. Never automatic: a person confirms it */
+function SamePersonLinks({story, links, readOnly}){
+  const {nav, openSheet} = useApp();
+  return html`<div className="same-person">
+    ${links.length ? html`<p className="small"><${Pill} tone="teal">Linked Student Impact story<//> ${links.map(l => html`<button key=${l.storyId} className="btn btn-quiet btn-sm" onClick=${() => nav('story', {id: l.storyId})}>${l.other.alias ? l.other.alias + ': ' : ''}${l.other.title}</button>`)}</p>`
+      : isFormerStudent(story) ? html`<p className="small muted">If ${story.alias || 'this person'} has a Student Impact story in the journal, link it so both stories show the same person's path.</p>` : null}
+    ${!readOnly && (isFormerStudent(story) || links.length) ? html`<button className="btn btn-ghost btn-sm" onClick=${() => openSheet(close => html`<${LinkStudentSheet} story=${story} close=${close} />`)}><${Icon} name="link" size=${16} /> ${links.length ? 'Link another Student Impact story' : 'Link their Student Impact story'}</button>` : null}
+  </div>`;
+}
+function LinkStudentSheet({story, close}){
+  const {caps, stories, students, staffPeople, safeWrite, showToast} = useApp();
+  const [q, setQ] = useState(asStr(story.alias));
+  const [pick, setPick] = useState('');
+  const [sure, setSure] = useState(false);
+  const already = new Set((story.links || []).filter(l => l.type === 'same_person').map(l => l.storyId));
+  const k = norm(q);
+  const options = stories.filter(s => isStudentStory(s) && !already.has(s.id) && (!!s.demo === !!story.demo) && (!k || norm([s.alias, s.title, s.program].join(' ')).includes(k)))
+    .sort((a, b) => (a.alias || '').localeCompare(b.alias || '')).slice(0, 30);
+  const other = stories.find(s => s.id === pick);
+  async function link(){
+    if (!other || !sure) return;
+    const me = caps.me || {};
+    const reason = 'Confirmed as the same person by ' + (asStr(me.name) || 'ABG staff') + ' on ' + fmtDay(todayLocal());
+    const ok = await safeWrite(async () => {
+      await caps.db.collection('stories').doc(story.id).update({links: clone(story.links || []).concat([{storyId: other.id, type: 'same_person', reason, confirmed: true}]), updatedAt: nowISO(), updatedBy: me.id || null});
+      await caps.db.collection('stories').doc(other.id).update({links: clone(other.links || []).filter(l => !(l.storyId === story.id && l.type === 'same_person')).concat([{storyId: story.id, type: 'same_person', reason, confirmed: true}])});
+      const sp = story.staffId ? (staffPeople || []).find(x => x.id === story.staffId) : null;
+      if (sp && other.studentId && !sp.studentId) await caps.db.collection('staff').doc(sp.id).update({studentId: other.studentId});
+    });
+    if (ok) { showToast('Stories linked'); close(); }
+  }
+  const studentNote = s => { const st = s.studentId ? students.find(x => x.id === s.studentId) : null; return st && st.note ? ' (' + st.note + ')' : ''; };
+  return html`<div className="view" style=${{gap: '12px'}}>
+    <${SheetHead} title="Link a Student Impact story" close=${close} />
+    <p className="small">Link only when you know this is the same person. A matching first name isn't enough: two people can share a name.</p>
+    <${Field} label="Find the student story"><input id="ls-q" className="input" type="search" value=${q} onChange=${e => { setQ(e.target.value); setPick(''); setSure(false); }} placeholder="First name, title or program" /><//>
+    ${options.length === 0 ? html`<p className="empty-note">No student stories match.</p>` : html`<div className="pick-list">${options.map(s => html`<label key=${s.id} className=${'pick' + (pick === s.id ? ' on' : '')}><input type="radio" name="ls-pick" checked=${pick === s.id} onChange=${() => { setPick(s.id); setSure(false); }} /><span><strong>${s.alias || 'Student'}${studentNote(s)}</strong><br /><span className="small muted">${s.title}${s.program ? ' · ' + s.program : ''}${fmtEventDate(s.eventDate) ? ' · ' + fmtEventDate(s.eventDate) : ''}</span></span></label>`)}</div>`}
+    ${other ? html`<label className="check"><input id="ls-sure" type="checkbox" checked=${sure} onChange=${e => setSure(e.target.checked)} /> I've confirmed that ${other.alias || 'this student'} in "${trunc(other.title, 50)}" is the same person as ${story.alias || 'this staff member'}.</label>` : null}
+    <div className="row-btns end"><button className="btn btn-ghost" onClick=${close}>Cancel</button><button className="btn btn-primary" id="ls-link" disabled=${!other || !sure} onClick=${link}>Link stories</button></div>
+  </div>`;
 }
 function MilestonesSection(){
   const {stories, storiesLoaded} = useApp();
@@ -3767,6 +4562,8 @@ function isLongTerm(s){ return yearSpan(s) >= 1 || (s.categories || []).includes
 function applyFilters(stories, f, q){
   const toks = norm(q).split(' ').filter(Boolean);
   return stories.filter(s => {
+    if (f.type && storyTypeOf(s) !== f.type) return false;
+    if (f.former === 'yes' && !isFormerStudent(s)) return false;
     if (f.status && s.status !== f.status) return false;
     if (f.category && !(s.categories || []).includes(f.category)) return false;
     if (f.theme && !(s.themes || []).includes(f.theme)) return false;
@@ -3787,7 +4584,7 @@ function applyFilters(stories, f, q){
     if (f.from && (!y || y < +f.from)) return false;
     if (f.to && (!y || y > +f.to)) return false;
     if (toks.length) {
-      const hay = norm([s.title, s.summary, s.story, s.alias, s.program, s.community, fmtEventDate(s.eventDate)].concat(s.takeaways || [], (s.themes || []).map(t => labelOf(THEMES, t)), (s.categories || []).map(c => labelOf(CATEGORIES, c)), (s.evidence || []).map(e => e.statement)).join(' '));
+      const hay = norm([s.title, s.summary, s.story, s.alias, s.program, s.community, fmtEventDate(s.eventDate), storyTypeLabel(s), isStaffStory(s) ? (s.staffInfo || {}).role : '', isFormerStudent(s) ? 'former student student to staff' : ''].concat(s.takeaways || [], (s.themes || []).map(t => labelOf(THEMES, t)), (s.categories || []).map(c => labelOf(CATEGORIES, c)), (s.evidence || []).map(e => e.statement)).join(' '));
       if (!toks.every(t => hay.includes(t))) return false;
     }
     return true;
@@ -3834,7 +4631,7 @@ function LibraryView({embedded}){
   const programs = uniq((settings.programs || []).concat(stories.map(s => s.program)));
   const communities = uniq((settings.communities || []).concat(stories.map(s => s.community)));
   const list = useMemo(() => sortStories(applyFilters(stories, f, q), sort), [stories, f, q, sort]);
-  const active = Object.keys(f).filter(k => f[k]).length;
+  const active = Object.keys(f).filter(k => f[k] && k !== 'type' && k !== 'former').length;
   const quick = [['status', 'approved', 'Approved'], ['need', 'yes', 'Needs follow-up'], ['evidence', 'measurable', 'Has measurable evidence'], ['period', 'ongoing', 'Ongoing'], ['period', 'past', 'Historical'], ['horizon', 'long', 'Long-term impact']];
   async function ask(){
     if (!asStr(q) || !caps.sample) return;
@@ -3854,9 +4651,13 @@ function LibraryView({embedded}){
   return html`<div className="view library">
     ${embedded ? null : html`<header className="page-head"><h1>Story Library</h1><p className="muted">${stories.length} ${stories.length === 1 ? 'story' : 'stories'} from every period of ABG's work.</p></header>`}
     <form className="search" role="search" onSubmit=${e => { e.preventDefault(); ask(); }}>
-      <div className="search-box"><${Icon} name="search" size=${18} /><input id="lib-search" className="search-input" type="search" aria-label="Search stories" placeholder="Search, or ask: students whose attendance improved" value=${q} onChange=${e => { setQ(e.target.value); if (ai) setAi(null); }} /></div>
+      <div className="search-box"><${Icon} name="search" size=${18} /><input id="lib-search" className="search-input" type="search" aria-label="Search stories" placeholder="Search, or ask: staff who were once ABG students" value=${q} onChange=${e => { setQ(e.target.value); if (ai) setAi(null); }} /></div>
       ${caps.sample ? html`<button type="submit" className="btn btn-ghost" disabled=${!asStr(q) || !stories.length}><${Icon} name="spark" size=${18} /> Ask Claude</button>` : null}
     </form>
+    <div className="type-filter">
+      <div className="seg" role="group" aria-label="Story type">${[['', 'All stories'], ['student', 'Student Impact'], ['staff', 'Staff Impact']].map(([v, l]) => html`<button type="button" key=${v || 'all'} id=${'lt-' + (v || 'all')} className="seg-btn" aria-pressed=${(f.type || '') === v} onClick=${() => setF(x => Object.assign({}, x, {type: v, former: v === 'staff' ? x.former : ''}))}>${l}<span className="seg-n tnum">${v ? stories.filter(s => storyTypeOf(s) === v).length : stories.length}</span></button>`)}</div>
+      ${f.type === 'staff' ? html`<button type="button" id="lt-former" className="chip chip-path" aria-pressed=${f.former === 'yes'} onClick=${() => setF(x => Object.assign({}, x, {former: x.former === 'yes' ? '' : 'yes'}))}>Former ABG students (Student → Staff) <span className="tnum">${stories.filter(isFormerStudent).length}</span></button>` : null}
+    </div>
     <div className="filter-row">
       <div className="chip-scroll">${quick.map(c => html`<button type="button" key=${c[0] + c[1]} className="chip" aria-pressed=${f[c[0]] === c[1]} onClick=${() => setF(x => Object.assign({}, x, {[c[0]]: x[c[0]] === c[1] ? '' : c[1]}))}>${c[2]}</button>`)}</div>
       <button className="btn btn-ghost btn-sm" onClick=${() => openSheet(close => html`<${FilterSheet} initial=${f} programs=${programs} communities=${communities} students=${students} onApply=${setF} close=${close} />`)}><${Icon} name="filter" size=${16} /> Filters${active ? ' (' + active + ')' : ''}</button>
@@ -4061,13 +4862,26 @@ function buildStakeholderReport({stories, period, external, selected, includesDe
   out.push('## Outcomes by area', '', '| Outcome area | Students | Share of students documented | Verified | Staff-observed | Reported | Unconfirmed |', '|---|---|---|---|---|---|---|');
   areas.forEach(a => out.push('| ' + [a.o.label, a.n, pct(a.n, N), a.by.verified || 0, a.by.observed || 0, a.by.reported || 0, a.by.unconfirmed || 0].join(' | ') + ' |'));
   out.push('', '_A student counts once per area, using the strongest evidence on file. No-change, declines and planned outcomes are not counted._', '');
+  const sx = staffImpactStats(stories);
+  if (sx.N) {
+    const sm = sx.summary, M = sx.N;
+    out.push('## Staff and employment impact', '', '_ABG staff documented ' + M + ' staff member' + (M === 1 ? '' : 's') + ' in Staff Impact stories. These are counts of the people documented, not all ABG employees or every job ABG has created; details that were not documented are not counted._', '');
+    out.push('- Staff members documented: ' + M + ' (each counted once)');
+    out.push('- Paid opportunities documented: ' + sm.paidOpportunitiesDocumented + ' of ' + M + (sm.positionsDocumented ? ' (' + sm.positionsDocumented.total + ' positions held, where known for ' + sm.positionsDocumented.staffWithAKnownCount + ')' : ''));
+    if (sm.employmentDurationYears) out.push('- Years working with ABG: average ' + sm.employmentDurationYears.average + ' (' + sm.employmentDurationYears.staffWithAKnownDuration + ' of ' + M + ' with a known duration)');
+    [['firstPaidJobAtAbg', 'ABG was their first paid job'], ['currentlyWithAbg', 'Currently working with ABG'], ['promotedOrExpandedResponsibilities', 'Promoted or given expanded responsibilities'], ['skillDevelopment', 'Professional or artistic skill development'], ['trainingOrMentorship', 'Training or mentorship received'], ['leadership', 'Leadership responsibilities'], ['furtherEducation', 'Further education or certifications'], ['laterOrAdditionalEmployment', 'Went on to other or additional employment'], ['mentorsOrTeachesStudents', 'Mentor or teach ABG students']]
+      .forEach(([k, l]) => { if (sm[k]) out.push('- ' + l + ': ' + sm[k] + ' of ' + M); });
+    out.push('');
+    if (sm.formerAbgStudentsWhoBecameStaff) out.push('**Student-to-staff pathway:** ' + sm.formerAbgStudentsWhoBecameStaff + ' of ' + M + ' staff members documented first came to ABG as students. ' + sm.formerStudentsWithPaidOpportunity + ' have a paid opportunity documented, ' + sm.formerStudentsMentoringOrTeaching + ' mentor or teach ABG students, and ' + sm.formerStudentsWithLaterProfessionalOutcomes + ' have later professional outcomes documented (advancement, leadership, further education or work in the field). Not every person completes every stage.', '');
+  }
   const chosen = stories.filter(s => selected.includes(s.id));
   if (chosen.length) {
-    out.push('## Student stories', '', '_Selected by ABG staff to illustrate the findings above, not as typical results._', '');
+    out.push(chosen.some(isStaffStory) ? '## Student and staff stories' : '## Student stories', '', '_Selected by ABG staff to illustrate the findings above, not as typical results._', '');
     chosen.forEach(s => {
-      const nm = external ? (externalName(s) || 'A student') : (s.alias || 'A student');
+      const who = isStaffStory(s) ? 'A staff member' : 'A student';
+      const nm = external ? (externalName(s) || who) : (s.alias || who);
       const sw = t => external ? scrubName(t, s.alias, nm) : String(t || '');
-      out.push('### ' + sw(s.title), '', '_' + [nm, s.program, external && needsRedaction(s) ? '' : s.community].filter(Boolean).join(' · ') + '_', '', sw(s.story || s.summary), '');
+      out.push('### ' + sw(s.title), '', '_' + [nm, isStaffStory(s) ? 'Staff Impact' + (isFormerStudent(s) ? ', former ABG student' : '') : '', s.program, external && needsRedaction(s) ? '' : s.community].filter(Boolean).join(' · ') + '_', '', sw(s.story || s.summary), '');
       const ev = (external ? externalEvidence(s) : (s.evidence || [])).filter(e => e.status !== 'future');
       if (ev.length) { out.push('**Documented outcomes**'); ev.forEach(e => out.push('- ' + sw(e.statement) + (hasComparison(e) ? ' (' + sw(e.before) + ' → ' + sw(e.after) + ')' : '') + ' [' + classLabel(e) + ']')); out.push(''); }
     });
@@ -4093,20 +4907,20 @@ function StakeholderReport({stories, includesDemo}){
   const since = days ? new Date(Date.now() - days * 864e5).toISOString() : '';
   const period = since ? 'from ' + fmtDate(since) + ' to ' + fmtDate(nowISO()) : 'at any time';
   const inRange = stories.filter(s => !since || (s.createdAt || '') >= since);
-  const eligible = inRange.filter(s => isStudentStory(s) && (!external || s.status === 'approved'));
+  const eligible = inRange.filter(s => (isStudentStory(s) || isStaffStory(s)) && (!external || s.status === 'approved'));
   const [picked, setPicked] = useState(null);
   const selected = picked || eligible.slice().sort((a, b) => outcomeCount(b) - outcomeCount(a)).slice(0, 3).map(s => s.id);
   const toggle = id => setPicked((picked || selected).includes(id) ? (picked || selected).filter(x => x !== id) : (picked || selected).concat([id]));
   const md = useMemo(() => buildStakeholderReport({stories: inRange, period, external, selected: selected.filter(id => eligible.some(s => s.id === id)), includesDemo}), [stories, period, external, selected.join(), includesDemo]);
   return html`<section className="card stake">
     <h2>Stakeholder report</h2>
-    <p className="small muted">Combines an executive summary, key findings, outcomes by area, selected student stories, evidence types and limitations. Every number is counted from the journal; you choose the stories.</p>
+    <p className="small muted">Combines an executive summary, key findings, outcomes by area, staff and employment impact, selected stories, evidence types and limitations. Every number is counted from the journal; you choose the stories.</p>
     <div className="row">
       <${Field} label="Reporting period"><select id="sr-range" className="select" value=${range} onChange=${e => setRange(e.target.value)}>${RANGES.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select><//>
       <${Field} label="Use"><select id="sr-use" className="select" value=${external ? 'ext' : 'int'} onChange=${e => { setExternal(e.target.value === 'ext'); setPicked(null); }}><option value="ext">External (donors, grants, schools): approved stories only</option><option value="int">Internal (ABG staff): any story</option></select><//>
     </div>
-    <div className="field"><span className="field-label">Student stories to include</span>
-      ${eligible.length === 0 ? html`<p className="small muted">${external ? 'No approved student stories in this period. Approve stories in their Privacy and approval section, or switch to internal use.' : 'No student stories in this period.'}</p>` : html`<div className="pick-chips">${eligible.map(s => html`<label key=${s.id} className=${'chip' + (selected.includes(s.id) ? ' on' : '')}><input type="checkbox" className="sr-only" checked=${selected.includes(s.id)} onChange=${() => toggle(s.id)} />${(external ? externalName(s) || 'A student' : s.alias) + ': ' + trunc(s.title, 40)}</label>`)}</div>`}
+    <div className="field"><span className="field-label">Student and staff stories to include</span>
+      ${eligible.length === 0 ? html`<p className="small muted">${external ? 'No approved student stories in this period. Approve stories in their Privacy and approval section, or switch to internal use.' : 'No student stories in this period.'}</p>` : html`<div className="pick-chips">${eligible.map(s => html`<label key=${s.id} className=${'chip' + (selected.includes(s.id) ? ' on' : '')}><input type="checkbox" className="sr-only" checked=${selected.includes(s.id)} onChange=${() => toggle(s.id)} />${(external ? externalName(s) || (isStaffStory(s) ? 'A staff member' : 'A student') : s.alias) + (isStaffStory(s) ? ' (staff)' : '') + ': ' + trunc(s.title, 40)}</label>`)}</div>`}
     </div>
     <textarea id="sr-text" className="textarea report-ta" rows="16" aria-label="Stakeholder report" readOnly=${true} value=${md}></textarea>
     <div className="row-btns end"><${CopyButton} text=${md} /><button className="btn btn-ghost btn-sm" disabled=${!caps.downloads} onClick=${() => saveFile(caps, showToast, 'abg-stakeholder-report' + (includesDemo ? '-DEMO' : '') + '.md', md)}><${Icon} name="download" size=${16} /> Download .md</button></div>
@@ -4178,7 +4992,8 @@ function ReportsView({embedded}){
       <div>
         ${row('Approved stories', 'Summaries, takeaways, evidence with status, approved quotes, and approved audience drafts. Markdown pastes cleanly into Google Docs and Word.', html`<select id="exp-aud" className="select select-sm" aria-label="Audience" value=${aud} onChange=${e => setAud(e.target.value)}><option value="">All audiences</option>${AUDIENCES.map(a => html`<option key=${a.id} value=${a.id}>${a.short}</option>`)}</select><${CopyButton} text=${approvedMarkdown(stories, aud)} />${dlBtn(() => dl('abg-approved-stories' + (aud ? '-' + aud : '') + '.md', approvedMarkdown(stories, aud)))}`)}
         ${row('Student outcomes for the consulting team (CSV, names removed)', 'One row per student: the metrics card with how certain each value is, themes, audiences, evidence counts, approval status, and summaries. First names are replaced with codes (Student 01, Student 02…). Program and school names stay in, so read the summaries for other identifying details before sharing.', dlBtn(() => dl('abg-student-outcomes-team.csv', teamCSV(stories, students))))}
-        ${row('Stories (CSV)', 'Every story with status, dates, program, themes, audiences, and privacy fields. Internal.', dlBtn(() => dl('abg-stories.csv', storiesCSV(stories))))}
+        ${row('Stories (CSV)', 'Every story with its type (Student Impact, Staff Impact or general), status, dates, program, themes, audiences, and privacy fields. Internal.', dlBtn(() => dl('abg-stories.csv', storiesCSV(stories))))}
+        ${row('Staff and employment outcomes (CSV)', 'One row per documented staff member, never double-counted across stories: the staff card with how sure each value is, the student-to-staff background, and whether a Student Impact story is linked. Blank values read "Not documented". Internal: contains first names.', dlBtn(() => dl('abg-staff-outcomes.csv', staffCSV(stories))))}
         ${row('Structured impact records (JSON)', 'One record per story with every outcome field: category, initial and current condition, supporting observation, evidence source and type, values, timeframe, ABG activity and contribution, and open questions. Unknown fields are null.', dlBtn(() => dl('abg-impact-records.json', JSON.stringify(impactRecords(stories), null, 2))))}
         ${row('Measurable outcomes, evidence and data gaps (CSV)', 'Each measurable outcome and observation with before and after values, who observed it, its verification status, and the transcript passage, plus data gaps.', dlBtn(() => dl('abg-evidence.csv', evidenceCSV(stories))))}
         ${row('Verified program metrics (CSV)', 'Numbers entered from verified sources, with their sources.', dlBtn(() => dl('abg-verified-metrics.csv', metricsCSV(metrics, stories))))}
@@ -4206,22 +5021,26 @@ function ListEditor({title, hint, items, onChange, placeholder, disabled, id}){
    Built through the same steps as a real interview: transcript entries, the analysis structure,
    normalizeAnalysis, newStoryFromAnalysis and finalizeStory. Every record carries demo: true and a
    fixed id, so loading twice never duplicates and removal is exact. */
-const DEMO_ID = {story: k => 'demo-story-' + k, student: k => 'demo-student-' + k, entry: (k, i) => 'demo-entry-' + k + '-' + (i + 1)};
+const DEMO_ID = {story: k => 'demo-story-' + k, student: k => 'demo-student-' + k, staff: k => 'demo-staff-' + k, entry: (k, i) => 'demo-entry-' + k + '-' + (i + 1)};
+const DEMO_STAFF_N = DEMO_STORIES.filter(d => d.kind === 'staff').length;
+const DEMO_SUMMARY = (DEMO_STORIES.length - DEMO_STAFF_N) + ' fictional students' + (DEMO_STAFF_N ? ' and ' + DEMO_STAFF_N + ' fictional staff members' : '');
 function buildDemoRecords(me){
-  const out = {students: [], entries: [], stories: []};
+  const out = {students: [], staff: [], entries: [], stories: []};
   DEMO_STORIES.forEach(d => {
     const name = d.firstName, sid = DEMO_ID.story(d.key);
+    const isStaff = d.kind === 'staff';
     const entries = d.entries.map((en, i) => {
       const turns = en.turns.map(([q, a], j) => ({
-        q: q === 'OPENING' ? OPENING_Q(name) : q === 'UPDATE' ? UPDATE_OPENING_Q(name) : q === 'CLOSING' ? CLOSING_Q(name) : q,
+        q: q === 'OPENING' ? (isStaff ? STAFF_OPENING_Q(name) : OPENING_Q(name)) : q === 'UPDATE' ? (isStaff ? STAFF_UPDATE_OPENING_Q(name) : UPDATE_OPENING_Q(name)) : q === 'CLOSING' ? (isStaff ? STAFF_CLOSING_Q(name) : CLOSING_Q(name)) : q,
         kind: q === 'OPENING' || q === 'UPDATE' ? 'opening' : q === 'CLOSING' ? 'closing' : 'followup', category: '',
         a, status: 'answered', at: new Date(Date.parse(en.recordedAt) + j * 150000).toISOString(), audio: []}));
       return {id: DEMO_ID.entry(d.key, i), storyId: sid, recordedAt: en.recordedAt, eventDateText: '', eventApprox: false, prompt: turns[0].q,
         transcript: turnsToText(turns), turns, audio: [], transcriptEdited: null, summary: i === 0 ? (d.analysis.entrySummary || '') : 'Update interview', takeaways: [],
         source: i === 0 ? 'interview' : 'interview-update', analyzed: true, createdBy: (me && me.id) || null, demo: true};
     });
-    const a = normalizeAnalysis(d.analysis, {items: entries.map(e => ({id: e.id, text: e.transcript})), storyIds: new Set()});
-    const draft = newStoryFromAnalysis(a, {me, studentId: DEMO_ID.student(d.key), studentName: name, studentInfo: {gender: d.gender, school: d.school, demographics: d.demographics}});
+    const a = normalizeAnalysis(d.analysis, {items: entries.map(e => ({id: e.id, text: e.transcript})), storyIds: new Set(), kind: isStaff ? 'staff' : 'student'});
+    const draft = isStaff ? newStoryFromAnalysis(a, {me, kind: 'staff', staffId: DEMO_ID.staff(d.key), studentName: name, staffInfo: d.staffInfo})
+      : newStoryFromAnalysis(a, {me, studentId: DEMO_ID.student(d.key), studentName: name, studentInfo: {gender: d.gender, school: d.school, demographics: d.demographics}});
     const st = finalizeStory(draft, me).story;
     const fu = (d.tasks || []).map((t, i) => ({id: 'demo-fu-' + d.key + '-t' + i, kind: 'task', question: t.q, due: t.due || '', status: t.status || 'open', answer: t.answer || '', entryId: null, suggested: true}))
       .concat((d.questions || []).map((q, i) => ({id: 'demo-fu-' + d.key + '-q' + i, kind: 'question', question: q.q, due: '', status: q.status || 'open', answer: q.answer || '', entryId: q.status === 'answered' ? entries[entries.length - 1].id : null})));
@@ -4232,7 +5051,8 @@ function buildDemoRecords(me){
       links: (d.links || []).map(l => ({storyId: DEMO_ID.story(l.key), type: l.type, reason: l.reason, confirmed: true}))});
     out.stories.push(st);
     out.entries = out.entries.concat(entries);
-    out.students.push({id: DEMO_ID.student(d.key), firstName: name, nameKey: norm(name), gender: d.gender || '', school: d.school || '', demographics: d.demographics || '', note: '', createdAt: d.createdAt, createdBy: (me && me.id) || null, demo: true});
+    if (isStaff) out.staff.push({id: DEMO_ID.staff(d.key), firstName: name, nameKey: norm(name), note: '', createdAt: d.createdAt, createdBy: (me && me.id) || null, demo: true});
+    else out.students.push({id: DEMO_ID.student(d.key), firstName: name, nameKey: norm(name), gender: d.gender || '', school: d.school || '', demographics: d.demographics || '', note: '', createdAt: d.createdAt, createdBy: (me && me.id) || null, demo: true});
   });
   /* links go both ways */
   out.stories.forEach(st => st.links.forEach(l => { const o = out.stories.find(x => x.id === l.storyId); if (o && !o.links.some(x => x.storyId === st.id)) o.links.push({storyId: st.id, type: l.type, reason: l.reason, confirmed: true}); }));
@@ -4242,18 +5062,20 @@ async function loadDemoData(db, me){
   const r = buildDemoRecords(me);
   const put = async (col, rec) => { const x = Object.assign({}, rec); delete x.id; await db.collection(col).doc(rec.id).set(x); };
   for (const x of r.students) await put('students', x);
+  for (const x of r.staff) await put('staff', x);
   for (const x of r.entries) await put('entries', x);
   for (const x of r.stories) await put('stories', x);
   return r;
 }
-async function removeDemoData(db, allStories, allStudents){
+async function removeDemoData(db, allStories, allStudents, allStaff){
   const storyIds = uniq(DEMO_STORIES.map(d => DEMO_ID.story(d.key)).concat(allStories.filter(x => x.demo).map(x => x.id)));
   for (const sid of storyIds) {
     const snap = await db.collection('entries').where('storyId', '==', sid).get();
     for (const d of snap.docs) await db.collection('entries').doc(d.id).delete();
     if (allStories.some(x => x.id === sid) || DEMO_STORIES.some(d => DEMO_ID.story(d.key) === sid)) await db.collection('stories').doc(sid).delete();
   }
-  for (const id of uniq(DEMO_STORIES.map(d => DEMO_ID.student(d.key)).concat(allStudents.filter(x => x.demo).map(x => x.id)))) await db.collection('students').doc(id).delete();
+  for (const id of uniq(DEMO_STORIES.filter(d => d.kind !== 'staff').map(d => DEMO_ID.student(d.key)).concat(allStudents.filter(x => x.demo).map(x => x.id)))) await db.collection('students').doc(id).delete();
+  for (const id of uniq(DEMO_STORIES.filter(d => d.kind === 'staff').map(d => DEMO_ID.staff(d.key)).concat((allStaff || []).filter(x => x.demo).map(x => x.id)))) await db.collection('staff').doc(id).delete();
   /* a real story never keeps a link to a removed demo story */
   for (const o of allStories.filter(x => !x.demo && (x.links || []).some(l => storyIds.includes(l.storyId)))) await db.collection('stories').doc(o.id).update({links: (o.links || []).filter(l => !storyIds.includes(l.storyId))});
 }
@@ -4403,7 +5225,7 @@ function ItemRow({color, name, desc, onEdit, onDelete, readOnly, deleteLabel}){
   </div>`;
 }
 function SettingsView(){
-  const {caps, settings, stories, allStories, allStudents, safeWrite, readOnly, updateMe, openSheet, showToast, role: myRole, isAdmin} = useApp();
+  const {caps, settings, stories, allStories, allStudents, allStaff, safeWrite, readOnly, updateMe, openSheet, showToast, role: myRole, isAdmin} = useApp();
   /* application settings (programs, schools, outcome categories, demo data) are for administrators */
   const lock = readOnly || !isAdmin;
   const me = caps.me || {};
@@ -4415,7 +5237,7 @@ function SettingsView(){
   const [demoExp, setDemoExp] = useState(!!demo.inExports);
   useEffect(() => { setDemoShow(!demo.hidden); setDemoExp(!!demo.inExports); }, [demo.hidden, demo.inExports]);
   async function loadDemo(){ setDemoBusy('load'); const ok = await safeWrite(async () => { await loadDemoData(caps.db, me); }); if (ok) { await setDemo({loadedAt: nowISO(), removedAt: null, hidden: false, version: DEMO_VERSION}); showToast('Six demo stories added'); } setDemoBusy(''); }
-  const removeDemo = () => openSheet(close => html`<${ConfirmSheet} close=${close} title="Remove all demo stories?" body=${'This deletes the ' + demoStories.length + ' fictional demo stories, their interview entries and demo student records. Real stories are not touched. You can load the demo stories again later.'} confirmLabel="Remove demo stories" onConfirm=${async () => { const ok = await safeWrite(() => removeDemoData(caps.db, allStories || [], allStudents || [])); if (ok) { await setDemo({removedAt: nowISO(), loadedAt: null}); showToast('Demo stories removed'); } }} />`);
+  const removeDemo = () => openSheet(close => html`<${ConfirmSheet} close=${close} title="Remove all demo stories?" body=${'This deletes the ' + demoStories.length + ' fictional demo stories, their interview entries and demo student and staff records. Real stories are not touched. You can load the demo stories again later.'} confirmLabel="Remove demo stories" onConfirm=${async () => { const ok = await safeWrite(() => removeDemoData(caps.db, allStories || [], allStudents || [], allStaff || [])); if (ok) { await setDemo({removedAt: nowISO(), loadedAt: null}); showToast('Demo stories removed'); } }} />`);
   /* saves build on the latest written values, so quick edits in a row never overwrite each other */
   const latest = useRef(settings);
   useEffect(() => { latest.current = settings; }, [settings]);
@@ -4616,13 +5438,13 @@ function SettingsView(){
         </section></div>
 
         <div className="set-sec" id="sec-demo" data-sec="demo"><section className="card set-card">
-          ${head('Demo Stories', 'Six fictional students, named after famous artists, show how recorded stories turn into Impact Insights. Their schools, programs and outcomes are invented.')}
+          ${head('Demo Stories', DEMO_SUMMARY.charAt(0).toUpperCase() + DEMO_SUMMARY.slice(1) + ', named after famous artists, show how recorded stories turn into Impact Insights. Their schools, programs, jobs and outcomes are invented.')}
           ${demoStories.length ? html`
             <p className="small">${demoStories.length} demo stor${demoStories.length === 1 ? 'y' : 'ies'} in the journal, each labeled <${DemoPill} />. Their numbers are calculated from the demo records, the same way real stories are.</p>
             <label className="switch-row"><span><strong>Show demo stories in the journal</strong><br /><span className="small muted">Turn off to hide them everywhere (Overview, Story Library, Impact Insights) without deleting them.</span></span><input id="set-demo-show" type="checkbox" className="switch" checked=${demoShow} disabled=${!isAdmin} onChange=${e => { const v = e.target.checked; setDemoShow(v); setDemo({hidden: !v}); }} /></label>
             <label className="switch-row"><span><strong>Include demo stories in reports and exports</strong><br /><span className="small muted">Off by default, so fictional stories never end up in donor reports or files. When on, they're marked "[DEMO, fictional]".</span></span><input id="set-demo-exports" type="checkbox" className="switch" checked=${demoExp} disabled=${!isAdmin} onChange=${e => { const v = e.target.checked; setDemoExp(v); setDemo({inExports: v}); }} /></label>
             ${!isAdmin ? html`<p className="small muted">Only admins can change or remove demo stories.</p>` : html`<div><button className="btn btn-ghost btn-sm danger-text" onClick=${removeDemo}><${Icon} name="trash" size=${16} /> Remove all demo stories</button></div>`}`
-          : html`<p className="small">No demo stories are in the journal.</p>${!isAdmin ? null : html`<div><button className="btn btn-primary btn-sm" disabled=${!!demoBusy} onClick=${loadDemo}>${demoBusy === 'load' ? 'Adding…' : 'Load six demo stories'}</button></div>`}`}
+          : html`<p className="small">No demo stories are in the journal.</p>${!isAdmin ? null : html`<div><button className="btn btn-primary btn-sm" disabled=${!!demoBusy} onClick=${loadDemo}>${demoBusy === 'load' ? 'Adding…' : 'Load ' + DEMO_STORIES.length + ' demo stories'}</button></div>`}`}
         </section></div>
 
         <div className="set-sec" id="sec-team" data-sec="team"><section className="card set-card">
@@ -4652,6 +5474,7 @@ function App(){
   const [storiesLoaded, setStoriesLoaded] = useState(false);
   const [metrics, setMetrics] = useState([]);
   const [students, setStudents] = useState([]);
+  const [staffPeople, setStaffPeople] = useState([]);
   const [backlog, setBacklog] = useState([]);
   const [backlogLoaded, setBacklogLoaded] = useState(false);
   const [settings, setSettings] = useState({programs: [], communities: [], programInfo: {}, outcomes: [], demo: {}});
@@ -4690,13 +5513,14 @@ function App(){
     const u1 = db.collection('stories').onSnapshot(snap => { setStories(snap.docs.map(d => Object.assign({id: d.id}, d.data()))); setStoriesLoaded(true); }, err => { setStoriesLoaded(true); showToast(dbErrorMessage(err)); });
     const u2 = db.collection('metrics').onSnapshot(snap => setMetrics(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
     const u4 = db.collection('students').onSnapshot(snap => setStudents(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
+    const u7 = db.collection('staff').onSnapshot(snap => setStaffPeople(snap.docs.map(d => Object.assign({id: d.id}, d.data()))), () => {});
     const u3 = db.doc('config/settings').onSnapshot(snap => { const d = snap.exists ? (snap.data() || {}) : {}; ACTIVE_OUTCOMES = mergeOutcomes(d.outcomes); setSettings({programs: asArr(d.programs), communities: asArr(d.communities), programInfo: d.programInfo && typeof d.programInfo === 'object' ? d.programInfo : {}, outcomes: asArr(d.outcomes), demo: d.demo && typeof d.demo === 'object' ? d.demo : {}}); setSettingsLoaded(true); }, () => setSettingsLoaded(true));
     let alive = true;
     const loadRole = () => (window.__platform && window.__platform.getRole ? window.__platform.getRole() : Promise.resolve('user')).then(r => { if (alive) setRole(r || 'user'); }, () => { if (alive) setRole('user'); });
     loadRole();
     const u6 = () => { alive = false; };
     const u5 = db.collection('backlog').onSnapshot(snap => { setBacklog(snap.docs.map(d => Object.assign({id: d.id}, d.data()))); setBacklogLoaded(true); }, () => setBacklogLoaded(true));
-    return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); };
   }, [caps.status]);
 
   const nav = useCallback((name, params) => { setSheet(null); setRoute({name, params: params || {}, key: Date.now()}); try { window.scrollTo(0, 0); } catch (e) {} }, []);
@@ -4730,14 +5554,15 @@ function App(){
         await caps.db.doc('config/settings').set(Object.assign({}, settings, {demo: Object.assign({}, dc, {loadedAt: nowISO(), hidden: false, inExports: false, version: DEMO_VERSION}), updatedAt: nowISO()}));
         await loadDemoData(caps.db, caps.me || {});
       });
-      if (ok) showToast('Six fictional demo stories were added so you can explore. They are labeled Demo; manage them in Settings.');
+      if (ok) showToast(DEMO_STORIES.length + ' fictional demo stories were added so you can explore. They are labeled Demo; manage them in Settings.');
     })();
   }, [caps.status, storiesLoaded, settingsLoaded, role, readOnly]);
   const demoHidden = !!(settings.demo || {}).hidden;
   const allStories = stories, allStudents = students;
   const shownStories = useMemo(() => demoHidden ? stories.filter(x => !x.demo) : stories, [stories, demoHidden]);
   const shownStudents = useMemo(() => demoHidden ? students.filter(x => !x.demo) : students, [students, demoHidden]);
-  const ctx = {caps, updateMe, stories: shownStories, students: shownStudents, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite,
+  const shownStaff = useMemo(() => demoHidden ? staffPeople.filter(x => !x.demo) : staffPeople, [staffPeople, demoHidden]);
+  const ctx = {caps, updateMe, stories: shownStories, students: shownStudents, staffPeople: shownStaff, allStaff: staffPeople, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite,
     readOnly, role: role || 'user', isAdmin: role === 'admin'};
   const focus = caps.status === 'ready' && (route.name === 'record' || route.name === 'review' || route.name === 'interview');
   let content;
