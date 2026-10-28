@@ -119,7 +119,7 @@ One site, one database, two experiences:
 1. Supabase > SQL Editor: run `supabase/community.sql` (after `admin-roles.sql`).
 2. Supabase > Edge Functions: create a function named `community` from `supabase/functions/community/index.ts` and turn **Verify JWT off** (the public calls it without signing in; it checks its own tokens). It uses the same `ANTHROPIC_API_KEY` and `GROQ_API_KEY` secrets as the `ai` and `transcribe` functions.
 3. `index.ts` is generated: edit `handler.ts`, `entry.ts` or `src/core/shared.js`, then run `node scripts/build-community.mjs`.
-4. Cloudflare Pages serves `/app` and `/share` through `public/_redirects`.
+4. Cloudflare Pages serves the app for `/app` and `/share` automatically (single-page app fallback). Don't add a `_redirects` rule to `/index.html`: Cloudflare turns it into a redirect to `/`.
 
 ## How a story becomes evidence
 
