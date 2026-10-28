@@ -1,14 +1,20 @@
 import './globals.js';
 import './styles.css';
 import { createClient } from '@supabase/supabase-js';
-import { makeDb, makeUser, makeSample, makeAudio, makeSpeech, makeAdmin, makeRole, downloads } from './platform.js';
-import './journal.js';
+import { makeDb, makeUser, makeSample, makeAudio, makeSpeech, makeAdmin, makeRole, makeCommunityAdmin, downloads } from './platform.js';
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const root = document.getElementById('root');
 /* read before Supabase consumes it, so an expired invitation or sign-in link can be explained */
 const ARRIVED_HASH = /access_token|error/.test(window.location.hash) ? window.location.hash : '';
+/* Two experiences on one site:
+   /share  Community Story Collection Portal (public, no account; talks only to the community Edge Function)
+   /app    Internal Impact Management Portal (invited staff, signed in)
+   /       Landing page: "Share Your Story" and "Staff Sign In". Signed-in staff go straight to /app. */
+const PATH = (window.location.pathname.replace(/\/+$/, '') || '/').toLowerCase();
+const PORTAL = PATH === '/share' || PATH.startsWith('/share/') ? 'share' : PATH === '/app' || PATH.startsWith('/app/') ? 'app' : 'root';
+const toApp = () => { if (PORTAL !== 'app') history.replaceState(null, '', '/app' + window.location.search + window.location.hash); };
 const {React, ReactDOM, htm} = window;
 const html = htm.bind(React.createElement);
 const {useState} = React;
@@ -120,6 +126,18 @@ function makeKeeper(sb){
   };
 }
 
+function Landing(){
+  return html`<main className="landing">
+    <div className="landing-card">
+      <img className="landing-logo" src="/abg-logo.png" alt="Arts Bridging the Gap" />
+      <h1>ABG Impact Journal</h1>
+      <p className="landing-lede">Stories of how Arts Bridging the Gap makes a difference in students' lives, careers and communities.</p>
+      <a className="btn btn-primary btn-lg landing-share" href="/share" id="landing-share">Share Your Story</a>
+      <p className="small muted">For students, alumni, staff, parents, volunteers and friends of ABG. No account needed.</p>
+      <a className="landing-staff" href="/app" id="landing-staff">Staff Sign In</a>
+    </div>
+  </main>`;
+}
 function Setup(){
   return html`<main className="login"><div className="login-card card"><${Brand} /><h1>Setup needed</h1>
     <p>This copy of the app doesn't know which Supabase project to use. Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> as environment variables in Cloudflare Pages, then redeploy. The README walks through it.</p></div></main>`;
@@ -144,9 +162,11 @@ async function boot(){
       admin: makeAdmin(sb, URL_, KEY), getRole: makeRole(sb, user.email),
       // logs out this device only; other devices stay signed in
       signOut: async () => { leaving = true; await keeper.forget(); try { await sb.auth.signOut({scope: 'local'}); } catch (e) {} window.location.replace(window.location.pathname); }};
+    window.__platform.community = makeCommunityAdmin(sb, URL_, KEY);
     window.claude = {use: async name => caps[name] || null};
+    toApp();
     if (/access_token|error_description/.test(window.location.hash)) history.replaceState(null, '', window.location.pathname + window.location.search);
-    window.__mountJournal(root);
+    import('./journal.js').then(() => window.__mountJournal(root));
   };
   // no async auth calls inside this callback (supabase-js can deadlock); defer them instead
   sb.auth.onAuthStateChange((event, session) => {
@@ -165,10 +185,16 @@ async function boot(){
   const restored = await keeper.restore();
   if (restored.session) { start(restored.session.user); return; }
   if (mounted) return;
+  // the root page: visitors without a staff session choose between sharing a story and signing in
+  if (PORTAL === 'root' && !ARRIVED_HASH) { show(html`<${Landing} />`); return; }
+  toApp();
   if (restored.offline && navigator.onLine === false) { show(html`<${Offline} />`); return; }
   const linkProblem = /error_code=otp_expired|error=access_denied/.test(ARRIVED_HASH)
     ? 'That link has expired or was already used. Enter your email and we will send you a new sign-in code.' : '';
   if (ARRIVED_HASH) history.replaceState(null, '', window.location.pathname + window.location.search);
   show(html`<${Login} sb=${sb} notice=${linkProblem} />`);
 }
-boot();
+if (PORTAL === 'share') {
+  // the public portal never creates a Supabase client or touches staff sign-in
+  import('./community.js').then(m => m.mountCommunity(root, {url: URL_, key: KEY})).catch(() => { root.innerHTML = '<p style="padding:24px;font-family:sans-serif">The page could not load. Check your connection and reload.</p>'; });
+} else boot();

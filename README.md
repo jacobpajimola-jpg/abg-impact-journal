@@ -88,6 +88,39 @@ Supabase's built-in email sender allows only a few emails per hour, so this proj
 
 ---
 
+## Two portals: internal journal and Share Your Story
+
+One site, one database, two experiences:
+
+| Address | Who | What |
+|---|---|---|
+| `/` | Everyone | Landing page with **Share Your Story** and **Staff Sign In**. Signed-in staff go straight to the journal. |
+| `/app` | Invited staff (Kyle, ABG staff, consultants) | The internal journal. Unchanged sign-in: existing users never register again. |
+| `/share` | Students, alumni, staff, parents, volunteers, friends | The public **Community Portal**. No account. It never signs anyone in and can't reach the journal. |
+
+**Community Portal flow:** Welcome → how you're connected to ABG (and whether you're 18 or older) → your own experience or one you witnessed → a little about you (optional; staff are asked whether they were an ABG student first) → talk or type → a short AI interview → review your story (edit it, untick anything wrong, choose whether ABG may ever share it publicly) → submitted. Contributors get a **private link** (`/share#s=…`) to check the status, answer ABG's questions, correct their story or ask for its removal.
+
+**Security model**
+- Contributors never get a Supabase account. Everything they do goes through the `community` Edge Function, which checks a long random private token per submission. Only a SHA-256 hash of each token is stored, and tokens live in the URL fragment, which browsers never send to servers.
+- The function builds every AI prompt itself, so it can't be used as a general AI proxy. Limits: 6 new stories per connection per hour (connections stored only as hashes), about 7 follow-up questions, 24 AI calls per story.
+- The database (`supabase/community.sql`) lets signed-in active staff **read** submitted stories (never unfinished drafts); only **administrators** can review, change or delete them. Nobody can insert submissions except the function. Every status or review change is logged in `submission_events` by a database trigger.
+- **Minors:** anyone under 18 can only take part through a personal invitation that an administrator created after recording a parent or guardian's permission. This is enforced on the server, not just hidden in the page. Stories by or about minors are never shared publicly with names.
+- **Voice:** contributors must agree to recording first. Audio is transcribed by Groq and immediately discarded; only the text is kept.
+- **Retention:** unfinished drafts are deleted after 14 days, and rejected submissions after 180 days. A contributor's removal request withdraws an approved story from all reporting at once; an administrator then deletes it. Administrators can delete any submission at any time.
+
+**Inside the journal**
+- **Community Submissions** (review queue): pending review, needs clarification, approved for internal reporting, rejected / excluded, removal requested. Open a submission to read the transcript, check the outcomes Claude extracted (same model as Kyle's interviews), fix the story type, then approve, ask the contributor a question (they see it on their private link), or exclude it (for example as a duplicate). Pending submissions never count in Impact Insights; approval creates an ordinary journal story labeled with its source. Public sharing stays a separate decision.
+- **Evidence classes:** self-reported (someone's own experience), staff-observed (an ABG staff member saw it), community-observed (a parent, teacher, volunteer or supporter witnessed it), independently verified (checked against a record) and unconfirmed. A community account is never staff-observed or verified on arrival.
+- **Source Comparison:** lists possible matches between accounts (a shared first name, plus program or school), shows two accounts side by side by impact area, and lets Claude suggest whether they're consistent, complementary, conflicting or insufficient. Only an administrator links them, after confirming it's the same person. Linking gives both stories one participant record, so the person is counted once; unlinking restores the original records. Conflicting accounts stay visible.
+- **Impact Insights** adds Community Perspectives and Source Comparison sections, and filters for source, contributor type, evidence type and verification.
+- **Invite Contributors:** the community link, a QR code (also downloadable), a ready-made message, and personal invitation links (shown once, stored only as a hash, limited uses and expiry). Only administrators can record guardian permission on an invitation.
+
+**Setup for the Community Portal** (once)
+1. Supabase > SQL Editor: run `supabase/community.sql` (after `admin-roles.sql`).
+2. Supabase > Edge Functions: create a function named `community` from `supabase/functions/community/index.ts` and turn **Verify JWT off** (the public calls it without signing in; it checks its own tokens). It uses the same `ANTHROPIC_API_KEY` and `GROQ_API_KEY` secrets as the `ai` and `transcribe` functions.
+3. `index.ts` is generated: edit `handler.ts`, `entry.ts` or `src/core/shared.js`, then run `node scripts/build-community.mjs`.
+4. Cloudflare Pages serves `/app` and `/share` through `public/_redirects`.
+
 ## How a story becomes evidence
 
 **Interview (five stages).** Kyle tells the story in his own words first. Then about four to six follow-up questions, one at a time, fill only what's missing: (1) background and ABG involvement, (2) the most meaningful changes, (3) supporting evidence, (4) ABG's contribution, (5) current progress and follow-up. For each outcome the interviewer tracks the starting point, what changed, when, how Kyle knows, and ABG's possible role, and it asks about the most important gap. It never asks for records or diagnoses and never assumes causes.

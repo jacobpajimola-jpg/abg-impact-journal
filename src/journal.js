@@ -1,6 +1,9 @@
 import { DEMO_STORIES, DEMO_VERSION } from './demoData.js';
+import qrcode from 'qrcode-generator';
+import { CATEGORIES, THEMES, AUDIENCES, DOMAIN_GROUPS, DOMAINS, STAFF_DOMAINS, OBSERVERS, LINK_TYPES, METRIC_FIELDS, METRIC_STATUS, STORY_TYPES, STAFF_STATUS, EMPLOYMENT_TYPES, FORMER_STUDENT, STAFF_FIELDS, STAFF_STAGES, JOURNEY_STAGES, ABG_CONTEXT, INTERVIEW_STAGES, LISTEN_FOR, STAFF_LISTEN_FOR, ANALYSIS_SHAPE, STAFF_ANALYSIS_SHAPE, RELATIONSHIPS, SUBJECTS, communityAnalysisPrompt, communityContextText } from './core/shared.js';
 (function(){
 'use strict';
+if (window.__journalLoaded) return; window.__journalLoaded = true;
 if (!window.React || !window.ReactDOM || !window.htm) {
   var bp = document.querySelector('.boot p');
   if (bp) bp.textContent = "The journal couldn't load. Check your connection and reload the page.";
@@ -10,41 +13,6 @@ const { useState, useEffect, useMemo, useRef, useCallback, useContext, createCon
 const html = htm.bind(React.createElement);
 
 /* ================= vocabulary ================= */
-const CATEGORIES = [
-  {id:'engagement', label:'Student engagement'},
-  {id:'personal', label:'Personal development'},
-  {id:'creative', label:'Educational and creative development'},
-  {id:'longterm', label:'Long-term student outcomes'},
-  {id:'reach', label:'Program reach and participation'},
-  {id:'community', label:'Community and partnership impact'},
-];
-const THEMES = [
-  {id:'confidence', label:'Confidence'},
-  {id:'self_expression', label:'Self-expression'},
-  {id:'attendance', label:'Attendance'},
-  {id:'classroom_engagement', label:'Classroom engagement'},
-  {id:'creativity', label:'Creative development'},
-  {id:'artistic_skills', label:'Artistic skills'},
-  {id:'continued_engagement', label:'Continued participation'},
-  {id:'belonging', label:'Belonging'},
-  {id:'communication', label:'Communication'},
-  {id:'leadership', label:'Leadership'},
-  {id:'collaboration', label:'Collaboration'},
-  {id:'alumni_return', label:'Alumni engagement'},
-  {id:'volunteering', label:'Volunteering'},
-  {id:'public_art', label:'Public art'},
-  {id:'school_partnership', label:'School partnership'},
-  {id:'family_community', label:'Community involvement'},
-  {id:'long_term_development', label:'Long-term development'},
-  {id:'challenges', label:'Challenges and unmet needs'},
-];
-const AUDIENCES = [
-  {id:'donors', label:'Donors and foundations', short:'Donors', emphasis:'number of students served, program reach, student outcomes, continued participation, long-term development, what financial support made possible, and verified evidence of program effectiveness'},
-  {id:'schools', label:'School administrators', short:'Schools', emphasis:'school attendance, classroom engagement, program participation, student confidence, communication skills, academic development, student retention, and access to arts education'},
-  {id:'corporate', label:'Corporate partners', short:'Corporate partners', emphasis:'community impact, student participation, employee volunteer involvement, volunteer hours, completed projects, and partnership outcomes'},
-  {id:'community', label:'Community organizations and neighborhood councils', short:'Community groups', emphasis:'youth engagement, community participation, neighborhood art projects, family involvement, public murals, and school and community partnerships. Never claim crime reduction or other broad community statistics'},
-  {id:'artists', label:'Artists and volunteers', short:'Artists and volunteers', emphasis:'creative collaboration, student engagement, volunteer experiences, community contribution, and artistic development'},
-];
 const FORMATS = [
   {id:'donor_story', label:'Donor impact story', aud:'donors', guide:'150 to 220 words'},
   {id:'school_case', label:'School partnership case study', aud:'schools', guide:'four short labeled parts (Context, What ABG provided, What changed, Why it matters for schools), 180 to 250 words in total'},
@@ -71,45 +39,6 @@ const EVIDENCE_STATUS = [
 const GENDERS = [{id:'male', label:'Male'}, {id:'female', label:'Female'}, {id:'other', label:'Other'}];
 function studentInfoText(si){ if (!si) return ''; return [si.gender ? 'gender: ' + labelOf(GENDERS, si.gender) : '', si.school ? 'school: ' + si.school : '', si.demographics ? 'other details: ' + si.demographics : ''].filter(Boolean).join('; '); }
 /* impact domains: the five core metrics first, then other stakeholder-relevant outcomes */
-const DOMAIN_GROUPS = [{id:'academic', label:'Academic progress'}, {id:'personal', label:'Community and personal development'}, {id:'longterm', label:'Long-term student success'}, {id:'program', label:'Program engagement'}, {id:'staff', label:'Staff and employment'}];
-const DOMAINS = [
-  {id:'attendance', label:'School attendance', group:'academic', change:true},
-  {id:'academics', label:'Grades and academic performance', group:'academic', change:true},
-  {id:'engagement', label:'Motivation and school engagement', group:'academic', change:true},
-  {id:'graduation', label:'High school graduation', group:'academic', milestone:true},
-  {id:'higher_ed', label:'College or further education', group:'longterm', milestone:true},
-  {id:'career', label:'Career, employment or internships', group:'longterm', milestone:true},
-  {id:'returned', label:'Returned to ABG as mentor, volunteer or instructor', group:'longterm', milestone:true},
-  {id:'arts_continued', label:'Continued art or creative pursuits', group:'longterm', milestone:true},
-  {id:'risk', label:'Reduced risky behavior', group:'personal', change:true, sensitive:true},
-  {id:'social', label:'Positive relationships and peer groups', group:'personal', change:true},
-  {id:'wellbeing', label:'Emotional well-being and sense of belonging', group:'personal', change:true},
-  {id:'community_involvement', label:'Community involvement', group:'personal', change:true},
-  {id:'activities', label:'Productive after-school activities', group:'personal', change:true},
-  {id:'confidence', label:'Confidence, leadership and communication', group:'personal', change:true},
-  {id:'aspirations', label:'Decision-making and future aspirations', group:'personal', change:true},
-  {id:'behavior', label:'Behavior', group:'personal', change:true},
-  {id:'participation', label:'Continued participation in ABG', group:'program'},
-  {id:'mentorship', label:'Mentor relationships at ABG', group:'program'},
-  {id:'leadership_abg', label:'Leadership roles within ABG', group:'program', milestone:true},
-  {id:'access', label:'Access to arts education', group:'program'},
-  {id:'artistic', label:'Artistic skills', group:'program'},
-  {id:'pathways', label:'Career or college interests', group:'longterm'},
-  /* staff and employment outcomes (Staff Impact stories) */
-  {id:'employment', label:'Paid employment at ABG', group:'staff', milestone:true},
-  {id:'first_job', label:'First paid job', group:'staff', milestone:true},
-  {id:'role_growth', label:'Promotion or expanded responsibilities', group:'staff', milestone:true},
-  {id:'pro_skills', label:'Professional or artistic skill development', group:'staff'},
-  {id:'training', label:'Training or mentorship received', group:'staff'},
-  {id:'staff_leadership', label:'Leadership responsibilities', group:'staff'},
-  {id:'mentoring_students', label:'Mentoring or teaching ABG students', group:'staff', milestone:true},
-  {id:'community_contribution', label:'Contribution to arts education and the community', group:'staff'},
-  {id:'further_ed', label:'Further education or certifications', group:'staff', milestone:true},
-  {id:'next_employment', label:'Later or additional employment', group:'staff', milestone:true},
-  {id:'stability', label:'Personal growth, stability and sense of purpose', group:'staff'},
-  {id:'other', label:'Other', group:'program'},
-];
-const STAFF_DOMAINS = DOMAINS.filter(d => d.group === 'staff').map(d => d.id);
 /* milestones counted on the dashboard; each is checked per student from evidence and the metrics card */
 const MILESTONES = [
   {id:'graduated', label:'Graduated high school'},
@@ -137,19 +66,23 @@ const EVIDENCE_LABELS = [
 /* four evidence types used in reporting. Derived from status and observer, so older records classify too.
    Kyle's confident account never makes something "verified": only a staff member checking documentation does. */
 const EVIDENCE_CLASSES = [
-  {id:'verified', label:'Verified by documentation', short:'Verified', tone:'good', color:'#2F8F5B'},
-  {id:'observed', label:'Directly observed by staff', short:'Staff-observed', tone:'blue', color:'#3D7FC1'},
-  {id:'reported', label:'Reported by student or third party', short:'Reported', tone:'teal', color:'#2EB8A0'},
-  {id:'unconfirmed', label:'Unconfirmed or inferred', short:'Unconfirmed', tone:'warn', color:'#E3A33B'},
+  {id:'verified', label:'Independently verified', short:'Verified', tone:'good', color:'#2F8F5B', desc:'Supported by checked records or independent documentation'},
+  {id:'observed', label:'Staff-observed', short:'Staff-observed', tone:'blue', color:'#3D7FC1', desc:'An authorized ABG staff member saw it personally'},
+  {id:'self', label:'Self-reported', short:'Self-reported', tone:'teal', color:'#2EB8A0', desc:'The person describing their own experience'},
+  {id:'community', label:'Community-observed', short:'Community-observed', tone:'purple', color:'#A653C9', desc:'A parent, teacher, volunteer or supporter describing what they witnessed or were told'},
+  {id:'unconfirmed', label:'Unconfirmed or inferred', short:'Unconfirmed', tone:'warn', color:'#E3A33B', desc:'Secondhand, uncertain or inferred'},
 ];
-const CLASS_RANK = {verified: 4, observed: 3, reported: 2, unconfirmed: 1};
+const CLASS_RANK = {verified: 5, observed: 4, self: 3, community: 2, unconfirmed: 1};
+const SELF_OBSERVERS = ['student', 'self'];
+const COMMUNITY_OBSERVERS = ['teacher', 'parent', 'school_staff', 'volunteer', 'community', 'other'];
 function evidenceClass(e){
   if (!e) return 'unconfirmed';
   if (e.status === 'future') return 'planned';
   if (e.status === 'verified') return 'verified';
   if (e.status === 'unverified' || e.inferred) return 'unconfirmed';
   if (e.observer === 'abg_staff' || e.observer === 'records') return 'observed';
-  if (['student', 'teacher', 'parent', 'school_staff', 'other'].includes(e.observer)) return 'reported';
+  if (SELF_OBSERVERS.includes(e.observer)) return 'self';
+  if (COMMUNITY_OBSERVERS.includes(e.observer)) return 'community';
   return 'unconfirmed';
 }
 /* changing the evidence type in review keeps status and observer consistent with it */
@@ -159,12 +92,13 @@ function classPatch(e, cls){
   if (cls === 'verified') return {status: 'verified', inferred: false};
   if (cls === 'unconfirmed') return {status: 'unverified'};
   if (cls === 'observed') return {observer: 'abg_staff', inferred: false, status: unsure ? plain : e.status};
-  return {observer: ['student', 'teacher', 'parent', 'school_staff', 'other'].includes(e.observer) ? e.observer : 'other', inferred: false, status: unsure ? plain : e.status};
+  if (cls === 'self') return {observer: SELF_OBSERVERS.includes(e.observer) ? e.observer : 'self', inferred: false, status: unsure ? plain : e.status};
+  return {observer: COMMUNITY_OBSERVERS.includes(e.observer) ? e.observer : 'other', inferred: false, status: unsure ? plain : e.status};
 }
 function classLabel(e){
   const c = evidenceClass(e);
   if (c === 'planned') return 'Expected, not yet happened';
-  if (c === 'reported' && e.observer && e.observer !== 'other') return 'Reported by ' + ({student: 'student', teacher: 'teacher', parent: 'parent or family', school_staff: 'school staff'}[e.observer] || 'someone else');
+  if (c === 'community' && e.observer && !['other', 'community'].includes(e.observer)) return 'Community-observed: ' + ({teacher: 'teacher', parent: 'parent or family', school_staff: 'school staff', volunteer: 'volunteer'}[e.observer] || 'someone else');
   return (byId(EVIDENCE_CLASSES, c) || {}).label || '';
 }
 function evidenceLabelId(e){
@@ -211,15 +145,6 @@ function parseMeasure(v, e){
 function letterGrade(v){ const m = asStr(v).toUpperCase().match(/^(?:GRADE\s*)?([A-F])([+-]?)$/); return m ? m[1] + m[2] : ''; }
 function hasComparison(e){ return !!(asStr(e.before) && asStr(e.after)); }
 /* who observed or reported a piece of evidence */
-const OBSERVERS = [
-  {id:'abg_staff', label:'ABG staff (Kyle)'},
-  {id:'teacher', label:'Teacher'},
-  {id:'school_staff', label:'School administrator or staff'},
-  {id:'parent', label:'Parent or family'},
-  {id:'student', label:'The student'},
-  {id:'records', label:'Records or documents'},
-  {id:'other', label:'Someone else'},
-];
 const QUOTE_KINDS = [
   {id:'exact', label:'Exact words'},
   {id:'remembered', label:'Remembered'},
@@ -232,16 +157,6 @@ const PHASES = [
   {id:'short_term', label:'Short-term developments'},
   {id:'long_term', label:'Long-term outcomes'},
   {id:'future', label:'Future follow-up'},
-];
-const LINK_TYPES = [
-  {id:'same_student', label:'Same student'},
-  {id:'same_school', label:'Same school'},
-  {id:'same_mural', label:'Same mural'},
-  {id:'same_program', label:'Same program'},
-  {id:'same_community', label:'Same community'},
-  {id:'same_partnership', label:'Same partnership'},
-  /* set only by a person who confirmed it: a Student Impact story and a Staff Impact story about the same individual */
-  {id:'same_person', label:'Same person (student and staff stories)'},
 ];
 const STRUCTURE = [
   {id:'character', label:'Character', hint:'Who is the story about?'},
@@ -284,75 +199,15 @@ const STAFF_CLOSING_Q = name => "Is there anything else about " + name + "'s exp
 const STAFF_UPDATE_OPENING_Q = name => "What has changed for " + name + " since you last recorded their story? New roles, skills, training, jobs or anything else, even small things.";
 const METRIC_SUGGESTIONS = ['Students served','Schools reached','Workshops completed','Murals or projects completed','Volunteer hours','Volunteers','Families attending events','Program sessions held'];
 /* the standard metrics card: the same measurable fields on every student story */
-const METRIC_FIELDS = [
-  {id:'startGrade', label:'Grade or age when they started', short:'Starting grade or age', type:'text', ph:'e.g. 7th grade, about 12'},
-  {id:'yearsWithAbg', label:'Years involved with ABG', short:'Years with ABG', type:'number', unit:'years'},
-  {id:'sessionsAttended', label:'Sessions or workshops attended', short:'Sessions attended', type:'number', unit:'sessions'},
-  {id:'programs', label:'ABG programs or projects', short:'Programs', type:'text', ph:'e.g. School mural program'},
-  {id:'artworksCompleted', label:'Murals or artworks completed', short:'Artworks completed', type:'number', unit:'works'},
-  {id:'continuedArt', label:'Kept making art after the program', short:'Kept making art', type:'choice', options:['Yes','No']},
-  {id:'grades', label:'Grades or schoolwork during or after ABG', short:'Grades', type:'choice', options:['Improved','Stayed about the same','Declined']},
-  {id:'schoolAttendance', label:'School attendance during or after ABG', short:'School attendance', type:'choice', options:['Improved','Stayed about the same','Declined']},
-  {id:'stillParticipating', label:'Still participating in ABG', short:'Still participating', type:'choice', options:['Yes','No']},
-  {id:'graduated', label:'Graduated high school', short:'Graduated high school', type:'choice', options:['Yes','No','Not yet (still in school)']},
-  {id:'firstGenCollege', label:'First in their family to attend college', short:'First-generation college', type:'choice', options:['Yes','No']},
-  {id:'nextStep', label:'College, training or creative work afterward', short:'College or creative path', type:'text', ph:'e.g. community college art classes'},
-  {id:'returnedToAbg', label:'Came back to ABG (volunteer, mentor or alum)', short:'Came back to ABG', type:'choice', options:['Yes','No']},
-  {id:'currentStatus', label:'What they are doing now', short:'Doing now', type:'text', ph:'e.g. high school senior'},
-];
-const METRIC_STATUS = [
-  {id:'verified', label:'Verified', tone:'good'},
-  {id:'reported', label:'Reported', tone:'blue'},
-  {id:'estimate', label:'Estimate', tone:'warn'},
-];
 
 /* ================= staff impact stories =================
    Two primary story types: Student Impact and Staff Impact. "Former ABG student" is a background attribute of a
    staff story (staffInfo.formerStudent), never a third type. Stories saved before staff stories existed have no
    storyType and keep reading as student (or general) stories, so nothing older changes. */
-const STORY_TYPES = [{id:'student', label:'Student Impact', tone:'teal'}, {id:'staff', label:'Staff Impact', tone:'purple'}];
-const STAFF_STATUS = [{id:'current', label:'Current staff member'}, {id:'former', label:'Former staff member'}];
-const EMPLOYMENT_TYPES = [{id:'full_time', label:'Full-time'}, {id:'part_time', label:'Part-time'}, {id:'temporary', label:'Temporary'}, {id:'contract', label:'Contract'}, {id:'volunteer', label:'Volunteer'}, {id:'unknown', label:'Unknown'}];
-const FORMER_STUDENT = [{id:'yes', label:'Yes, former ABG student'}, {id:'no', label:'No'}, {id:'unknown', label:'Unknown'}];
 /* the staff impact card: the same employment and development fields on every staff story, so they add up across
    people. Every value carries how sure it is (verified, reported, estimate) and, when Claude found it, the passage
    it came from. A blank field is "not documented", never "no". */
-const STAFF_FIELDS = [
-  {id:'staffStatus', label:'Current or former staff member', short:'Current or former', type:'choice', options:['Current staff','Former staff'], group:'employment'},
-  {id:'role', label:'Current or most recent role at ABG', short:'Role', type:'text', ph:'e.g. Teaching artist', group:'employment'},
-  {id:'firstRole', label:'First position at ABG', short:'First position', type:'text', ph:'e.g. Mural assistant', group:'employment'},
-  {id:'startYear', label:'Year they started working with ABG', short:'Started', type:'text', ph:'e.g. 2019', group:'employment'},
-  {id:'yearsWithAbg', label:'Years working with ABG', short:'Years working with ABG', type:'number', unit:'years', group:'employment'},
-  {id:'opportunityType', label:'Type of opportunity', short:'Opportunity', type:'choice', options:['Paid employment','Paid stipend or internship','Volunteer (unpaid)'], group:'employment'},
-  {id:'employmentType', label:'Employment type', short:'Employment type', type:'choice', options:['Full-time','Part-time','Temporary','Contract','Volunteer'], group:'employment'},
-  {id:'firstJob', label:'ABG was their first paid job', short:'First paid job', type:'choice', options:['Yes','No'], group:'employment'},
-  {id:'positionsHeld', label:'Positions held at ABG', short:'Positions held', type:'number', unit:'positions', group:'employment'},
-  {id:'roleGrowth', label:'Promotion or expanded responsibilities', short:'Role growth', type:'choice', options:['Promoted','Responsibilities expanded','No change'], group:'development'},
-  {id:'skills', label:'Professional or artistic skills developed', short:'Skills developed', type:'text', ph:'e.g. lesson planning, mural design', group:'development'},
-  {id:'trainingReceived', label:'Received training or professional development', short:'Training', type:'choice', options:['Yes','No'], group:'development'},
-  {id:'mentored', label:'Received mentorship at ABG', short:'Mentorship received', type:'choice', options:['Yes','No'], group:'development'},
-  {id:'leadership', label:'Took on leadership responsibilities', short:'Leadership', type:'choice', options:['Yes','No'], group:'development'},
-  {id:'furtherEducation', label:'Further education or certifications', short:'Further education', type:'text', ph:'e.g. art education certificate', group:'development'},
-  {id:'mentorsStudents', label:'Mentors or teaches ABG students', short:'Mentors or teaches students', type:'choice', options:['Yes, mentors students','Yes, teaches or instructs students','No'], group:'community'},
-  {id:'otherEmployment', label:'Went on to other employment', short:'Later employment', type:'text', ph:'e.g. art teacher at a charter school', group:'career'},
-  {id:'inField', label:'Working in the arts, education or nonprofit field', short:'In the field', type:'choice', options:['Yes','No'], group:'career'},
-  {id:'currentStatus', label:'What they are doing now', short:'Doing now', type:'text', ph:'e.g. lead teaching artist at ABG', group:'career'},
-];
-const STAFF_STAGES = [
-  {id: 1, label: 'Background and first involvement'},
-  {id: 2, label: 'Employment opportunities'},
-  {id: 3, label: 'Professional development'},
-  {id: 4, label: 'Personal and community impact'},
-  {id: 5, label: 'Long-term outcomes'},
-];
 /* the student-to-staff journey: only stages the interview supports are kept */
-const JOURNEY_STAGES = [
-  {id:'student', label:'Student participation'},
-  {id:'skills', label:'Skill development'},
-  {id:'employment', label:'Employment opportunity'},
-  {id:'growth', label:'Professional growth'},
-  {id:'community', label:'Community contribution'},
-];
 const STAFF_STAKEHOLDERS = [['donors', 'Donor communications', 'What difference is ABG making in people\'s lives?'], ['grants', 'Grant applications', 'What outcomes justify continued funding?'], ['schools', 'School partnerships', 'What does ABG bring to the schools it works with?'], ['community', 'Community impact reporting', 'How does ABG create opportunity in the community?'], ['consulting', 'Consulting deliverables', 'What does this add to the consulting team\'s analysis?']];
 function blankStaffInfo(){ return {status: '', role: '', startYear: '', employmentType: '', formerStudent: '', firstParticipatedYear: '', programs: '', transitionYear: ''}; }
 function cleanYear(v){ const m = asStr(v).match(/(19|20)\d{2}/); return m ? m[0] : ''; }
@@ -449,6 +304,70 @@ const STATUS_LEGEND = 'Reported means Kyle saw it or someone told him. Estimate 
 function isStudentStory(s){ return !!(s && s.storyType !== 'staff' && (s.studentId || asStr(s.alias))); }
 function storyTypeOf(s){ return isStaffStory(s) ? 'staff' : isStudentStory(s) ? 'student' : 'general'; }
 function storyTypeLabel(s){ const t = storyTypeOf(s); return t === 'general' ? 'General story' : labelOf(STORY_TYPES, t); }
+
+/* ================= community sources =================
+   A story is either an internal interview (Kyle or other ABG staff; no "source" field, so every older story)
+   or a community submission approved by an administrator (source "community"). The contributor (who told it)
+   is kept separate from the participant (who it's about): a parent's observation is about their child. */
+const SUB_STATUS = [
+  {id:'pending_review', label:'Pending review', tone:'warn'},
+  {id:'needs_clarification', label:'Needs clarification', tone:'blue'},
+  {id:'approved', label:'Approved for internal reporting', tone:'good'},
+  {id:'rejected', label:'Rejected / excluded', tone:'neutral'},
+  {id:'removal_requested', label:'Removal requested', tone:'bad'},
+];
+const PUBLICATION = {public_name: 'May be shared publicly with their first name', anonymous: 'May be shared publicly without names', internal: 'Keep within ABG (no public sharing)'};
+const SOURCE_KINDS = [
+  {id:'internal', label:'Staff interview', group:'staff'},
+  {id:'student_self', label:'Student self-report', group:'self'},
+  {id:'alumni_self', label:'Alumni self-report', group:'self'},
+  {id:'staff_self', label:'Staff self-report', group:'self'},
+  {id:'parent_obs', label:'Parent observation', group:'community'},
+  {id:'volunteer_obs', label:'Volunteer observation', group:'community'},
+  {id:'community_obs', label:'Community observation', group:'community'},
+  {id:'community_self', label:'Community member', group:'community'},
+];
+function isCommunity(s){ return !!(s && s.source === 'community'); }
+/* community stories count in reporting only while approved (a contributor's removal request withdraws them at once) */
+function reportable(s){ return !isCommunity(s) || ((s.review || {}).status === 'approved'); }
+function sourceKind(s){
+  if (!isCommunity(s)) return 'internal';
+  const c = s.contributor || {};
+  if (c.perspective === 'self') return c.relationship === 'staff' ? 'staff_self' : c.relationship === 'alumni' ? 'alumni_self' : c.relationship === 'current_student' ? 'student_self' : 'community_self';
+  return c.relationship === 'parent' ? 'parent_obs' : c.relationship === 'volunteer' ? 'volunteer_obs' : 'community_obs';
+}
+function sourceLabel(s){ return labelOf(SOURCE_KINDS, sourceKind(s)); }
+function relationshipOf(s){ return isCommunity(s) ? ((s.contributor || {}).relationship || '') : 'internal'; }
+const CONTRIBUTOR_TYPES = [{id:'internal', label:'ABG staff interview'}].concat(RELATIONSHIPS.map(r => ({id: r.id, label: r.label})));
+function contributorText(s){ const c = s.contributor || {}; return (labelOf(RELATIONSHIPS, c.relationship) || 'Community member') + (c.firstName ? ' (' + c.firstName + ')' : '') + ', ' + (c.perspective === 'self' ? 'own experience' : 'something they witnessed'); }
+function subTranscript(sub){ return (sub.turns || []).map(t => 'Q: ' + t.q + '\nA: ' + (t.status === 'skipped' ? '(skipped)' : t.a)).join('\n\n'); }
+function subName(sub){ const i = sub.intake || {}; return i.perspective === 'witnessed' ? (i.subjectFirstName || '') : (i.firstName || ''); }
+function subTitle(sub){ const a = sub.analysis || {}; return asStr(a.title) || ('Story from a ' + (labelOf(RELATIONSHIPS, sub.relationship) || 'community member').toLowerCase()); }
+/* who saw it: the contributor's own experience is self-reported; what they witnessed is community-observed */
+function communityObserver(intake){ const i = intake || {}; return i.perspective === 'witnessed' ? ({parent: 'parent', volunteer: 'volunteer', friend: 'community'}[i.relationship] || 'other') : 'self'; }
+/* a review draft from a community submission, built with the same normalize / draft steps as Kyle's interviews */
+function draftFromSubmission(sub, me, typeOverride){
+  const raw = clone(sub.analysis || {});
+  const ed = sub.contributor_edits || {};
+  if (Array.isArray(raw.evidence) && Array.isArray(ed.removed)) raw.evidence = raw.evidence.filter((e, i) => !ed.removed.includes(i));
+  if (typeof ed.story === 'string' && ed.story.trim()) raw.story = ed.story;
+  const type = typeOverride || sub.story_type || 'student';
+  const kind = type === 'staff' ? 'staff' : 'student';
+  const items = [{id: 'sub-' + sub.id, text: subTranscript(sub), recordedAt: sub.submitted_at || sub.created_at}];
+  const a = normalizeAnalysis(raw, {items, kind, storyIds: new Set()});
+  const i = sub.intake || {};
+  const staffInfo = kind === 'staff' && i.perspective === 'self' ? {status: i.staffStatus || '', role: i.staffRole || '', formerStudent: i.formerStudent || '', firstParticipatedYear: i.firstParticipatedYear || '', programs: i.studentPrograms || '', transitionYear: i.transitionYear || ''} : null;
+  const d = newStoryFromAnalysis(a, {me, kind, studentName: type === 'general' ? '' : subName(sub), staffInfo});
+  if (type === 'general') { d.alias = ''; delete d.storyType; d.staffCard = undefined; }
+  if (!a.title) d.title = subTitle(sub);
+  const obs = communityObserver(i);
+  /* nobody at ABG has checked a community account yet: it is never staff-observed or verified on arrival */
+  d.evidence = (d.evidence || []).map(e => Object.assign({}, e, {observer: ['abg_staff', 'records', ''].includes(e.observer || '') ? obs : e.observer, status: e.status === 'verified' ? 'reported' : e.status}));
+  d.privacy = Object.assign({}, d.privacy, {minor: sub.is_minor ? 'yes' : d.privacy.minor});
+  if (!d.program && i.programs) d.program = i.programs;
+  d.entryCount = 1;
+  return d;
+}
 function fmtMetric(f, v){
   if (f.type !== 'number') return v;
   const n = toNum(v); if (n == null) return v;
@@ -525,18 +444,9 @@ function dbErrorMessage(e){
 }
 
 /* ================= AI prompts ================= */
-const ABG_CONTEXT = "Arts Bridging the Gap (ABG) is a Los Angeles nonprofit that serves youth from under-resourced communities through arts education, creative programming and community art projects. Kyle is its Executive Director.";
 
 /* the five interview stages: Kyle tells the story first, then focused follow-ups fill the evidence gaps */
-const INTERVIEW_STAGES = [
-  {id: 1, label: 'Background and ABG involvement'},
-  {id: 2, label: 'Most meaningful changes'},
-  {id: 3, label: 'Supporting evidence'},
-  {id: 4, label: "ABG's contribution"},
-  {id: 5, label: 'Current progress and follow-up'},
-];
 /* outcome areas the interviewer listens for (mapped to impact domains in the analysis) */
-const LISTEN_FOR = ['school attendance', 'academic performance', 'high school graduation', 'higher education', 'confidence and creativity', 'emotional well-being and sense of belonging', 'community involvement', 'positive relationships', 'leadership and mentorship', 'career aspirations and opportunities'];
 const INTERVIEW_NOTES_SHAPE = {facts: [], outcomes: [], askedAbout: [], stage: 1};
 function interviewPrompt({name, turns, mode, story, asked, target, memo, info, notes, avoid}){
   const convo = turns.map(t => 'Q (' + t.kind + '): ' + t.q + '\nA: ' + (t.status === 'skipped' ? '[Kyle skipped this question]' : t.a)).join('\n\n');
@@ -611,7 +521,6 @@ Reply with only JSON:
 /* Staff Impact interview: Kyle tells the staff member's story, then follow-ups move through employment,
    professional development, personal and community impact and long-term outcomes. A former ABG student's
    transition from participant to staff is woven into the same interview, never a separate one. */
-const STAFF_LISTEN_FOR = ['paid employment versus volunteering, stipends or internships', 'first employment opportunity', 'responsibilities and role changes', 'how long they have worked with ABG', 'skills developed', 'training or mentorship received', 'leadership responsibilities', 'confidence, independence and sense of purpose', 'contributions to the students ABG serves (mentoring, teaching)', 'further education or certifications', 'later or other employment', 'continuing in the arts, education or nonprofit work'];
 function staffInterviewPrompt({name, turns, mode, story, asked, target, info, notes, avoid}){
   const convo = turns.map(t => 'Q (' + t.kind + '): ' + t.q + '\nA: ' + (t.status === 'skipped' ? '[Kyle skipped this question]' : t.a)).join('\n\n');
   const si = cleanStaffInfo(info || (story && story.staffInfo) || {});
@@ -692,35 +601,6 @@ function questionOverlap(a, b){
   return n / Math.min(A.size, B.size);
 }
 
-const ANALYSIS_SHAPE = `{
-  "title": "4 to 8 word title in sentence case, e.g. From hesitant painter to mural lead",
-  "summary": "2 or 3 sentences for library cards",
-  "story": "the Student Success Story, 200 to 350 words: a concise, compelling narrative covering the student's background, challenges before ABG, how they became involved, their experiences during the program, and the observed changes and outcomes. Warm, engaging and authentic. Mention key outcomes in words, but leave detailed figures to the evidence list. No generic praise, exaggeration or unsupported claims. Leave out any part the interview didn't cover.",
-  "entrySummary": "1 or 2 sentences on what this specific interview adds",
-  "alias": "the student's first name as given, or null",
-  "overview": {"ageOrGrade": "approximate age or grade when involved, or null", "background": "1 or 2 sentences of background relevant to ABG's impact, or null", "involvementDate": "when they were involved with ABG, in Kyle's words, or null"},
-  "metricsCard": {"field id": {"value": "the value; for choice fields one of the listed options exactly", "status": "reported | estimate"}},
-  "isMinor": "yes | no | unknown",
-  "period": "past (months or years ago) | recent",
-  "eventDate": {"text": "when the original experience happened, in Kyle's words, or null", "iso": "YYYY, YYYY-MM or YYYY-MM-DD, or null", "approximate": true},
-  "program": "ABG program or project, or null",
-  "community": "school or community, or null",
-  "takeaways": ["3 to 5 takeaways drawn from what Kyle actually said"],
-  "structure": {"character": "text or null", "circumstances": "text or null", "involvement": "text or null", "events": "text or null", "outcomes": "text or null", "longTerm": "text or null"},
-  "categories": ["category ids"],
-  "themes": ["theme ids"],
-  "stakeholders": {"primary": ["up to 3 audience ids, most relevant first"], "schools": "one sentence: how this student's documented or reported outcomes answer 'How does ABG benefit students at our school?', or null if nothing relevant", "donors": "one sentence answering 'What difference is our contribution making?', or null", "grants": "one sentence answering 'Can ABG demonstrate outcomes that justify continued funding?', naming the evidence level, or null", "why": "Stakeholder value: 2 or 3 sentences on how the documented outcomes show ABG's impact and support donor funding or school partnerships. Claim only what the evidence supports, and say when outcomes are reported or estimated rather than verified."},
-  "evidence": [{"metric": "short name of the outcome, e.g. High school graduation, College enrollment, Field of study, Current job, Returned as instructor, School attendance, Leadership role at ABG, Sessions attended", "domain": "${DOMAINS.map(d => d.id).join(' | ')}", "direction": "achieved (a milestone such as graduating or enrolling) | improved | same | declined | mixed | unclear (only what Kyle said)", "level": "1 personal observation | 2 observable improvement | 3 documented metric (give the number)", "category": "category id", "kind": "numeric for measurable outcomes (numbers, counts, rates, before-and-after comparisons, durations) | qualitative for observations and testimonials", "statement": "what the evidence shows", "value": null, "unit": "students, sessions, hours, percent, years... or null", "before": "the value or situation before ABG, or null", "after": "the value or situation after, or null", "timeframe": "the period compared, e.g. fall 2023 to spring 2024, or null", "status": "reported | estimate | qualitative | unverified | future", "observer": "abg_staff | teacher | school_staff | parent | student | records | other", "basis": "who observed or reported it, e.g. Kyle observed directly; teacher told Kyle; attendance records Kyle mentioned", "observation": "the concrete thing seen or heard that supports it, or null", "activity": "the ABG program or activity involved, or null", "contribution": "how ABG may have contributed, only as Kyle described it, or null (never assume)", "openQuestion": "what is still unknown or should be followed up about this outcome, or null", "inferred": "true only if this outcome is your inference rather than something Kyle stated", "excerpt": "short passage copied word for word from the interview"}],
-  "missingMetrics": [{"metric": "Missing data: an outcome that was mentioned but not quantified or confirmed, or a relevant core metric the interview didn't cover. Kyle has no school records, so phrase record-based items as things ABG or the consulting team could request (e.g. School attendance records could be requested from the school; A teacher statement could confirm the change Kyle observed)", "why": "how it would strengthen the case for stakeholders", "howToGet": "where it might come from"}],
-  "quotes": [{"text": "the words", "speaker": "first name or role, or Narrator", "kind": "exact | remembered | paraphrase"}],
-  "milestones": [{"date": {"text": "when, or null", "iso": "YYYY or YYYY-MM, or null"}, "label": "what happened", "phase": "circumstances | involvement | immediate | short_term | long_term | future", "confirmed": true}],
-  "materials": [{"type": "photo | artwork | video | testimonial | record | survey | other", "description": "what exists and where, as Kyle described it"}],
-  "recommendedFollowUps": ["up to 5 concrete actions, e.g. Verify attendance information with the school"],
-  "followUpQuestions": ["up to 2 questions still open for Kyle, if any"],
-  "possibleLinks": [{"storyId": "id from the other-stories list", "type": "link type id", "reason": "short reason"}],
-  "containsIdentifying": false,
-  "containsSensitive": false
-}`;
 
 function analysisPrompt({mode, story, items, others, whenHint, studentName, memo, studentInfo}){
   const entriesText = items.map((it, i) => '--- Entry ' + (i + 1) + ' (recorded ' + (fmtDate(it.recordedAt) || 'today') + ') ---\n' + it.text).join('\n\n');
@@ -777,37 +657,6 @@ link types: ${LINK_TYPES.filter(l => l.id !== 'same_person').map(l => l.id).join
   ].filter(Boolean).join('\n\n');
 }
 
-const STAFF_ANALYSIS_SHAPE = `{
-  "title": "4 to 8 word title in sentence case, e.g. From mural crew to lead teaching artist",
-  "summary": "2 or 3 sentences for library cards",
-  "story": "the Impact Narrative, 200 to 350 words: a compelling but accurate account of the person's involvement with ABG and how it influenced their life: where they were before, how they became involved, the opportunities ABG provided, how they grew, what they contribute now and where they are today. Warm and specific. Leave out any part the interview didn't cover. No exaggeration of ABG's role.",
-  "entrySummary": "1 or 2 sentences on what this specific interview adds",
-  "alias": "the person's first name as given, or null",
-  "overview": {"background": "1 or 2 sentences on their circumstances before or when joining ABG, relevant to the impact, or null", "involvementDate": "when they were involved with or worked at ABG, in Kyle's words, or null"},
-  "staffCard": {"field id": {"value": "the value; for choice fields one of the listed options exactly", "status": "reported | estimate", "excerpt": "short passage copied word for word from the interview that supports it"}},
-  "journey": [{"stage": "student | skills | employment | growth | community", "text": "one sentence on this stage, only from what the interview says", "excerpt": "supporting passage copied word for word"}],
-  "journeySummary": "for a former ABG student only: 2 or 3 sentences on their progression from ABG student to staff member and what it shows about ABG's long-term impact, without exaggerating ABG's role; otherwise null",
-  "isMinor": "yes | no | unknown",
-  "period": "past (months or years ago) | recent",
-  "eventDate": {"text": "when the story mainly took place, in Kyle's words, or null", "iso": "YYYY, YYYY-MM or YYYY-MM-DD, or null", "approximate": true},
-  "program": "ABG program or project they worked in, or null",
-  "community": "school or community, or null",
-  "takeaways": ["Key Outcomes: 3 to 5 of the most important employment, professional development, personal growth and community outcomes, drawn from what Kyle actually said"],
-  "structure": {"character": "text or null", "circumstances": "text or null", "involvement": "text or null", "events": "text or null", "outcomes": "text or null", "longTerm": "text or null"},
-  "categories": ["category ids"],
-  "themes": ["theme ids"],
-  "stakeholders": {"primary": ["up to 3 audience ids, most relevant first"], "donors": "one sentence on how this story supports donor communications, or null", "grants": "one sentence on how it supports grant applications, naming the evidence level, or null", "schools": "one sentence on how it supports school partnerships, or null", "community": "one sentence on how it supports community impact reporting, or null", "consulting": "one sentence on what it adds to the consulting team's deliverables (for example evidence of employment pathways), or null", "why": "Stakeholder relevance: 2 or 3 sentences. Claim only what the evidence supports, and say when outcomes are reported or estimated rather than verified."},
-  "evidence": [{"metric": "short name of the outcome, e.g. Paid position at ABG, First paid job, Promoted to lead artist, Years with ABG, Mentors students, Training received, Later employment", "domain": "${DOMAINS.map(d => d.id).join(' | ')}", "direction": "achieved (a milestone such as being hired or promoted) | improved | same | declined | mixed | unclear (only what Kyle said)", "level": "1 general impression | 2 specific observed change | 3 counted or dated fact (give it)", "category": "category id", "kind": "numeric for durations, counts, dates and before-and-after comparisons | qualitative for observations and testimonials", "statement": "what the evidence shows", "value": null, "unit": "years, months, positions, students... or null", "before": "the situation before, or null", "after": "the situation after, or null", "timeframe": "the period, e.g. 2019 to 2024, or null", "status": "reported | estimate | qualitative | unverified | future", "observer": "abg_staff | student | other", "basis": "how it is known, e.g. Kyle observed directly; the staff member told Kyle", "observation": "the concrete thing seen or heard, or null", "activity": "the ABG program, role or activity involved, or null", "contribution": "how ABG may have contributed, only as Kyle described it, or null", "openQuestion": "what is still unknown, or null", "paid": "yes | no | unknown: for employment outcomes, whether the opportunity was paid, only if the interview says", "inferred": "true only if this outcome is your inference rather than something Kyle stated", "excerpt": "short passage copied word for word from the interview"}],
-  "missingMetrics": [{"metric": "Missing data: an outcome mentioned but not dated, quantified or confirmed (e.g. Start date of first paid position not documented; Whether the role was paid is unknown). Kyle doesn't need records, so phrase record-based items as things ABG could look up later", "why": "how it would strengthen the case", "howToGet": "where it might come from"}],
-  "quotes": [{"text": "the words", "speaker": "first name or role, or Narrator", "kind": "exact | remembered | paraphrase"}],
-  "milestones": [{"date": {"text": "when, or null", "iso": "YYYY or YYYY-MM, or null"}, "label": "what happened (e.g. Joined ABG mural program as a student; Hired as a paid mural assistant; Promoted to lead teaching artist)", "phase": "circumstances | involvement | immediate | short_term | long_term | future", "confirmed": true}],
-  "materials": [{"type": "photo | artwork | video | testimonial | record | survey | other", "description": "what exists and where, as Kyle described it"}],
-  "recommendedFollowUps": ["up to 5 concrete actions, e.g. Confirm the year the paid position began from ABG payroll records"],
-  "followUpQuestions": ["up to 2 questions still open for Kyle, if any"],
-  "possibleLinks": [{"storyId": "id from the other-stories list", "type": "link type id", "reason": "short reason"}],
-  "containsIdentifying": false,
-  "containsSensitive": false
-}`;
 function staffAnalysisPrompt({mode, story, items, others, whenHint, name, staffInfo}){
   const entriesText = items.map((it, i) => '--- Entry ' + (i + 1) + ' (recorded ' + (fmtDate(it.recordedAt) || 'today') + ') ---\n' + it.text).join('\n\n');
   const si = cleanStaffInfo(staffInfo || (story && story.staffInfo) || {});
@@ -1017,7 +866,7 @@ function reportPrompt(stories, metrics){
   const S = approved.map((s, i) => {
     const name = externalName(s);
     const obj = {
-      ref: 'S' + (i + 1), storyType: storyTypeLabel(s), title: s.title, [isStaffStory(s) ? 'staffMember' : 'student']: name || (isStaffStory(s) ? 'a staff member (no name)' : 'a student (no name)'), when: fmtEventDate(s.eventDate) || null, program: s.program || null,
+      ref: 'S' + (i + 1), storyType: storyTypeLabel(s), source: isCommunity(s) ? 'Community submission: ' + sourceLabel(s) : 'ABG staff interview', title: s.title, [isStaffStory(s) ? 'staffMember' : 'student']: name || (isStaffStory(s) ? 'a staff member (no name)' : 'a student (no name)'), when: fmtEventDate(s.eventDate) || null, program: s.program || null,
       formerAbgStudent: isStaffStory(s) ? isFormerStudent(s) : undefined, studentToStaffJourney: isStaffStory(s) && s.journeySummary ? s.journeySummary : undefined,
       employmentFacts: isStaffStory(s) ? STAFF_FIELDS.filter(f => staffVal(s, f.id)).map(f => f.label + ': ' + staffVal(s, f.id).value + ' (' + staffVal(s, f.id).status + ')') : undefined,
       community: needsRedaction(s) ? null : (s.community || null), impactStory: trunc(s.story || s.summary, 1800), takeaways: s.takeaways || [],
@@ -1069,6 +918,7 @@ Rules:
 - Keep storytelling clearly separate from validated numbers.
 - Never add together numbers from different stories; several stories can describe the same student or program.
 - Describe outcomes as observed or reported, not as caused by ABG unless a story says so. Pending timeline items are not accomplishments.
+- Community submissions are the contributor's own account (self-reported) or what they witnessed (community-observed). Present them that way, never as staff observations or verified records.
 - Refer to students only by the name given in each story's "student" field, and staff members only by the name in "staffMember".
 - Staff figures count unique staff members documented in this journal, not all ABG employees, and documented opportunities, not every job ABG has created. A person and a position are different: never present the number of people as the number of jobs. Unknown values are not zero.
 - For stories with sensitiveDetailsAllowed false, never mention gang involvement, the justice system, substance use or other stigmatizing experiences, even if the impact story text does.
@@ -1217,7 +1067,8 @@ function toCSV(cols, rows){ return '﻿' + [cols.map(c => csvCell(c[0])).join(',
 const lbls = (list, ids) => (ids || []).map(id => labelOf(list, id)).join('; ');
 function storiesCSV(stories){
   return toCSV([
-    ['Story ID', s => s.id], ['Story type', s => storyTypeLabel(s)], ['Student record ID', s => s.studentId], ['Staff record ID', s => s.staffId], ['First name', s => s.alias], ['Public alias', s => s.publicName], ['Title', s => s.title], ['Status', s => labelOf(STATUSES, s.status)], ['Type', s => s.period === 'past' ? 'Historical' : 'Recent'],
+    ['Story ID', s => s.id], ['Story type', s => storyTypeLabel(s)], ['Source', s => isCommunity(s) ? 'Community submission' : 'Internal interview'], ['Source type', s => sourceLabel(s)],
+    ['Contributor relationship', s => isCommunity(s) ? labelOf(RELATIONSHIPS, (s.contributor || {}).relationship) : 'ABG staff'], ['Review status', s => isCommunity(s) ? (reportable(s) ? 'Approved for internal reporting' : 'Withdrawn') : labelOf(STATUSES, s.status)], ['Student record ID', s => s.studentId], ['Staff record ID', s => s.staffId], ['First name', s => s.alias], ['Public alias', s => s.publicName], ['Title', s => s.title], ['Status', s => labelOf(STATUSES, s.status)], ['Type', s => s.period === 'past' ? 'Historical' : 'Recent'],
     ['Staff role', s => isStaffStory(s) ? ((staffVal(s, 'role') || {}).value || (s.staffInfo || {}).role || '') : ''], ['Current or former staff', s => isStaffStory(s) ? labelOf(STAFF_STATUS, (s.staffInfo || {}).status) : ''], ['Former ABG student', s => isStaffStory(s) ? (labelOf(FORMER_STUDENT, (s.staffInfo || {}).formerStudent) || 'Unknown') : ''],
     ['When it happened', s => fmtEventDate(s.eventDate)], ['Sort date', s => s.eventDate && s.eventDate.iso], ['Approximate date', s => s.eventDate && s.eventDate.approximate ? 'Yes' : 'No'],
     ['Gender', s => (s.overview || {}).gender ? labelOf(GENDERS, s.overview.gender) : ''], ['Age or grade', s => (s.overview || {}).ageOrGrade], ['Other details', s => (s.overview || {}).demographics], ['Program', s => s.program], ['Metrics known', s => isStudentStory(s) ? metricsKnown(s) + ' of ' + METRIC_FIELDS.length : isStaffStory(s) ? staffKnown(s) + ' of ' + STAFF_FIELDS.length + ' (staff card)' : ''], ['School or community', s => s.community], ['Summary', s => s.summary], ['Impact story', s => s.story],
@@ -1257,6 +1108,13 @@ function impactRecords(stories){
   return stories.map(s => ({
     storyId: s.id, demo: !!s.demo, storyType: storyTypeLabel(s), student: isStaffStory(s) ? null : n(s.alias), studentRecordId: n(s.studentId), title: n(s.title), status: labelOf(STATUSES, s.status),
     approvedForExternalUse: s.status === 'approved',
+    participantId: isStaffStory(s) ? (s.staffId ? 'staff:' + s.staffId : 'story:' + s.id) : isStudentStory(s) ? (s.studentId ? 'student:' + s.studentId : 'story:' + s.id) : null,
+    source: isCommunity(s) ? 'Community submission' : 'Internal interview', sourceType: sourceLabel(s),
+    contributor: isCommunity(s) ? {submissionId: n(s.submissionId), relationship: labelOf(RELATIONSHIPS, (s.contributor || {}).relationship) || null, perspective: (s.contributor || {}).perspective === 'self' ? 'Firsthand (own experience)' : 'Observed (witnessed)', firstName: n((s.contributor || {}).firstName)} : {submissionId: null, relationship: 'ABG staff', perspective: 'Staff interview', firstName: null},
+    reviewStatus: isCommunity(s) ? (reportable(s) ? 'Approved for internal reporting' : 'Withdrawn by contributor') : labelOf(STATUSES, s.status),
+    lastReviewedBy: n((s.review || {}).by), lastReviewedDate: n((s.review || {}).at),
+    publicationConsent: isCommunity(s) ? (PUBLICATION[(s.publication || {}).choice] || null) : null,
+    linkedAccounts: (s.links || []).filter(l => l.type === 'same_person').map(l => ({storyId: l.storyId, comparison: l.comparison ? labelOf(COMPARISON, l.comparison) : null})),
     staff: isStaffStory(s) ? staffRecord(s, n) : null,
     program: n(s.program), schoolOrCommunity: n(s.community), when: n(fmtEventDate(s.eventDate)), recorded: n(s.createdAt), lastUpdated: n(s.updatedAt),
     outcomes: (s.evidence || []).map(e => ({
@@ -1603,6 +1461,7 @@ function storyMarkdown(s, entries){
   const ov = s.overview || {};
   const staff = isStaffStory(s);
   const out = ['# ' + s.title, '', 'INTERNAL ' + (staff ? 'STAFF' : 'STUDENT') + ' IMPACT REPORT. Contains full transcripts. Status: ' + labelOf(STATUSES, s.status) + '.', ''];
+  if (isCommunity(s)) out.push('**Source:** community submission (' + contributorText(s) + '). ' + (reportable(s) ? 'Approved for internal reporting' : 'Withdrawn by the contributor') + ((s.review || {}).by ? ' by ' + s.review.by : '') + '. Public sharing: ' + (PUBLICATION[(s.publication || {}).choice] || 'not recorded') + '.', '');
   if (staff) {
     const si = cleanStaffInfo(s.staffInfo);
     out.push('## Staff overview');
@@ -1816,6 +1675,10 @@ const ICONS = {
   monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
   compass: '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>',
+  inbox: '<path d="M3 13l2.5-8h13L21 13v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/>',
+  qr: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 17h3v3h-3"/>',
+  scale: '<path d="M12 3v18M5 7h14M7 21h10"/><path d="M5 7l-3 7a3.5 3.5 0 0 0 6 0L5 7zM19 7l-3 7a3.5 3.5 0 0 0 6 0l-3-7z"/>',
+  share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',
   briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7M3 12.5h18M10.5 12.5v2h3v-2"/>',
   users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.2 5 2.6 5 5.8"/>',
 };
@@ -1913,20 +1776,24 @@ const NAV = [
   {id: 'interview', label: 'Capture a Story', icon: 'edit'},
   {id: 'library', label: 'Story Library', icon: 'doc'},
   {id: 'insights', label: 'Impact Insights', icon: 'chart'},
+  {id: 'submissions', label: 'Community Submissions', icon: 'inbox'},
+  {id: 'compare', label: 'Source Comparison', icon: 'scale'},
+  {id: 'invite', label: 'Invite Contributors', icon: 'share'},
   {id: 'guide', label: 'Interview Guide', icon: 'compass'},
 ];
 const STORIES_ROUTES = ['library', 'story', 'backlog', 'followups'];
-function isCurrent(route, id){ if (id === 'library') return STORIES_ROUTES.includes(route.name); if (id === 'insights') return route.name === 'insights' || route.name === 'reports'; return route.name === id; }
+function isCurrent(route, id){ if (id === 'library') return STORIES_ROUTES.includes(route.name); if (id === 'insights') return route.name === 'insights' || route.name === 'reports'; if (id === 'submissions') return route.name === 'submissions' || route.name === 'submission'; return route.name === id; }
 function initialsOf(name){ const p = asStr(name).split(/[\s._-]+/).filter(Boolean); return ((p[0] || '?')[0] + (p[1] ? p[1][0] : '')).toUpperCase(); }
 function Sidebar(){
-  const {route, nav, readOnly, stories, caps, openSheet} = useApp();
+  const {route, nav, readOnly, stories, caps, openSheet, subs} = useApp();
   const due = countDue(stories);
+  const pending = subs.filter(x => x.status === 'pending_review' || x.status === 'removal_requested').length;
   const me = caps.me || {};
   const shown = asStr(me.name) || firstNameOf(window.__platform && window.__platform.email) || 'Signed in';
   return html`<aside className="sidebar">
     <button className="side-logo" onClick=${() => nav('home')} aria-label="Overview"><${Brand} /></button>
     <nav className="side-nav" aria-label="Main">
-      ${NAV.filter(n => !(readOnly && n.id === 'interview')).map(n => html`<button key=${n.id} className="side-link" aria-current=${isCurrent(route, n.id) ? 'page' : undefined} onClick=${() => nav(n.id)}><${Icon} name=${n.icon} /><span>${n.label}</span>${n.id === 'library' && due > 0 ? html`<span className="badge" title=${due + ' follow-ups due'}>${due}</span>` : null}</button>`)}
+      ${NAV.filter(n => !(readOnly && n.id === 'interview')).map(n => html`<button key=${n.id} className="side-link" aria-current=${isCurrent(route, n.id) ? 'page' : undefined} onClick=${() => nav(n.id)}><${Icon} name=${n.icon} /><span>${n.label}</span>${n.id === 'library' && due > 0 ? html`<span className="badge" title=${due + ' follow-ups due'}>${due}</span>` : null}${n.id === 'submissions' && pending > 0 ? html`<span className="badge" title=${pending + ' waiting for review'}>${pending}</span>` : null}</button>`)}
     </nav>
     <div className="side-bottom">
       <button className="side-link" aria-current=${route.name === 'settings' ? 'page' : undefined} onClick=${() => nav('settings')}><${Icon} name="gear" /><span>Settings</span></button>
@@ -2237,13 +2104,16 @@ function InsightsOverview({list, filterBar, period}){
     </section>
 
     <${StaffImpactSection} list=${list} period=${period} />
+    <${CommunityPerspectivesSection} list=${list} period=${period} />
+    <${SourceComparisonSection} list=${list} />
 
     <details className="sec ins-rules"><summary><span>How these numbers are counted</span><${Icon} name="chev" size=${18} /></summary><div className="sec-body small">
-      <p><strong>Reporting period:</strong> stories first recorded ${period}. Filters narrow it further.</p>
+      <p><strong>Reporting period:</strong> stories first recorded ${period} (community stories by the date they were submitted). Filters narrow it further.</p>
+      <p><strong>Eligible records:</strong> internal interviews, and community stories only after an administrator approves them. Pending, rejected and withdrawn community submissions are never counted.</p>
       <p><strong>Students:</strong> each student is counted once, by student record. A story without a student record counts once under its first name. General stories (not about one student) count as stories but not students. Staff Impact stories are counted in their own section, never as students.</p>
       <p><strong>Denominators:</strong> student figures are out of the ${N} students documented in this view; evidence figures are out of the ${R} outcome records in this view.</p>
       <p><strong>Outcomes:</strong> a student counts once per area when at least one outcome record shows achievement, improvement, or a mixed or unspecified positive change, or when their metrics card says so (source not recorded, so it counts as unconfirmed). No-change and declines are shown separately. Planned or hoped-for outcomes are never counted.</p>
-      <p><strong>Evidence types:</strong> verified by documentation (only when staff checked a document), directly observed by staff, reported by the student or a third party, or unconfirmed or inferred. Kyle's confident account alone is never treated as verified.</p>
+      <p><strong>Evidence types:</strong> independently verified (only when staff checked a record or independent document), staff-observed (an authorized ABG staff member saw it), self-reported (the person describing their own experience), community-observed (a parent, teacher, volunteer or supporter describing what they witnessed or were told), or unconfirmed or inferred. A confident account from staff is never treated as verified on its own, and agreement between several accounts is not verification either.</p>
       <p><strong>Not a representative sample:</strong> these are the students ABG staff chose to record. The figures describe them, not all ABG students, and are not rates for ABG as a whole.</p>
     </div></details>
   </div>`;
@@ -2339,7 +2209,8 @@ function DashboardView({tab: initial}){
   const demoN = stories.filter(x => x.demo).length;
   const [tab, setTab] = useState(initial || 'overview');
   const [range, setRange] = useState(() => lsGet('abg-ins-range') || '12m');
-  const [f, setF] = useState({type: '', program: '', grade: '', school: '', outcome: ''});
+  const BLANK = {type: '', source: '', contributor: '', evidence: '', verified: '', program: '', grade: '', school: '', outcome: ''};
+  const [f, setF] = useState(BLANK);
   const setFilter = (k, v) => setF(x => Object.assign({}, x, {[k]: v}));
   useEffect(() => { lsSet('abg-ins-range', range); }, [range]);
   if (tab === 'reports') return html`<div className="view">
@@ -2349,8 +2220,11 @@ function DashboardView({tab: initial}){
   const days = (byId(RANGES, range) || {}).days || 0;
   const since = days ? new Date(Date.now() - days * 864e5).toISOString() : '';
   const period = since ? 'from ' + fmtDate(since) + ' to today' : 'at any time';
-  const inRange = stories.filter(s => !since || (s.createdAt || '') >= since);
-  const list = inRange.filter(s => (!f.type || storyTypeOf(s) === f.type) && (!f.program || s.program === f.program) && (!f.school || s.community === f.school) && (!f.grade || gradeBucket(s) === f.grade) && (!f.outcome || storyOutcomes(s).has(f.outcome)));
+  /* only eligible records: internal interviews, and community stories an administrator approved */
+  const inRange = stories.filter(reportable).filter(s => !since || (s.createdAt || '') >= since);
+  const hasClass = (s, c) => (s.evidence || []).some(e => e.status !== 'future' && evidenceClass(e) === c);
+  const list = inRange.filter(s => (!f.type || storyTypeOf(s) === f.type) && (!f.source || (f.source === 'community') === isCommunity(s)) && (!f.contributor || relationshipOf(s) === f.contributor)
+    && (!f.evidence || hasClass(s, f.evidence)) && (!f.verified || (f.verified === 'yes') === hasClass(s, 'verified')) && (!f.program || s.program === f.program) && (!f.school || s.community === f.school) && (!f.grade || gradeBucket(s) === f.grade) && (!f.outcome || storyOutcomes(s).has(f.outcome)));
   const programs = uniq(stories.map(s => asStr(s.program))).sort();
   const schools = uniq(stories.map(s => asStr(s.community))).sort();
   const active = Object.values(f).some(Boolean);
@@ -2367,11 +2241,15 @@ function DashboardView({tab: initial}){
     <${InsightsOverview} list=${list} period=${period} filterBar=${html`<div className="filter-bar">
       <span className="filter-label">Filter by:</span>
       ${sel('type', 'Story type', [['student', 'Student Impact'], ['staff', 'Staff Impact']])}
+      ${sel('source', 'Source', [['internal', 'Internal interviews'], ['community', 'Community submissions']])}
+      ${sel('contributor', 'Contributor type', CONTRIBUTOR_TYPES.map(c => [c.id, c.label]))}
+      ${sel('evidence', 'Evidence type', EVIDENCE_CLASSES.map(c => [c.id, c.label]))}
+      ${sel('verified', 'Verification', [['yes', 'Has independently verified outcomes'], ['no', 'No verified outcomes yet']])}
       ${sel('program', 'Program', programs.map(p => [p, p]))}
       ${sel('grade', 'Grade level', GRADE_BUCKETS.map(g => [g.id, g.label]))}
       ${sel('school', 'School', schools.map(p => [p, p]))}
       ${sel('outcome', 'Outcome', ACTIVE_OUTCOMES.map(o => [o.id, o.label]))}
-      ${active ? html`<button className="btn btn-quiet btn-sm" onClick=${() => setF({type: '', program: '', grade: '', school: '', outcome: ''})}>Clear</button>` : null}
+      ${active ? html`<button className="btn btn-quiet btn-sm" onClick=${() => setF(BLANK)}>Clear</button>` : null}
     </div>`} />
     <details className="sec ins-more"><summary><span>More evidence details: milestones, metrics card, themes<span className="count">All stories</span></span><${Icon} name="chev" size=${18} /></summary>
       <div className="sec-body"><${InsightsView} embedded=${true} /></div>
@@ -2394,6 +2272,7 @@ function StoryCard({story, why}){
     <div className="sc-top">
       ${story.demo ? html`<${DemoPill} />` : null}
       <${TypePill} story=${story} />
+      ${isCommunity(story) ? html`<${Pill} tone=${reportable(story) ? 'purple' : 'bad'}>${reportable(story) ? 'Community · ' + sourceLabel(story) : 'Withdrawn by contributor'}<//>` : null}
       <${StatusPill} status=${story.status} />
       ${story.period === 'past' ? html`<${Pill} tone="orange">Historical<//>` : null}
       ${updates > 0 ? html`<${Pill} tone="blue">${updates} update${updates > 1 ? 's' : ''}<//>` : null}
@@ -2445,7 +2324,9 @@ function RecentStoryRow({story, i}){
   </div>`;
 }
 function HomeView(){
-  const {caps, stories, storiesLoaded, nav, readOnly} = useApp();
+  const {caps, stories: allStoriesShown, storiesLoaded, nav, readOnly, subs, subsState, isAdmin} = useApp();
+  const stories = allStoriesShown.filter(reportable);
+  const pending = subs.filter(x => x.status === 'pending_review').length;
   const first = firstNameOf(caps.me && caps.me.name) || firstNameOf(window.__platform && window.__platform.email) || firstNameOf(caps.me && caps.me.email);
   const recent = stories.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5);
   const studentsN = studentProfiles(stories).length;
@@ -2476,6 +2357,15 @@ function HomeView(){
       ${staffN ? stat('briefcase', 'blue', 'Staff featured', staffN, 'Unique staff members', 'insights') : null}
       ${stat('bars', 'orange', 'Outcomes recorded', outcomesN, 'Reported outcomes', 'insights')}
     </div>
+    ${subsState !== 'none' ? html`<section className="card home-community">
+      <div className="hc-text"><h2>Community stories</h2>
+        <p className="small muted">${subsState === 'missing' ? 'The Share Your Story page is not set up on the server yet.' : pending ? pending + ' submission' + (pending === 1 ? '' : 's') + ' waiting for review.' : 'Invite students, alumni, staff, parents and volunteers to share their own stories.'}</p></div>
+      <div className="row-btns">
+        <button className="btn btn-ghost btn-sm" id="home-subs" onClick=${() => nav('submissions')}><${Icon} name="inbox" size=${16} /> Community Submissions${pending ? html` <span className="badge">${pending}</span>` : null}</button>
+        <button className="btn btn-ghost btn-sm" onClick=${() => nav('invite')}><${Icon} name="share" size=${16} /> Invite Contributors</button>
+        <button className="btn btn-ghost btn-sm" onClick=${() => nav('compare')}><${Icon} name="scale" size=${16} /> Source Comparison</button>
+      </div>
+    </section>` : null}
     <section className="recent">
       <div className="sec-head"><h2>Recent Stories</h2>${stories.length ? html`<button className="btn btn-quiet btn-sm view-all" onClick=${() => nav('library')}>View all <span aria-hidden="true">→</span></button>` : null}</div>
       ${!storiesLoaded ? html`<div className="skeleton"></div>`
@@ -2556,6 +2446,28 @@ function GuideContent({compact, kind}){
       <details className="guide-step"><summary><span className="step-title">Optional prompts for a staff story</span><${Icon} name="chev" size=${16} /></summary>
         <div className="step-body">${GUIDE_STAFF.prompts.map(x => html`<div key=${x.title} className="gs-prompt"><p className="eyebrow">${x.title}</p><blockquote className="guide-prompt">${x.prompt}</blockquote><div className="row-btns"><${CopyButton} text=${x.prompt} label="Copy prompt" /></div></div>`)}</div>
       </details>
+    <//>
+    <${GuideSec} id="community" title="Community stories: review and compare" sub="for ABG staff" open=${false}>
+      <p className="small">Students, alumni, staff, parents, volunteers and friends can share their own stories on the Share Your Story page. Their interviews go through the same outcome extraction as yours, then wait for an administrator.</p>
+      <div className="guide-cards guide-staff">
+        <div className="guide-card"><h3>Review a submission</h3><ol className="small guide-list"><li>Open Community Submissions and pick one under Pending review.</li><li>Read the contributor's answers in the transcript.</li><li>Check each outcome Claude found against their words. Remove anything they didn't really say, and fix the story type if needed.</li><li>Approve it for internal reporting, ask the contributor a question, or exclude it (for example as a duplicate).</li></ol></div>
+        <div className="guide-card"><h3>Evidence and sharing</h3><ul className="small guide-list"><li>Someone describing their own experience is a <strong>self-reported</strong> outcome. A parent, volunteer or friend describing what they saw is <strong>community-observed</strong>.</li><li>Nothing is <strong>independently verified</strong> until someone at ABG checks a record.</li><li>Internal approval is not permission to publish. Public use follows the contributor's own choice, and never names someone under 18.</li></ul></div>
+        <div className="guide-card"><h3>Source Comparison</h3><ul className="small guide-list"><li>When your interview and a community story may describe the same person, the journal lists them as a possible match. It never links them for you.</li><li>Compare the accounts, then link them only if you know it's the same person. Mark them consistent, complementary, conflicting or insufficient evidence.</li><li>Linked accounts count as one person. Conflicting accounts stay visible as told.</li></ul></div>
+      </div>
+      <p className="notice small guide-warn"><strong>Don't overstate the evidence.</strong> Count people, not stories. Several people saying the same thing makes a story stronger but doesn't verify it. Journal figures describe the people who shared stories, not all ABG participants.</p>
+    <//>
+    <${GuideSec} id="portal" title="The Share Your Story page" sub="what contributors see" open=${false}>
+      <p className="small">Plain-language answers you can pass on to anyone you invite. The same points appear on the page itself.</p>
+      <ul className="small guide-list">
+        <li><strong>What it is:</strong> a short, guided conversation about how ABG has made a difference, for students, alumni, staff, parents, volunteers and friends. No account is needed.</li>
+        <li><strong>Why ABG asks:</strong> to understand and show funders, schools and partners the difference its programs make.</li>
+        <li><strong>How to begin:</strong> open the link or scan the QR code, press Get Started, and answer a few questions about how you know ABG.</li>
+        <li><strong>Talk or type:</strong> answer out loud (your words become text and the recording is deleted) or type in a chat. Both work the same way.</li>
+        <li><strong>Skip anything:</strong> every question can be skipped, and "I don't know" is a fine answer.</li>
+        <li><strong>How it's used:</strong> ABG staff read every story. It's only shared publicly if the contributor says yes, and never with the name of anyone under 18.</li>
+        <li><strong>Changes later:</strong> after sending, contributors get a private link to check the status, answer ABG's questions, correct their story or ask for it to be removed.</li>
+        <li><strong>Under 18:</strong> students under 18 need a personal invitation from ABG, created after a parent or guardian gives permission.</li>
+      </ul>
     <//>
     <${GuideSec} id="script" title=${'Guided storytelling script' + (kind === 'staff' ? ' (student stories)' : '')} sub="5 prompts, optional" open=${!!compact && kind !== 'staff'}>
       <p className="small muted">Use these as a guide if it helps. You don't need to read them word for word, follow the order, or fill every blank.</p>
@@ -3589,9 +3501,17 @@ function StoryEditor({draft, setDraft, items, mode}){
 /* the short review Kyle sees before saving: fix the story, drop outcomes that aren't supported, confirm how each is known */
 const SOURCE_CHOICES = [
   {id: 'observed', label: 'I saw it myself'},
-  {id: 'reported', label: 'The student or someone else told me'},
+  {id: 'self', label: 'The person told me about their own experience'},
+  {id: 'community', label: 'A parent, teacher or someone else told me'},
   {id: 'verified', label: 'Confirmed by a document'},
   {id: 'unconfirmed', label: 'Not sure, or my impression'},
+];
+/* in a community story, the contributor is the source: their own experience is self-reported; what they witnessed is community-observed */
+const COMMUNITY_SOURCE_CHOICES = [
+  {id: 'self', label: 'Self-reported (their own experience)'},
+  {id: 'community', label: 'Community-observed (they witnessed it)'},
+  {id: 'verified', label: 'Independently verified by a document'},
+  {id: 'unconfirmed', label: 'Unconfirmed or secondhand'},
 ];
 function QuickReview({draft, setDraft, mode}){
   const {settings, stories} = useApp();
@@ -4076,10 +3996,12 @@ function StoryView({id}){
   return html`<div className="view story">
     <div className="crumbs"><button className="btn btn-quiet btn-sm" onClick=${() => nav('library')}><${Icon} name="back" size=${16} /> Story Library</button></div>
     ${story.demo ? html`<p className="notice demo-note small"><strong>Fictional demo story.</strong> This student, school and outcomes are invented to show how a recorded story becomes impact evidence. Demo stories are left out of reports and exports unless included in Settings.</p>` : null}
+    ${isCommunity(story) && !reportable(story) ? html`<div className="banner banner-bad"><${Icon} name="trash" size=${22} /><div><strong>The contributor asked ABG to remove this story.</strong><p className="small">It's left out of Impact Insights and reports. An administrator should delete it from Community Submissions.</p></div>${story.submissionId ? html`<button className="btn btn-primary btn-sm" onClick=${() => nav('submission', {id: story.submissionId})}>Open submission</button>` : null}</div>` : null}
     <header className="story-head">
       <div className="chips">
         ${story.demo ? html`<${DemoPill} />` : null}
         <${TypePill} story=${story} />
+        ${isCommunity(story) ? html`<${Pill} tone="purple">Community · ${sourceLabel(story)}<//>` : null}
         <${StatusPill} status=${story.status} />
         ${story.period === 'past' ? html`<${Pill} tone="orange">Historical<//>` : null}
         ${updates > 0 ? html`<${Pill} tone="blue">${updates} update${updates > 1 ? 's' : ''}<//>` : null}
@@ -4106,6 +4028,17 @@ function StoryView({id}){
       <button className="btn btn-primary btn-sm" onClick=${() => openSheet(close => html`<${AnswerSheet} storyId=${id} close=${close} />`)}>Answer</button>
     </div>` : null}
 
+    ${isCommunity(story) ? html`<section className="card source-card">
+      <h2>Source</h2>
+      <dl className="overview">
+        <div><dt>Source</dt><dd>Community submission (Share Your Story)</dd></div>
+        <div><dt>Contributor</dt><dd>${contributorText(story)}</dd></div>
+        <div><dt>Evidence</dt><dd>${(story.contributor || {}).perspective === 'self' ? 'Self-reported' : 'Community-observed'} unless ABG later verifies an outcome against a record</dd></div>
+        <div><dt>Public sharing</dt><dd>${PUBLICATION[(story.publication || {}).choice] || 'Not recorded'}${(story.publication || {}).choice && story.publication.choice !== 'internal' ? (story.publication.confirmed ? ' (checked by ABG)' : ' (not yet checked by ABG)') : ''}</dd></div>
+        <div><dt>Review</dt><dd>${reportable(story) ? 'Approved for internal reporting' : 'Withdrawn'}${(story.review || {}).by ? ' by ' + story.review.by : ''}${(story.review || {}).at ? ' on ' + fmtDate(story.review.at) : ''}</dd></div>
+      </dl>
+      ${story.submissionId ? html`<div><button className="btn btn-ghost btn-sm" onClick=${() => nav('submission', {id: story.submissionId})}><${Icon} name="inbox" size=${16} /> Open the submission and its review history</button></div>` : null}
+    </section>` : null}
     ${staff ? html`<section className="card">
       <h2>Staff overview</h2>
       <dl className="overview">${staffRows.map(r => html`<div key=${r[0]}><dt>${r[0]}</dt><dd>${r[1]}</dd></div>`)}</dl>
@@ -4144,7 +4077,7 @@ function StoryView({id}){
 
     <section className="card">
       <div className="sec-head"><h2>Supporting evidence</h2>${!readOnly ? html`<button className="btn btn-quiet btn-sm" onClick=${() => openSheet(close => html`<${AddEvidenceSheet} storyId=${id} close=${close} kind="qualitative" />`)}><${Icon} name="plus" size=${16} /> Add</button>` : null}</div>
-      <p className="small muted">Every outcome shows its evidence type: verified by documentation, directly observed by staff, reported by the student or a third party, or unconfirmed. Verified is only for things checked against a document.</p>
+      <p className="small muted">Every outcome shows its evidence type: independently verified, staff-observed, self-reported, community-observed, or unconfirmed. Verified is only for things checked against a record or independent document.</p>
       ${comparisons.length ? html`<details className="ev-more"><summary className="small">Sources for the ${comparisons.length} before-and-after outcome${comparisons.length > 1 ? 's' : ''}</summary>${comparisons.map(r => html`<${EvidenceRow} key=${r.e.id} ev=${r.e} entries=${entries} readOnly=${readOnly} onStatus=${v => setEvStatus(r.i, v)} />`)}</details>` : null}
       ${others.length === 0 ? html`<p className="empty-note small">No other observations recorded.</p>` : others.map(r => html`<${EvidenceRow} key=${r.e.id} ev=${r.e} entries=${entries} readOnly=${readOnly} onStatus=${v => setEvStatus(r.i, v)} />`)}
       ${(story.quotes || []).length > 0 ? html`<div className="ev-group">
@@ -4307,6 +4240,563 @@ function MetricsCardView({story, readOnly, onEdit, embedded}){
     <dl className="mc-view">${rows.map(r => html`<div key=${r.f.id} className=${r.m ? '' : 'is-unknown'}><dt>${r.f.label}</dt><dd>${r.m ? html`<span>${fmtMetric(r.f, r.m.value)}</span> <${MetricPill} status=${r.m.status} />` : html`<span className="muted">Unknown</span>`}</dd></div>`)}</dl>
   </section>`;
 }
+/* ================= Community Submissions (review queue) =================
+   Stories sent through the public portal wait here. They never reach Impact Insights until an administrator
+   approves them; approval turns the submission into an ordinary journal story (source "community") built with
+   the same draft, review and evidence model as Kyle's interviews. The database only lets administrators change
+   a submission, and every status change is recorded in its history. */
+function SubStatusPill({status}){ const s = byId(SUB_STATUS, status) || {label: status, tone: 'neutral'}; return html`<${Pill} tone=${s.tone} dot=${true}>${s.label}<//>`; }
+function SubmissionsView(){
+  const {subs, subsState, reloadSubs, nav, isAdmin} = useApp();
+  const [tab, setTab] = useState('pending_review');
+  useEffect(() => { reloadSubs(); }, []);
+  const count = id => subs.filter(x => x.status === id).length;
+  const list = subs.filter(x => x.status === tab).sort((a, b) => (b.submitted_at || '').localeCompare(a.submitted_at || ''));
+  return html`<div className="view subs">
+    <header className="page-head row-between"><div><h1>Community Submissions</h1><p className="muted">Stories shared through the Share Your Story page. They count in Impact Insights only after an administrator approves them.</p></div>
+      <button className="btn btn-ghost btn-sm" onClick=${() => nav('invite')}><${Icon} name="share" size=${16} /> Invite contributors</button></header>
+    ${!isAdmin ? html`<p className="notice small">You can read submissions. Only administrators can approve, reject or ask contributors questions.</p>` : null}
+    ${subsState === 'missing' ? html`<p className="notice">Community submissions aren't set up on the server yet. An administrator needs to run <code>supabase/community.sql</code> in Supabase (see the README).</p>` : null}
+    ${subsState === 'error' ? html`<p className="error">Couldn't load submissions. Check your connection. <button className="btn btn-quiet btn-sm" onClick=${reloadSubs}>Try again</button></p>` : null}
+    <${PageTabs} label="Submission status" value=${tab} onChange=${setTab} tabs=${SUB_STATUS.map(x => ({id: x.id, label: x.label, badge: count(x.id) || null}))} />
+    ${subsState === 'loading' ? html`<div className="skeleton"></div>`
+      : list.length === 0 ? html`<div className="empty"><h3>Nothing here</h3><p className="muted">${tab === 'pending_review' ? 'New community stories will appear here for review.' : 'No submissions with this status.'}</p></div>`
+      : html`<div className="sub-list">${list.map(x => { const i = x.intake || {}; const nm = subName(x); return html`<button className="card sub-row" key=${x.id} onClick=${() => nav('submission', {id: x.id})}>
+        <span className="sub-main">
+          <span className="chips"><${Pill} tone=${x.story_type === 'staff' ? 'purple' : x.story_type === 'student' ? 'teal' : 'neutral'}>${x.story_type === 'staff' ? 'Staff Impact' : x.story_type === 'student' ? 'Student Impact' : 'General'}<//>${x.is_minor ? html`<${Pill} tone="warn">Involves a minor<//>` : null}${i.formerStudent === 'yes' && x.story_type === 'staff' ? html`<span className="pill tone-path">Student → Staff</span>` : null}</span>
+          <strong>${subTitle(x)}</strong>
+          <small className="muted">${labelOf(RELATIONSHIPS, x.relationship)}${i.firstName ? ' ' + i.firstName : ''} · ${x.perspective === 'self' ? 'own experience' : 'witnessed' + (nm ? ': about ' + nm : '')} · ${i.method === 'voice' ? 'voice' : 'written'} · submitted ${fmtDate(x.submitted_at)}</small>
+        </span>
+        <span className="sub-side"><${SubStatusPill} status=${x.status} /><${Icon} name="chev" size=${18} /></span>
+      </button>`; })}</div>`}
+  </div>`;
+}
+const REJECT_REASONS = [{id: 'duplicate', label: 'Duplicate of a story already in the journal'}, {id: 'not_abg', label: "Not about ABG's programs"}, {id: 'unsupported', label: "Can't be used as evidence"}, {id: 'inappropriate', label: 'Inappropriate or unsafe content'}, {id: 'other', label: 'Other'}];
+function SubmissionView({id}){
+  const {caps, stories, subs, reloadSubs, nav, isAdmin, safeWrite, showToast, openSheet} = useApp();
+  const [sub, setSub] = useState(() => subs.find(x => x.id === id) || null);
+  const [events, setEvents] = useState([]);
+  const [type, setType] = useState('');
+  const [draft, setDraft] = useState(null);
+  const [mode, setMode] = useState('');
+  const [text, setText] = useState('');
+  const [reason, setReason] = useState('');
+  const [pubOk, setPubOk] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  const me = caps.me || {};
+  const email = (window.__platform && window.__platform.email) || me.email || '';
+  const api = window.__platform && window.__platform.community;
+  const load = async () => { if (!api) return; try { const x = await api.get(id); setSub(x); try { setEvents(await api.events(id)); } catch (e) {} } catch (e) { setErr(e.message); } };
+  useEffect(() => { load(); }, [id]);
+  useEffect(() => { if (sub && isAdmin && !draft && sub.analysis) { const t = type || sub.story_type; setType(t); setDraft(draftFromSubmission(sub, me, t)); } }, [sub && sub.id, sub && !!sub.analysis]);
+  if (!sub) return html`<div className="view"><div className="crumbs"><button className="btn btn-quiet btn-sm" onClick=${() => nav('submissions')}><${Icon} name="back" size=${16} /> Community Submissions</button></div>${err ? html`<p className="error">${err}</p>` : html`<div className="skeleton"></div>`}</div>`;
+  const i = sub.intake || {};
+  const nm = subName(sub);
+  const open = ['pending_review', 'needs_clarification'].includes(sub.status);
+  const story = sub.story_id ? stories.find(s => s.id === sub.story_id) : null;
+  const matches = nm ? stories.filter(s => norm(s.alias) === norm(nm) && s.id !== sub.story_id && !s.demo).slice(0, 6) : [];
+  const ed = sub.contributor_edits || {};
+  const update = async (patch, msg) => { setBusy('save'); setErr(''); try { await api.update(sub.id, patch); showToast(msg || 'Saved'); await load(); reloadSubs(); setMode(''); setText(''); } catch (e) { setErr(e.message); } setBusy(''); };
+  const changeType = t => { setType(t); setDraft(draftFromSubmission(sub, me, t)); };
+  async function analyze(){
+    if (!caps.sample) return;
+    setBusy('analyze'); setErr('');
+    try {
+      const raw = await caps.sample.json(communityAnalysisPrompt({intake: i, transcript: subTranscript(sub), type: type || sub.story_type, today: todayLocal()}), {modelTier: 'default'});
+      await api.update(sub.id, {analysis: raw, data: Object.assign({}, sub.data || {}, {analysisFailed: false})});
+      const fresh = Object.assign({}, sub, {analysis: raw}); setSub(fresh); setDraft(draftFromSubmission(fresh, me, type || sub.story_type));
+    } catch (e) { setErr(e && e.message ? e.message : aiErrorMessage(e)); }
+    setBusy('');
+  }
+  async function approve(){
+    if (!draft) return;
+    setBusy('approve'); setErr('');
+    const fin = finalizeStory(draft, me);
+    const s = fin.story;
+    const now = nowISO();
+    const pub = sub.publication_consent;
+    const privacy = Object.assign({}, s.privacy, {minor: sub.is_minor ? 'yes' : (s.privacy || {}).minor || 'unknown'});
+    if (pub === 'internal') Object.assign(privacy, {external: 'no', permission: 'no'});
+    else if (pubOk && pub === 'anonymous') Object.assign(privacy, {external: 'yes', permission: 'no', redact: 'yes'});
+    else if (pubOk && pub === 'public_name') Object.assign(privacy, {external: 'yes', permission: 'yes', redact: 'no'});
+    Object.assign(s, {source: 'community', submissionId: sub.id, status: 'internal', privacy, createdAt: sub.submitted_at || now, entryCount: 1,
+      contributor: {relationship: sub.relationship, perspective: sub.perspective, firstName: i.firstName || '', subject: i.subject || '', isMinor: !!sub.is_minor, method: i.method || 'written', guardianConsent: i.adult === false},
+      publication: {choice: pub, confirmed: pub !== 'internal' && pubOk},
+      review: {status: 'approved', by: email, at: now, note: asStr(text)}});
+    const entry = {storyId: s.id, recordedAt: sub.submitted_at || now, eventDateText: i.yearsInvolved || '', eventApprox: true, prompt: (sub.turns[0] || {}).q || '',
+      transcript: subTranscript(sub), turns: (sub.turns || []).map(t => ({q: t.q, kind: t.kind || 'followup', a: t.a || '', status: t.status || 'answered', at: t.at || now, audio: []})), audio: [],
+      transcriptEdited: null, summary: 'Community submission from a ' + (labelOf(RELATIONSHIPS, sub.relationship) || 'community member').toLowerCase(), takeaways: [], source: 'community', analyzed: true, createdBy: null};
+    const ok = await safeWrite(async () => {
+      await caps.db.collection('entries').doc(uid('e')).set(entry);
+      const d = Object.assign({}, s); delete d.id;
+      await caps.db.collection('stories').doc(s.id).set(d);
+    });
+    if (!ok) { setBusy(''); return; }
+    try { await api.update(sub.id, {status: 'approved', story_id: s.id, review: Object.assign({}, sub.review || {}, {note: asStr(text), by: email, at: now, publicationConfirmed: pubOk, type: type || sub.story_type})}); }
+    catch (e) { setErr('The story was saved, but the submission status could not be updated: ' + e.message); setBusy(''); return; }
+    setBusy(''); reloadSubs(); showToast('Approved for internal reporting'); nav('story', {id: s.id});
+  }
+  const askQuestion = () => update({status: 'needs_clarification', clarifications: (sub.clarifications || []).concat([{from: 'abg', text: asStr(text), at: nowISO(), by: email}]), review: Object.assign({}, sub.review || {}, {note: 'Asked: ' + asStr(text)})}, 'Question sent to the contributor');
+  const reject = () => update({status: 'rejected', review: Object.assign({}, sub.review || {}, {note: asStr(text), reason, by: email, at: nowISO()})}, 'Excluded from reporting');
+  const removeAll = () => openSheet(close => html`<${ConfirmSheet} close=${close} title="Delete this submission?" body=${'This permanently deletes the submission' + (story ? ' and the journal story made from it, with its transcript' : '') + '. Its review history stays. This can\'t be undone.'} confirmLabel="Delete" onConfirm=${async () => {
+    setErr('');
+    if (story) { const ok = await safeWrite(async () => { const snap = await caps.db.collection('entries').where('storyId', '==', story.id).get(); for (const d of snap.docs) await caps.db.collection('entries').doc(d.id).delete(); for (const o of stories.filter(x => x.id !== story.id && (x.links || []).some(l => l.storyId === story.id))) await caps.db.collection('stories').doc(o.id).update({links: (o.links || []).filter(l => l.storyId !== story.id)}); await caps.db.collection('stories').doc(story.id).delete(); }); if (!ok) return; }
+    try { await api.remove(sub.id); showToast('Submission deleted'); reloadSubs(); nav('submissions'); } catch (e) { setErr(e.message); }
+  }} />`);
+  const rows = [
+    ['Connection to ABG', labelOf(RELATIONSHIPS, sub.relationship)], ['Perspective', sub.perspective === 'self' ? 'Their own experience (self-reported)' : 'An experience they witnessed (community-observed)'],
+    ["Contributor's first name", i.firstName], ['Age', i.adult === true ? '18 or older' : i.adult === false ? 'Under 18 (guardian consent recorded on a personal invitation)' : ''],
+    ['About', sub.perspective === 'witnessed' ? ((SUBJECTS.find(x => x.id === i.subject) || {}).label || '') + (i.subjectFirstName ? ': ' + i.subjectFirstName : '') + (i.subjectMinor === 'yes' ? ' (under 18)' : '') : ''],
+    ['Do they know it was shared?', sub.perspective === 'witnessed' && i.subject !== 'general' ? ({yes: 'Yes', no: 'No', unknown: 'Not sure'}[i.subjectAware] || '') : ''],
+    ['ABG programs', i.programs], ['Years involved', i.yearsInvolved], ['Background', i.background],
+    ['Role at ABG', i.staffRole], ['Current or former staff', i.staffStatus ? labelOf(STAFF_STATUS, i.staffStatus) : ''],
+    ['Former ABG student', sub.relationship === 'staff' && sub.perspective === 'self' ? labelOf(FORMER_STUDENT, i.formerStudent) + (i.formerStudent === 'yes' ? [i.firstParticipatedYear ? ' · first participated ' + i.firstParticipatedYear : '', i.studentPrograms ? ' · ' + i.studentPrograms : '', i.transitionYear ? ' · began working ' + i.transitionYear : ''].join('') : '') : ''],
+    ['Interview', (i.method === 'voice' ? 'Voice (recording transcribed, audio not kept)' : 'Written')], ['Public sharing choice', PUBLICATION[sub.publication_consent]],
+    ['Submitted', fmtDate(sub.submitted_at)], ['Personal invitation', sub.invite_id ? 'Yes' : 'No (public link)'],
+  ].filter(r => r[1]);
+  return html`<div className="view submission">
+    <div className="crumbs"><button className="btn btn-quiet btn-sm" onClick=${() => nav('submissions')}><${Icon} name="back" size=${16} /> Community Submissions</button></div>
+    <header className="story-head">
+      <div className="chips"><${SubStatusPill} status=${sub.status} /><${Pill} tone=${sub.story_type === 'staff' ? 'purple' : sub.story_type === 'student' ? 'teal' : 'neutral'}>${sub.story_type === 'staff' ? 'Staff Impact' : sub.story_type === 'student' ? 'Student Impact' : 'General'}<//>${sub.is_minor ? html`<${Pill} tone="warn">Involves a minor<//>` : null}</div>
+      <p className="eyebrow">Community submission · ${labelOf(RELATIONSHIPS, sub.relationship)}</p>
+      <h1>${subTitle(sub)}</h1>
+    </header>
+    ${sub.status === 'removal_requested' ? html`<div className="banner banner-bad"><${Icon} name="trash" size=${22} /><div><strong>The contributor asked ABG to remove this story.</strong><p className="small">${story ? 'Its journal story is already left out of all reporting. ' : ''}Please delete it.</p></div>${isAdmin ? html`<button className="btn btn-primary btn-sm" onClick=${removeAll}>Delete now</button>` : null}</div>` : null}
+    ${story ? html`<p className="notice small">Approved ${fmtDate((sub.review || {}).at)}${(sub.review || {}).by ? ' by ' + sub.review.by : ''}. <button className="link-btn" onClick=${() => nav('story', {id: story.id})}>Open the journal story</button></p>` : null}
+    ${err ? html`<p className="error" role="alert">${err}</p>` : null}
+    <section className="card"><h2>Contributor</h2><dl className="overview">${rows.map(r => html`<div key=${r[0]}><dt>${r[0]}</dt><dd>${r[1]}</dd></div>`)}</dl></section>
+    ${ed.note || (sub.clarifications || []).length ? html`<section className="card"><h2>Notes and questions</h2>
+      ${ed.note ? html`<p><strong>Contributor's note:</strong> ${ed.note}</p>` : null}
+      ${(sub.clarifications || []).map((c, k) => html`<p key=${k} className=${'clar clar-' + c.from}><strong>${c.from === 'abg' ? 'ABG asked' : 'Contributor replied'}</strong> <small className="muted">${fmtDate(c.at)}</small><br />${c.text}</p>`)}
+    </section>` : null}
+    <${Sec} title="Interview transcript" count=${(sub.turns || []).filter(t => t.status === 'answered').length + ' answers'} open=${!sub.analysis}>
+      <${TurnsView} turns=${(sub.turns || []).map(t => Object.assign({}, t, {audio: []}))} />
+      <p className="small muted">The contributor's original words, kept exactly as sent. ${ed.story ? 'They edited the summary before sending it; the edited version is used below.' : ''}</p>
+    <//>
+    ${matches.length ? html`<section className="card"><h2>Stories that may be about the same person</h2>
+      <p className="small muted">Same first name only, so this is not a match by itself. ${story ? 'Compare and link confirmed matches in Source Comparison.' : 'After approval, compare and link confirmed matches in Source Comparison so one person is never counted twice. If it repeats a story already in the journal, exclude it as a duplicate.'}</p>
+      ${matches.map(m => html`<div className="linked" key=${m.id}><div style=${{minWidth: 0}}><${Pill} tone="neutral">${sourceLabel(m)}<//> <button className="btn btn-quiet btn-sm" onClick=${() => nav('story', {id: m.id})}>${m.alias ? m.alias + ': ' : ''}${m.title}</button></div>${story ? html`<button className="btn btn-ghost btn-sm" onClick=${() => nav('compare', {a: story.id, b: m.id})}><${Icon} name="scale" size=${16} /> Compare</button>` : null}</div>`)}
+    </section>` : null}
+    ${isAdmin && open ? html`<section className="card">
+      <div className="sec-head"><h2>Review the story</h2>
+        <label className="ins-filter"><span className="small muted">Story type </span><select id="sub-type" className="select select-sm" value=${type || sub.story_type} onChange=${e => changeType(e.target.value)}><option value="student">Student Impact</option><option value="staff">Staff Impact</option><option value="general">General community story</option></select></label></div>
+      ${!sub.analysis ? html`<p className="notice small">There's no summary yet${(sub.data || {}).analysisFailed ? " (writing it failed when the contributor finished)" : ''}. Claude can write one from the transcript, with the same outcome extraction as Kyle's interviews.</p>
+        <div><button className="btn btn-primary" id="sub-analyze" disabled=${!caps.sample || busy === 'analyze'} onClick=${analyze}><${Icon} name="spark" size=${18} /> ${busy === 'analyze' ? 'Writing…' : 'Write the summary'}</button></div>`
+      : draft ? html`<p className="small muted">Claude drafted this from the contributor's words. Check each outcome against the transcript, correct anything that's wrong, and remove what isn't supported. Own-experience outcomes are self-reported; witnessed ones are community-observed. Nothing is verified until someone at ABG checks a record.</p>
+        <${QuickReview} draft=${draft} setDraft=${setDraft} mode="new" />
+        <details className="sec all-details"><summary><span>All details (optional)<span className="count">metrics card, timeline, stakeholder value</span></span><${Icon} name="chev" size=${18} /></summary>
+          <div className="sec-body"><${StoryEditor} draft=${draft} setDraft=${setDraft} items=${[{id: 'sub-' + sub.id, text: subTranscript(sub), recordedAt: sub.submitted_at}]} mode="new" /></div></details>` : null}
+    </section>` : sub.analysis && !story ? html`<section className="card prose"><h2>Summary</h2><p>${ed.story || sub.analysis.story || ''}</p>
+      ${(sub.analysis.evidence || []).filter((e, k) => !(ed.removed || []).includes(k)).length ? html`<h3>Outcomes found</h3><ul>${(sub.analysis.evidence || []).filter((e, k) => !(ed.removed || []).includes(k)).map((e, k) => html`<li key=${k}>${e.statement}</li>`)}</ul>` : null}</section>` : null}
+    ${isAdmin && open ? html`<section className="card review-actions">
+      <h2>Decision</h2>
+      <div className="row-btns">
+        <button className=${'btn ' + (mode === 'approve' ? 'btn-primary' : 'btn-ghost')} id="sub-approve-open" disabled=${!draft} onClick=${() => { setMode('approve'); setText(''); }}><${Icon} name="check" size=${18} /> Approve for internal reporting</button>
+        <button className=${'btn ' + (mode === 'ask' ? 'btn-primary' : 'btn-ghost')} id="sub-ask-open" onClick=${() => { setMode('ask'); setText(''); }}>Ask the contributor a question</button>
+        <button className=${'btn ' + (mode === 'reject' ? 'btn-primary' : 'btn-ghost')} id="sub-reject-open" onClick=${() => { setMode('reject'); setText(''); setReason(''); }}>Reject / exclude</button>
+      </div>
+      ${mode === 'approve' ? html`<div className="approve-check">
+        <p className="small">Approval adds this story to the Impact Journal and its outcomes to Impact Insights, labeled as a community ${sub.perspective === 'self' ? 'self-report' : 'observation'}. It stays internal: public sharing is a separate decision.</p>
+        <p className="small"><strong>Contributor's sharing choice:</strong> ${PUBLICATION[sub.publication_consent]}${sub.is_minor ? '. Involves a minor: never share it publicly without documented parent or guardian permission.' : ''}</p>
+        ${sub.publication_consent !== 'internal' ? html`<label className="check"><input type="checkbox" id="sub-pub-ok" checked=${pubOk} onChange=${e => setPubOk(e.target.checked)} /> I've checked this sharing choice${sub.is_minor ? ' and the guardian permission' : ''}, so the story may later be approved for external use</label>` : null}
+        <${Field} label="Review note (optional, internal)"><input id="sub-note" className="input" value=${text} onChange=${e => setText(e.target.value)} /><//>
+        <div className="row-btns"><button className="btn btn-primary" id="sub-approve" disabled=${busy === 'approve'} onClick=${approve}>${busy === 'approve' ? 'Approving…' : 'Approve and add to the journal'}</button><button className="btn btn-ghost" onClick=${() => setMode('')}>Cancel</button></div>
+      </div>` : null}
+      ${mode === 'ask' ? html`<div className="approve-check">
+        <p className="small">The contributor sees this question when they open their private link. Keep it short and friendly. It doesn't email them.</p>
+        <${Field} label="Your question"><textarea id="sub-question" className="textarea" rows="3" value=${text} onChange=${e => setText(e.target.value)}></textarea><//>
+        <div className="row-btns"><button className="btn btn-primary" id="sub-ask" disabled=${!asStr(text) || busy === 'save'} onClick=${askQuestion}>Send question</button><button className="btn btn-ghost" onClick=${() => setMode('')}>Cancel</button></div>
+      </div>` : null}
+      ${mode === 'reject' ? html`<div className="approve-check">
+        <${Field} label="Reason"><select id="sub-reason" className="select" value=${reason} onChange=${e => setReason(e.target.value)}><option value="">Choose a reason</option>${REJECT_REASONS.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select><//>
+        <${Field} label="Note (internal)" hint=${reason === 'duplicate' ? 'Say which story it duplicates.' : ''}><input id="sub-reject-note" className="input" value=${text} onChange=${e => setText(e.target.value)} /><//>
+        <p className="small muted">Excluded submissions never count in reporting. The contributor sees that it won't be used. They're deleted automatically after 180 days.</p>
+        <div className="row-btns"><button className="btn btn-primary" id="sub-reject" disabled=${!reason || busy === 'save'} onClick=${reject}>Exclude from reporting</button><button className="btn btn-ghost" onClick=${() => setMode('')}>Cancel</button></div>
+      </div>` : null}
+    </section>` : null}
+    <${Sec} title="Review history" count=${events.length}>
+      ${events.length === 0 ? html`<p className="empty-note small">No changes recorded yet.</p>` : html`<ul className="audit-list">${events.map((ev, k) => html`<li key=${k}><span>${ev.actor === 'contributor' ? 'The contributor' : ev.actor} · ${ev.action.replace('status:', 'status → ').replace(/_/g, ' ')}${ev.details && ev.details.note ? ': ' + ev.details.note : ''}</span><small className="muted">${fmtDate(ev.at)}</small></li>`)}</ul>`}
+    <//>
+    ${isAdmin && !['removal_requested'].includes(sub.status) ? html`<div><button className="btn btn-ghost danger" onClick=${removeAll}><${Icon} name="trash" size=${18} /> Delete submission${story ? ' and story' : ''}</button></div>` : null}
+  </div>`;
+}
+
+/* ================= Source Comparison =================
+   Connects accounts of the same person from different perspectives (Kyle's interview, the student's own story,
+   a parent's observation...). Nothing is ever merged automatically: the journal only suggests possible matches,
+   and an administrator confirms each link. A confirmed link gives the stories one participant record, so the
+   person is counted once; every original account is kept as it was. Agreement between accounts strengthens a
+   story but never makes an outcome "independently verified". */
+const COMPARISON = [
+  {id: 'consistent', label: 'Consistent', tone: 'good', desc: 'The accounts describe compatible experiences or outcomes.'},
+  {id: 'complementary', label: 'Complementary', tone: 'blue', desc: 'The accounts add different, relevant details.'},
+  {id: 'conflicting', label: 'Conflicting', tone: 'bad', desc: 'The accounts disagree about relevant facts or measurements.'},
+  {id: 'insufficient', label: 'Insufficient evidence', tone: 'warn', desc: "There isn't enough information to tell whether they agree."},
+];
+function samePersonLink(a, b){ return (a.links || []).find(l => l.storyId === b.id && l.type === 'same_person') || null; }
+/* groups of stories about one individual: shared participant record (student or staff) or a confirmed same-person link */
+function participantGroups(list){
+  const parent = new Map(list.map(s => [s.id, s.id]));
+  const find = x => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  const join = (a, b) => { if (parent.has(a) && parent.has(b)) parent.set(find(a), find(b)); };
+  const first = {};
+  list.forEach(s => {
+    const k = isStaffStory(s) ? (s.staffId ? 'sf:' + s.staffId : '') : isStudentStory(s) ? (s.studentId ? 'st:' + s.studentId : '') : '';
+    if (k) { if (first[k]) join(first[k], s.id); else first[k] = s.id; }
+    (s.links || []).forEach(l => { if (l.type === 'same_person') join(s.id, l.storyId); });
+  });
+  const g = new Map();
+  list.forEach(s => { const r = find(s.id); if (!g.has(r)) g.set(r, []); g.get(r).push(s); });
+  return Array.from(g.values());
+}
+function groupComparisons(group){
+  const out = [];
+  group.forEach((a, i) => group.slice(i + 1).forEach(b => { const l = samePersonLink(a, b) || samePersonLink(b, a); if (l) out.push({a, b, link: l}); }));
+  return out;
+}
+/* possible matches for a person to review: same first name, not linked, not dismissed, at least one community account */
+function possibleMatches(list){
+  const groups = participantGroups(list);
+  const gi = new Map(); groups.forEach((g, k) => g.forEach(s => gi.set(s.id, k)));
+  const named = list.filter(s => asStr(s.alias) && (isStudentStory(s) || isStaffStory(s)));
+  const out = [];
+  named.forEach((a, i) => named.slice(i + 1).forEach(b => {
+    if (norm(a.alias) !== norm(b.alias) || gi.get(a.id) === gi.get(b.id)) return;
+    if (!!a.demo !== !!b.demo) return;
+    if (!isCommunity(a) && !isCommunity(b)) return;
+    if ((a.notSamePerson || []).includes(b.id) || (b.notSamePerson || []).includes(a.id)) return;
+    const shared = [norm(a.program) && norm(a.program) === norm(b.program) ? 'same program' : '', norm(a.community) && norm(a.community) === norm(b.community) ? 'same school or community' : ''].filter(Boolean);
+    out.push({a, b, why: ['Same first name'].concat(shared).join(', '), score: shared.length});
+  }));
+  return out.sort((x, y) => y.score - x.score);
+}
+function outcomeAreaOf(e){ const o = outcomeCategoryOf(e); return o ? {id: o.id, label: o.label} : {id: domainOf(e), label: labelOf(DOMAINS, domainOf(e))}; }
+function comparePrompt(a, b){
+  const acct = s => ({source: sourceLabel(s), contributor: isCommunity(s) ? contributorText(s) : 'ABG staff member (interview)', recorded: fmtDate(s.createdAt), personInStory: s.alias || null, storyType: storyTypeLabel(s),
+    summary: trunc(s.story || s.summary, 1500), outcomes: (s.evidence || []).filter(e => e.status !== 'future').map(e => ({area: outcomeAreaOf(e).label, statement: e.statement, before: e.before || null, after: e.after || null, timeframe: e.timeframe || null, evidenceType: classLabel(e), detail: labelOf(EVIDENCE_STATUS, e.status), excerpt: (e.source || {}).excerpt || null}))});
+  return `${ABG_CONTEXT} Two accounts in ABG's impact journal may describe the same person. An ABG administrator will decide whether they do; you only compare what the accounts say.
+
+Compare the outcomes in the two accounts. Do not assume either account is more accurate, and do not decide whether they are the same person. Agreement between accounts does not make anything verified. Never invent details.
+
+Categories: consistent (compatible experiences or outcomes), complementary (each adds different relevant details), conflicting (they disagree about relevant facts or measurements), insufficient (not enough information to tell).
+
+Account A: ${JSON.stringify(acct(a))}
+Account B: ${JSON.stringify(acct(b))}
+
+Reply with only JSON: {"category": "consistent | complementary | conflicting | insufficient", "summary": "2 or 3 plain sentences", "consistent": ["outcomes both accounts support, short"], "complementary": ["details only one account adds, short"], "conflicting": ["specific disagreements, short"], "needsVerification": ["outcomes worth checking against records"]}`;
+}
+async function linkAccounts({caps, a, b, category, note, email}){
+  const now = nowISO();
+  const link = other => ({storyId: other.id, type: 'same_person', comparison: category, note: asStr(note), by: email, at: now, confirmed: true, reason: 'Confirmed as the same person by ' + (email || 'an administrator') + ' on ' + fmtDay(todayLocal())});
+  const patches = {[a.id]: {}, [b.id]: {}};
+  const studentPair = isStudentStory(a) && isStudentStory(b), staffPair = isStaffStory(a) && isStaffStory(b);
+  if (studentPair) {
+    let sid = a.studentId || b.studentId;
+    if (!sid) { sid = uid('st'); const nm = a.alias || b.alias || ''; await caps.db.collection('students').doc(sid).set({firstName: nm, nameKey: norm(nm), note: 'Created when linking accounts', createdAt: now, createdBy: (caps.me || {}).id || null}); }
+    [a, b].forEach(x => { if (x.studentId !== sid) patches[x.id] = {studentId: sid, linkedFrom: {studentId: x.studentId || null, at: now}}; });
+  } else if (staffPair) {
+    let fid = a.staffId || b.staffId;
+    if (!fid) { fid = uid('sf'); const nm = a.alias || b.alias || ''; await caps.db.collection('staff').doc(fid).set({firstName: nm, nameKey: norm(nm), note: 'Created when linking accounts', createdAt: now, createdBy: (caps.me || {}).id || null}); }
+    [a, b].forEach(x => { if (x.staffId !== fid) patches[x.id] = {staffId: fid, linkedFrom: {staffId: x.staffId || null, at: now}}; });
+  }
+  for (const [x, y] of [[a, b], [b, a]]) {
+    const links = (x.links || []).filter(l => !(l.storyId === y.id && l.type === 'same_person')).concat([link(y)]);
+    await caps.db.collection('stories').doc(x.id).update(Object.assign({}, patches[x.id], {links, updatedAt: now}));
+  }
+}
+async function unlinkAccounts({caps, a, b}){
+  for (const [x, y] of [[a, b], [b, a]]) {
+    const links = (x.links || []).filter(l => !(l.storyId === y.id && l.type === 'same_person'));
+    const patch = {links, updatedAt: nowISO()};
+    /* give back the participant record a story had before it was linked, unless it is still linked to someone else */
+    if (x.linkedFrom && !links.some(l => l.type === 'same_person')) { if ('studentId' in x.linkedFrom) patch.studentId = x.linkedFrom.studentId || null; if ('staffId' in x.linkedFrom) patch.staffId = x.linkedFrom.staffId || null; patch.linkedFrom = null; }
+    await caps.db.collection('stories').doc(x.id).update(patch);
+  }
+}
+function AccountColumn({s, nav}){
+  const ev = (s.evidence || []).filter(e => e.status !== 'future');
+  return html`<div className="acct card">
+    <div className="chips"><${Pill} tone=${isCommunity(s) ? 'purple' : 'blue'}>${sourceLabel(s)}<//><${TypePill} story=${s} /></div>
+    <h3><button className="link-btn" onClick=${() => nav('story', {id: s.id})}>${s.alias ? s.alias + ': ' : ''}${s.title}</button></h3>
+    <p className="small muted">${isCommunity(s) ? contributorText(s) : 'ABG staff interview'} · recorded ${fmtDate(s.createdAt)}</p>
+    <p className="small">${trunc(s.summary || s.story, 320)}</p>
+    ${ev.length ? html`<ul className="acct-ev">${ev.map(e => html`<li key=${e.id}><p className="eyebrow">${outcomeAreaOf(e).label}</p><p>${e.statement}${hasComparison(e) ? html` <span className="muted tnum">(${e.before} → ${e.after}${e.timeframe ? ', ' + e.timeframe : ''})</span>` : null}</p>
+      <p className="small"><${EvLabel} e=${e} /> <span className="muted">${labelOf(EVIDENCE_STATUS, e.status)}</span></p>${(e.source || {}).excerpt ? html`<p className="small muted acct-ex">“${trunc(e.source.excerpt, 160)}”</p>` : null}</li>`)}</ul>` : html`<p className="empty-note small">No outcomes recorded.</p>`}
+  </div>`;
+}
+function ComparePair({a, b}){
+  const {caps, nav, isAdmin, safeWrite, showToast, openSheet} = useApp();
+  const link = samePersonLink(a, b) || samePersonLink(b, a);
+  const [cat, setCat] = useState(link ? link.comparison || '' : '');
+  const [note, setNote] = useState(link ? link.note || '' : '');
+  const [sure, setSure] = useState(!!link);
+  const [ai, setAi] = useState(null);
+  const [busy, setBusy] = useState('');
+  const email = (window.__platform && window.__platform.email) || '';
+  const areas = new Map();
+  [a, b].forEach((s, k) => (s.evidence || []).filter(e => e.status !== 'future').forEach(e => { const ar = outcomeAreaOf(e); if (!areas.has(ar.id)) areas.set(ar.id, {label: ar.label, sides: [[], []]}); areas.get(ar.id).sides[k].push(e); }));
+  const crossPerson = (isStudentStory(a) && isStaffStory(b)) || (isStaffStory(a) && isStudentStory(b));
+  async function suggest(){
+    setBusy('ai'); setAi(null);
+    try { const r = await caps.sample.json(comparePrompt(a, b), {modelTier: 'default'}); setAi(r); if (!cat && byId(COMPARISON, r.category)) setCat(r.category); }
+    catch (e) { setAi({error: aiErrorMessage(e)}); }
+    setBusy('');
+  }
+  async function save(){
+    setBusy('link');
+    const ok = await safeWrite(() => linkAccounts({caps, a, b, category: cat, note, email}));
+    setBusy(''); if (ok) showToast(link ? 'Comparison updated' : 'Accounts linked. This person is now counted once.');
+  }
+  const unlink = () => openSheet(close => html`<${ConfirmSheet} close=${close} title="Unlink these accounts?" body="Both stories stay in the journal. They'll be counted as separate people again." confirmLabel="Unlink" onConfirm=${async () => { const ok = await safeWrite(() => unlinkAccounts({caps, a, b})); if (ok) showToast('Accounts unlinked'); }} />`);
+  const dismiss = async () => { const ok = await safeWrite(async () => { await caps.db.collection('stories').doc(a.id).update({notSamePerson: uniq((a.notSamePerson || []).concat([b.id]))}); await caps.db.collection('stories').doc(b.id).update({notSamePerson: uniq((b.notSamePerson || []).concat([a.id]))}); }); if (ok) { showToast('Marked as different people'); nav('compare'); } };
+  return html`<div className="view compare-pair">
+    <div className="crumbs"><button className="btn btn-quiet btn-sm" onClick=${() => nav('compare')}><${Icon} name="back" size=${16} /> Source Comparison</button></div>
+    <header className="page-head"><h1>Compare accounts</h1><p className="muted">${link ? 'These accounts are linked as the same person.' : 'These accounts may describe the same person. Only link them if you know they do: a shared first name is not enough.'}</p></header>
+    <div className="acct-grid"><${AccountColumn} s=${a} nav=${nav} /><${AccountColumn} s=${b} nav=${nav} /></div>
+    <section className="card">
+      <h2>Outcomes side by side</h2>
+      <p className="small muted">By impact area. "Both accounts" means each one mentions the area; read the statements to see whether they agree.</p>
+      ${areas.size === 0 ? html`<p className="empty-note">Neither account has outcomes yet.</p>` : html`<div className="cmp-table">${Array.from(areas.values()).map(r => html`<div className="cmp-row" key=${r.label}>
+        <p className="cmp-area"><strong>${r.label}</strong> <${Pill} tone=${r.sides[0].length && r.sides[1].length ? 'teal' : 'outline'}>${r.sides[0].length && r.sides[1].length ? 'Both accounts' : r.sides[0].length ? 'Only the first account' : 'Only the second account'}<//></p>
+        ${r.sides.map((side, k) => html`<div className="cmp-cell" key=${k}>${side.length ? side.map(e => html`<p key=${e.id} className="small">${e.statement} <${EvLabel} e=${e} /></p>`) : html`<p className="small muted">Not mentioned</p>`}</div>`)}
+      </div>`)}</div>`}
+    </section>
+    <section className="card">
+      <div className="sec-head"><h2>How do they compare?</h2>${caps.sample ? html`<button className="btn btn-ghost btn-sm" id="cmp-ai" disabled=${busy === 'ai'} onClick=${suggest}><${Icon} name="spark" size=${16} /> ${busy === 'ai' ? 'Comparing…' : 'Ask Claude for a suggestion'}</button>` : null}</div>
+      ${ai && ai.error ? html`<p className="error">${ai.error}</p>` : ai ? html`<div className="ai-suggest"><p><strong>Claude's suggestion:</strong> ${(byId(COMPARISON, ai.category) || {}).label || 'No category'}. ${ai.summary || ''}</p>
+        ${[['consistent', 'Supported by both'], ['complementary', 'Added by one account'], ['conflicting', 'Disagreements'], ['needsVerification', 'Worth checking against records']].map(([k, l]) => asArr(ai[k]).length ? html`<p className="small" key=${k}><strong>${l}:</strong> ${asArr(ai[k]).join('; ')}</p>` : null)}
+        <p className="small muted">A suggestion only. You decide, and neither account is treated as more accurate.</p></div>` : null}
+      <div className="cmp-cats" role="radiogroup" aria-label="Comparison">${COMPARISON.map(c => html`<label key=${c.id} className=${'pick' + (cat === c.id ? ' on' : '')}><input type="radio" name="cmp-cat" id=${'cmp-' + c.id} disabled=${!isAdmin} checked=${cat === c.id} onChange=${() => setCat(c.id)} /><span><strong>${c.label}</strong><br /><span className="small muted">${c.desc}</span></span></label>`)}</div>
+      <${Field} label="Note (internal)"><input id="cmp-note" className="input" disabled=${!isAdmin} value=${note} onChange=${e => setNote(e.target.value)} placeholder="e.g. Kyle saw attendance improve; the student describes wanting to come to school" /><//>
+      ${crossPerson ? html`<p className="small muted">One is a Student Impact story and the other a Staff Impact story: linking shows the person's student-to-staff path without combining their student and staff counts.</p>` : null}
+      ${isAdmin ? html`${!link ? html`<label className="check"><input type="checkbox" id="cmp-sure" checked=${sure} onChange=${e => setSure(e.target.checked)} /> I've confirmed these accounts describe the same person, not just two people with the same first name.</label>` : null}
+        <div className="row-btns">
+          <button className="btn btn-primary" id="cmp-link" disabled=${!cat || !sure || busy === 'link'} onClick=${save}>${link ? 'Save comparison' : 'Link as the same person'}</button>
+          ${link ? html`<button className="btn btn-ghost" id="cmp-unlink" onClick=${unlink}>Unlink</button>` : html`<button className="btn btn-ghost" id="cmp-dismiss" onClick=${dismiss}>Not the same person</button>`}
+        </div>` : html`<p className="small muted">Only administrators can link accounts.</p>`}
+    </section>
+  </div>`;
+}
+function CompareView({a, b}){
+  const {stories, nav, isAdmin, storiesLoaded} = useApp();
+  const list = useMemo(() => stories.filter(reportable), [stories]);
+  const A = a ? stories.find(s => s.id === a) : null, B = b ? stories.find(s => s.id === b) : null;
+  if (a && b) return A && B ? html`<${ComparePair} a=${A} b=${B} />` : html`<div className="view">${storiesLoaded ? html`<p className="notice">One of these stories isn't in the journal anymore.</p>` : html`<div className="skeleton"></div>`}</div>`;
+  const matches = possibleMatches(list);
+  const groups = participantGroups(list).filter(g => g.length > 1);
+  const pairs = [].concat.apply([], groups.map(groupComparisons));
+  const st = sourceStats(list);
+  return html`<div className="view compare">
+    <header className="page-head"><h1>Source Comparison</h1><p className="muted">Connect accounts of the same person from different perspectives, see where they agree or differ, and keep one person from being counted twice.</p></header>
+    <div className="stats stats-5">
+      <div className="stat"><b>${st.individuals}</b><span>Unique individuals</span></div>
+      <div className="stat"><b>${st.stories}</b><span>Stories</span></div>
+      <div className="stat"><b>${st.outcomes}</b><span>Reported outcomes</span></div>
+      <div className="stat"><b>${st.perspectives}</b><span>Supporting perspectives</span></div>
+      <div className="stat"><b>${st.verified}</b><span>Independently verified outcomes</span></div>
+    </div>
+    <section className="card">
+      <h2>Possible matches to review <span className="count">${matches.length}</span></h2>
+      <p className="small muted">Found only by a shared first name (plus program or school when they match). Open each pair, read both accounts, and link them only if you know it's the same person.</p>
+      ${matches.length === 0 ? html`<p className="empty-note">No possible matches right now.</p>` : html`<div className="match-list">${matches.map(m => html`<div className="linked" key=${m.a.id + m.b.id}>
+        <div style=${{minWidth: 0}}><strong>${m.a.alias}</strong> <span className="small muted">· ${m.why}</span><br /><span className="small">${sourceLabel(m.a)}: ${trunc(m.a.title, 60)} · ${sourceLabel(m.b)}: ${trunc(m.b.title, 60)}</span></div>
+        <button className="btn btn-ghost btn-sm" onClick=${() => nav('compare', {a: m.a.id, b: m.b.id})}><${Icon} name="scale" size=${16} /> Compare</button>
+      </div>`)}</div>`}
+    </section>
+    <section className="card">
+      <h2>Linked individuals <span className="count">${groups.length}</span></h2>
+      <p className="small muted">People with more than one account in the journal. Each is counted once in Impact Insights; every account stays as it was told.</p>
+      ${groups.length === 0 ? html`<p className="empty-note">No linked accounts yet.</p>` : html`<div className="group-list">${groups.map((g, k) => { const cmps = [].concat(groupComparisons(g)); return html`<div className="grp" key=${k}>
+        <p><strong>${g.map(s => s.alias).filter(Boolean)[0] || 'Unnamed'}</strong> <span className="small muted">· ${g.length} accounts: ${uniq(g.map(sourceLabel)).join(', ')}</span></p>
+        <div className="chips">${cmps.map((c, j) => { const cc = byId(COMPARISON, c.link.comparison); return html`<button key=${j} className="chip" onClick=${() => nav('compare', {a: c.a.id, b: c.b.id})}>${cc ? cc.label : 'Not categorized'} · ${sourceLabel(c.a)} / ${sourceLabel(c.b)}</button>`; })}
+          ${cmps.length === 0 ? html`<span className="small muted">Linked by a shared participant record.</span>` : null}</div>
+      </div>`; })}</div>`}
+    </section>
+    ${!isAdmin ? html`<p className="small muted">Only administrators can link or unlink accounts.</p>` : null}
+  </div>`;
+}
+/* counts used in Source Comparison and Impact Insights. People are deduplicated; outcomes are counted as recorded. */
+function sourceStats(list){
+  const groups = participantGroups(list);
+  const persons = groups.filter(g => g.some(s => isStudentStory(s) || isStaffStory(s)));
+  const outcomes = [].concat.apply([], list.map(s => (s.evidence || []).filter(e => e.status !== 'future').map(e => ({s, e}))));
+  const multi = groups.filter(g => g.length > 1);
+  const perspectives = multi.reduce((t, g) => t + Math.max(0, uniq(g.map(sourceKind)).length - 1), 0);
+  /* outcome areas supported by two or more different perspectives about the same person */
+  const supported = [];
+  multi.forEach(g => {
+    const by = new Map();
+    g.forEach(s => (s.evidence || []).filter(e => e.status !== 'future' && POSITIVE(e.direction) && evidenceClass(e) !== 'unconfirmed').forEach(e => { const ar = outcomeAreaOf(e); if (!by.has(ar.id)) by.set(ar.id, {label: ar.label, kinds: new Set(), items: []}); by.get(ar.id).kinds.add(sourceKind(s)); by.get(ar.id).items.push({s, e}); }));
+    by.forEach(v => { if (v.kinds.size > 1) supported.push(Object.assign({group: g}, v)); });
+  });
+  const pairs = [].concat.apply([], multi.map(groupComparisons));
+  return {individuals: persons.length, stories: list.length, outcomes: outcomes.length, perspectives, verified: outcomes.filter(x => evidenceClass(x.e) === 'verified').length,
+    supported, pairs, conflicts: pairs.filter(p => p.link.comparison === 'conflicting'), multi,
+    unverifiedLinked: [].concat.apply([], multi.map(g => [].concat.apply([], g.map(s => (s.evidence || []).filter(e => e.status !== 'future' && evidenceClass(e) !== 'verified').map(e => ({s, e}))))))};
+}
+
+/* ================= Invite Contributors ================= */
+const INVITE_MESSAGE = "ABG is collecting stories about how our programs have impacted students, staff, and the community. We'd love to hear about your experience! You can share your story through a short, guided interview using our Impact Journal.";
+function QrCode({text, label}){
+  const svg = useMemo(() => { try { const q = qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({cellSize: 6, margin: 2, scalable: true, alt: label || 'QR code'}); } catch (e) { return ''; } }, [text]);
+  return svg ? html`<div className="qr" role="img" aria-label=${label || 'QR code'} dangerouslySetInnerHTML=${{__html: svg}}></div>` : null;
+}
+function qrSvg(text){ const q = qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({cellSize: 10, margin: 4}); }
+function InviteView(){
+  const {caps, subs, subsState, reloadSubs, isAdmin, showToast, nav} = useApp();
+  const api = window.__platform && window.__platform.community;
+  const url = location.origin + '/share';
+  const [msg, setMsg] = useState(INVITE_MESSAGE + '\n\n' + url);
+  const [invites, setInvites] = useState(null);
+  const [form, setForm] = useState({label: '', relationship: '', maxUses: 1, days: 30, note: '', minorConsent: false});
+  const [made, setMade] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const loadInv = async () => { if (!api) return; try { setInvites(await api.invites()); } catch (e) { setInvites([]); setErr(e.message); } };
+  useEffect(() => { loadInv(); reloadSubs(); }, []);
+  const set = (k, v) => setForm(f => Object.assign({}, f, {[k]: v}));
+  async function create(){
+    setBusy(true); setErr('');
+    try {
+      const token = await api.createInvite({label: asStr(form.label).split(/\s+/)[0] || '', relationship: form.relationship, maxUses: +form.maxUses, days: +form.days, note: asStr(form.note), minorConsent: isAdmin && form.minorConsent, email: window.__platform.email});
+      const link = url + '#i=' + token;
+      setMade({link, label: form.label, msg: (form.label ? 'Hi ' + asStr(form.label).split(/\s+/)[0] + '! ' : '') + INVITE_MESSAGE + '\n\nYour personal link: ' + link});
+      setForm({label: '', relationship: '', maxUses: 1, days: 30, note: '', minorConsent: false});
+      loadInv();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+  const revoke = async id => { try { await api.revokeInvite(id); showToast('Invitation link turned off'); loadInv(); } catch (e) { setErr(e.message); } };
+  const invState = v => v.revoked_at ? ['Turned off', 'neutral'] : new Date(v.expires_at) < new Date() ? ['Expired', 'neutral'] : v.uses >= v.max_uses ? ['Used', 'good'] : ['Active', 'blue'];
+  const since = Date.now() - 30 * 864e5;
+  const recent = subs.filter(x => Date.parse(x.submitted_at || 0) >= since);
+  const byRel = RELATIONSHIPS.map(r => [r.label, subs.filter(x => x.relationship === r.id).length]).filter(r => r[1]);
+  const mail = 'mailto:?subject=' + encodeURIComponent('Share your ABG story') + '&body=' + encodeURIComponent(msg);
+  const sms = 'sms:?&body=' + encodeURIComponent(msg);
+  return html`<div className="view invite">
+    <header className="page-head"><h1>Invite Contributors</h1><p className="muted">Ask students, alumni, staff, parents, volunteers and friends to share their own stories. The link opens the Share Your Story page only: it never gives access to the journal.</p></header>
+    ${err ? html`<p className="error" role="alert">${err}</p>` : null}
+    <section className="card inv-link">
+      <div><h2>Community link</h2>
+        <p className="small muted">Anyone with this link can share a story. Put it on ABG's website, in emails and texts, or print the QR code on flyers. Adults only: students under 18 need a personal invitation (below).</p>
+        <div className="linkbox"><input id="inv-url" className="input" readOnly=${true} value=${url} onFocus=${e => e.target.select()} /><${CopyButton} text=${url} label="Copy link" /></div>
+        <div className="row-btns"><a className="btn btn-ghost btn-sm" href="/share" target="_blank" rel="noopener">Open the page</a>${caps.downloads ? html`<button className="btn btn-ghost btn-sm" onClick=${() => saveFile(caps, showToast, 'abg-share-your-story-qr.svg', qrSvg(url))}><${Icon} name="download" size=${16} /> Download QR code</button>` : null}</div>
+      </div>
+      <${QrCode} text=${url} label="QR code for the Share Your Story page" />
+    </section>
+    <section className="card">
+      <h2>Invitation message</h2>
+      <p className="small muted">Edit it if you like, then copy it into an email, text or post.</p>
+      <textarea id="inv-msg" className="textarea" rows="5" value=${msg} onChange=${e => setMsg(e.target.value)}></textarea>
+      <div className="row-btns"><${CopyButton} text=${msg} label="Copy message" /><a className="btn btn-ghost btn-sm" href=${mail}>Email it</a><a className="btn btn-ghost btn-sm" href=${sms}>Text it</a></div>
+    </section>
+    <section className="card">
+      <h2>Personal invitation links</h2>
+      <p className="small muted">A private link for one person (or a small group), shown once. It greets them by first name, can preset how they know ABG, and stops working after its uses or expiry date.</p>
+      <div className="row">
+        <${Field} label="Their first name (optional)"><input id="inv-label" className="input" maxLength="40" value=${form.label} onChange=${e => set('label', e.target.value)} /><//>
+        <${Field} label="How they know ABG (optional)"><select id="inv-rel" className="select" value=${form.relationship} onChange=${e => set('relationship', e.target.value)}><option value="">Let them choose</option>${RELATIONSHIPS.map(r => html`<option key=${r.id} value=${r.id}>${r.label}</option>`)}</select><//>
+      </div>
+      <div className="row">
+        <${Field} label="Can be used"><select id="inv-uses" className="select" value=${form.maxUses} onChange=${e => set('maxUses', e.target.value)}><option value="1">Once</option><option value="5">Up to 5 times</option><option value="25">Up to 25 times</option></select><//>
+        <${Field} label="Expires after"><select id="inv-days" className="select" value=${form.days} onChange=${e => set('days', e.target.value)}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select><//>
+      </div>
+      <${Field} label="Internal note (optional)" hint="Only ABG staff see this."><input id="inv-note" className="input" value=${form.note} onChange=${e => set('note', e.target.value)} /><//>
+      ${isAdmin ? html`<label className="check inv-minor"><input type="checkbox" id="inv-minor" checked=${form.minorConsent} onChange=${e => set('minorConsent', e.target.checked)} /> <span><strong>For a student under 18:</strong> I have documented permission from their parent or guardian for them to share their story with ABG. <span className="muted">Students under 18 can only take part through a link like this.</span></span></label>` : html`<p className="small muted">Inviting a student under 18? Ask an administrator: they record the parent or guardian's permission on the invitation.</p>`}
+      ${form.minorConsent ? html`<p className="notice small">Use "Once" and send the link to the parent or guardian. Stories by students under 18 are never shared publicly with names.</p>` : null}
+      <div><button className="btn btn-primary" id="inv-create" disabled=${busy || !api} onClick=${create}><${Icon} name="plus" size=${18} /> ${busy ? 'Creating…' : 'Create personal link'}</button></div>
+      ${made ? html`<div className="inv-made" id="inv-made">
+        <p className="small"><strong>Here's the link${made.label ? ' for ' + made.label : ''}.</strong> Copy it now: for privacy it isn't stored and can't be shown again.</p>
+        <div className="linkbox"><input id="inv-made-link" className="input" readOnly=${true} value=${made.link} onFocus=${e => e.target.select()} /><${CopyButton} text=${made.link} label="Copy link" /></div>
+        <div className="row-btns"><${CopyButton} text=${made.msg} label="Copy invitation message" /><a className="btn btn-ghost btn-sm" href=${'mailto:?subject=' + encodeURIComponent('Share your ABG story') + '&body=' + encodeURIComponent(made.msg)}>Email it</a><a className="btn btn-ghost btn-sm" href=${'sms:?&body=' + encodeURIComponent(made.msg)}>Text it</a></div>
+        <${QrCode} text=${made.link} label="QR code for this personal link" />
+      </div>` : null}
+      ${invites && invites.length ? html`<div className="inv-list">${invites.map(v => { const [label, tone] = invState(v); return html`<div className="linked" key=${v.id}>
+        <div style=${{minWidth: 0}}><${Pill} tone=${tone}>${label}<//> <strong>${v.label || 'No name'}</strong>${v.relationship ? ' · ' + labelOf(RELATIONSHIPS, v.relationship) : ''}${v.minor_consent ? html` <${Pill} tone="warn">Guardian permission on file<//>` : null}<br />
+          <span className="small muted">Used ${v.uses} of ${v.max_uses} · expires ${fmtDate(v.expires_at)} · by ${v.created_by}${v.note ? ' · ' + v.note : ''}</span></div>
+        ${label === 'Active' ? html`<button className="btn btn-quiet btn-sm" onClick=${() => revoke(v.id)}>Turn off</button>` : null}
+      </div>`; })}</div>` : invites ? html`<p className="empty-note small">No personal links yet.</p>` : null}
+    </section>
+    <section className="card">
+      <h2>Submission activity</h2>
+      ${subsState === 'missing' ? html`<p className="notice small">Community submissions aren't set up on the server yet.</p>` : html`
+      <div className="stats stats-3">
+        <div className="stat"><b>${subs.length}</b><span>Stories submitted</span></div>
+        <div className="stat"><b>${recent.length}</b><span>In the last 30 days</span></div>
+        <div className="stat"><b>${subs.filter(x => x.status === 'pending_review').length}</b><span>Waiting for review</span></div>
+      </div>
+      ${byRel.length ? html`<p className="small muted">By connection: ${byRel.map(r => r[0] + ' ' + r[1]).join(' · ')}</p>` : null}
+      <div><button className="btn btn-ghost btn-sm" onClick=${() => nav('submissions')}><${Icon} name="inbox" size=${16} /> Open Community Submissions</button></div>`}
+    </section>
+  </div>`;
+}
+
+/* ---------- Impact Insights: Community Perspectives and Source Comparison ---------- */
+const LONG_TERM_DOMAINS = ['graduation', 'higher_ed', 'career', 'returned', 'arts_continued', 'pathways', 'next_employment', 'further_ed', 'role_growth', 'mentoring_students'];
+function CommunityPerspectivesSection({list, period}){
+  const {nav, openSheet} = useApp();
+  const show = (title, rule, rows) => openSheet(close => html`<${BehindSheet} title=${title} rule=${rule} rows=${rows} close=${close} />`);
+  const com = list.filter(isCommunity);
+  const kinds = [['alumni_self', 'Alumni experiences'], ['parent_obs', 'Parent observations'], ['volunteer_obs', 'Volunteer observations'], ['community', 'Community testimonials'], ['student_self', 'Student self-reports'], ['staff_self', 'Staff self-reports']];
+  const ofKind = k => com.filter(s => k === 'community' ? ['community_obs', 'community_self'].includes(sourceKind(s)) : sourceKind(s) === k);
+  const themes = THEMES.map(t => ({t, n: com.filter(s => (s.themes || []).includes(t.id))})).filter(x => x.n.length).sort((a, b) => b.n.length - a.n.length).slice(0, 6);
+  const areas = ACTIVE_OUTCOMES.map(o => ({o, n: com.filter(s => storyOutcomes(s).has(o.id))})).filter(x => x.n.length).sort((a, b) => b.n.length - a.n.length);
+  const longTerm = com.filter(s => (s.evidence || []).some(e => e.status !== 'future' && LONG_TERM_DOMAINS.includes(domainOf(e)) && POSITIVE(e.direction)));
+  const voices = com.slice().sort((a, b) => ((b.status === 'approved') - (a.status === 'approved')) || (outcomeCount(b) - outcomeCount(a))).slice(0, 3);
+  return html`<section className="ins-section" aria-labelledby="h-community">
+    <h2 id="h-community" className="ins-h">Community Perspectives</h2>
+    <p className="tiny muted ins-hint">Stories shared through the Share Your Story page and approved by an administrator (${com.length} in this view, ${period}). Self-reports and observations, not verified records.</p>
+    ${com.length === 0 ? html`<section className="card ins-card"><p className="empty-note">Not yet documented. Community stories appear here after an administrator approves them in Community Submissions.</p><div><button className="btn btn-ghost btn-sm" onClick=${() => nav('invite')}><${Icon} name="share" size=${16} /> Invite contributors</button></div></section>` : html`
+    <div className="ins-charts">
+      <section className="card ins-card"><div><h3>Who shared</h3><p className="small muted">Approved community stories by perspective</p></div>
+        <ul className="ms-list">${kinds.map(([k, label]) => { const rows = ofKind(k); return html`<li key=${k}><button className="ms-btn" onClick=${() => show(label, rows.length + ' approved community stories.', rows.map(s => ({story: s, lines: [{text: contributorText(s)}]})))}><span>${label}</span><b className="tnum">${rows.length}</b></button></li>`; })}</ul>
+      </section>
+      <section className="card ins-card"><div><h3>Recurring themes and outcomes</h3><p className="small muted">Number of community stories mentioning each</p></div>
+        <ul className="ms-list">${areas.slice(0, 5).map(x => html`<li key=${x.o.id}><button className="ms-btn" onClick=${() => show(x.o.label, x.n.length + ' of ' + com.length + ' community stories.', x.n.map(s => ({story: s, lines: (s.evidence || []).filter(e => evidenceCategories(e).includes(x.o.id)).map(insLine)})))}><span>${x.o.label}</span><b className="tnum">${x.n.length}<small className="muted"> of ${com.length}</small></b></button></li>`)}
+          ${themes.slice(0, 3).map(x => html`<li key=${x.t.id}><button className="ms-btn" onClick=${() => show('Theme: ' + x.t.label, x.n.length + ' community stories.', x.n.map(s => ({story: s, lines: []})))}><span>Theme: ${x.t.label}</span><b className="tnum">${x.n.length}</b></button></li>`)}
+          <li><button className="ms-btn" onClick=${() => show('Long-term outcomes', 'Community stories describing graduation, college, careers, returning to ABG, continued art or professional growth.', longTerm.map(s => ({story: s, lines: (s.evidence || []).filter(e => e.status !== 'future' && LONG_TERM_DOMAINS.includes(domainOf(e))).map(insLine)})))}><span>Long-term outcomes described</span><b className="tnum">${longTerm.length}</b></button></li>
+        </ul>
+      </section>
+    </div>
+    <section className="card ins-card"><div><h3>Community voices</h3><p className="small muted">In contributors' own experience. Public use only where the story is approved for external use.</p></div>
+      <div className="fs-grid">${voices.map(s => html`<button className="fs-card" key=${s.id} onClick=${() => nav('story', {id: s.id})}>${storyArt(s.id)}<span className="fs-main"><strong>${s.alias || sourceLabel(s)}</strong><small className="muted">${sourceLabel(s)}</small><span className="fs-sum">${s.summary || s.title}</span></span></button>`)}</div>
+    </section>`}
+  </section>`;
+}
+function SourceComparisonSection({list}){
+  const {nav, openSheet} = useApp();
+  const show = (title, rule, rows) => openSheet(close => html`<${BehindSheet} title=${title} rule=${rule} rows=${rows} close=${close} />`);
+  const st = useMemo(() => sourceStats(list), [list]);
+  const matches = useMemo(() => possibleMatches(list), [list]);
+  const byCat = id => st.pairs.filter(p => p.link.comparison === id);
+  const stat = (value, label, sub, onClick) => html`<button className="stat-card ins-stat" onClick=${onClick}><span className="stat-text"><b className="tnum">${value}</b><span className="stat-label">${label}</span><small className="muted">${sub}</small></span></button>`;
+  return html`<section className="ins-section" aria-labelledby="h-sources">
+    <h2 id="h-sources" className="ins-h">Source Comparison</h2>
+    <p className="tiny muted ins-hint">People are counted once even when several accounts describe them. Agreement between perspectives strengthens a story; it doesn't make an outcome independently verified.</p>
+    <div className="ins-stats">
+      ${stat(st.individuals, 'Unique individuals represented', 'Students and staff, each counted once', () => nav('compare'))}
+      ${stat(st.stories, 'Stories', 'Internal interviews and approved community stories', () => nav('library'))}
+      ${stat(st.outcomes, 'Reported outcomes', 'Outcome records, as recorded', () => nav('compare'))}
+      ${stat(st.perspectives, 'Supporting perspectives', 'Extra perspectives on the same person', () => show('Supporting perspectives', 'People with accounts from more than one perspective.', st.multi.map(g => ({story: g[0], lines: g.map(s => ({text: sourceLabel(s) + ': ' + s.title}))}))))}
+      ${stat(st.verified, 'Independently verified outcomes', 'Checked against records', () => nav('compare'))}
+    </div>
+    <div className="ins-charts">
+      <section className="card ins-card"><div><h3>Linked accounts</h3><p className="small muted">How confirmed accounts of the same person compare</p></div>
+        <ul className="ms-list">${COMPARISON.map(c => { const rows = byCat(c.id); return html`<li key=${c.id}><button className="ms-btn" onClick=${() => show(c.label, c.desc, rows.map(p => ({story: p.a, lines: [{text: sourceLabel(p.a) + ' and ' + sourceLabel(p.b) + (p.link.note ? ': ' + p.link.note : ''), tag: c.label}]})))}><span>${c.label}</span><b className="tnum">${rows.length}</b></button></li>`; })}
+          <li><button className="ms-btn" onClick=${() => nav('compare')}><span>Possible matches awaiting review</span><b className="tnum">${matches.length}</b></button></li></ul>
+      </section>
+      <section className="card ins-card"><div><h3>Cross-perspective findings</h3><p className="small muted">From people with more than one account</p></div>
+        <ul className="ms-list">
+          <li><button className="ms-btn" onClick=${() => show('Outcomes supported by multiple perspectives', 'An outcome area with a positive account from two or more different perspectives about the same person.', st.supported.map(x => ({story: x.group[0], lines: x.items.map(i => ({text: sourceLabel(i.s) + ': ' + i.e.statement, e: i.e}))})))}><span>Outcomes supported by multiple perspectives</span><b className="tnum">${st.supported.length}</b></button></li>
+          <li><button className="ms-btn" onClick=${() => show('Conflicting accounts', 'Linked accounts an administrator marked as conflicting. Both accounts are kept as told.', st.conflicts.map(p => ({story: p.a, lines: [{text: sourceLabel(p.a) + ' vs ' + sourceLabel(p.b) + (p.link.note ? ': ' + p.link.note : '')}]})))}><span>Conflicting accounts needing review</span><b className="tnum">${st.conflicts.length}</b></button></li>
+          <li><button className="ms-btn" onClick=${() => show('Outcomes that need verification', 'Outcomes in linked accounts that no one has checked against a record yet.', groupRows(st.unverifiedLinked.map(x => ({s: x.s, line: insLine(x.e)}))))}><span>Outcomes in linked accounts not yet verified</span><b className="tnum">${st.unverifiedLinked.length}</b></button></li>
+        </ul>
+      </section>
+    </div>
+  </section>`;
+}
+
 /* ================= staff story pieces ================= */
 function TypePill({story}){
   const t = storyTypeOf(story);
@@ -4563,6 +5053,10 @@ function applyFilters(stories, f, q){
   const toks = norm(q).split(' ').filter(Boolean);
   return stories.filter(s => {
     if (f.type && storyTypeOf(s) !== f.type) return false;
+    if (f.source && (f.source === 'community') !== isCommunity(s)) return false;
+    if (f.contributor && relationshipOf(s) !== f.contributor) return false;
+    if (f.evclass && !(s.evidence || []).some(e => e.status !== 'future' && evidenceClass(e) === f.evclass)) return false;
+    if (f.review === 'withdrawn' && reportable(s)) return false;
     if (f.former === 'yes' && !isFormerStudent(s)) return false;
     if (f.status && s.status !== f.status) return false;
     if (f.category && !(s.categories || []).includes(f.category)) return false;
@@ -4605,7 +5099,8 @@ function FilterSheet({initial, programs, communities, students, onApply, close})
   const sel = (id, label, key, opts) => html`<${Field} label=${label}><select id=${id} className="select" value=${f[key] || ''} onChange=${e => set(key, e.target.value)}><option value="">Any</option>${opts.map(o => html`<option key=${o[0]} value=${o[0]}>${o[1]}</option>`)}</select><//>`;
   return html`<div className="view" style=${{gap: '12px'}}>
     <${SheetHead} title="Filter stories" close=${close} />
-    <div className="row">${sel('fl-status', 'Status', 'status', STATUSES.map(s => [s.id, s.label]))}${sel('fl-period', 'Historical or recent', 'period', [['past', 'Historical'], ['recent', 'Recent'], ['ongoing', 'Ongoing (has updates)']])}</div>
+    <div className="row">${sel('fl-contrib', 'Contributor relationship', 'contributor', CONTRIBUTOR_TYPES.map(c => [c.id, c.label]))}${sel('fl-evclass', 'Evidence classification', 'evclass', EVIDENCE_CLASSES.map(c => [c.id, c.label]))}</div>
+    <div className="row">${sel('fl-status', 'Review status', 'status', STATUSES.map(s => [s.id, s.label]))}${sel('fl-period', 'Historical or recent', 'period', [['past', 'Historical'], ['recent', 'Recent'], ['ongoing', 'Ongoing (has updates)']])}</div>
     <div className="row">${sel('fl-student', 'Student first name', 'student', students.slice().sort((a, b) => a.firstName.localeCompare(b.firstName)).map(x => [x.id, x.firstName + (x.note ? ' (' + x.note + ')' : '')]))}${sel('fl-horizon', 'Impact', 'horizon', [['short', 'Short-term impact'], ['long', 'Long-term impact']])}</div>
     <div className="row">${sel('fl-cat', 'Impact category', 'category', CATEGORIES.map(c => [c.id, c.label]))}${sel('fl-theme', 'Theme', 'theme', THEMES.map(c => [c.id, c.label]))}</div>
     <div className="row">${sel('fl-aud', 'Useful for', 'audience', AUDIENCES.map(c => [c.id, c.label]))}${sel('fl-ev', 'Evidence', 'evidence', [['measurable', 'Has measurable evidence'], ['verified', 'Has verified numbers']])}</div>
@@ -4631,7 +5126,7 @@ function LibraryView({embedded}){
   const programs = uniq((settings.programs || []).concat(stories.map(s => s.program)));
   const communities = uniq((settings.communities || []).concat(stories.map(s => s.community)));
   const list = useMemo(() => sortStories(applyFilters(stories, f, q), sort), [stories, f, q, sort]);
-  const active = Object.keys(f).filter(k => f[k] && k !== 'type' && k !== 'former').length;
+  const active = Object.keys(f).filter(k => f[k] && k !== 'type' && k !== 'former' && k !== 'source').length;
   const quick = [['status', 'approved', 'Approved'], ['need', 'yes', 'Needs follow-up'], ['evidence', 'measurable', 'Has measurable evidence'], ['period', 'ongoing', 'Ongoing'], ['period', 'past', 'Historical'], ['horizon', 'long', 'Long-term impact']];
   async function ask(){
     if (!asStr(q) || !caps.sample) return;
@@ -4656,6 +5151,7 @@ function LibraryView({embedded}){
     </form>
     <div className="type-filter">
       <div className="seg" role="group" aria-label="Story type">${[['', 'All stories'], ['student', 'Student Impact'], ['staff', 'Staff Impact']].map(([v, l]) => html`<button type="button" key=${v || 'all'} id=${'lt-' + (v || 'all')} className="seg-btn" aria-pressed=${(f.type || '') === v} onClick=${() => setF(x => Object.assign({}, x, {type: v, former: v === 'staff' ? x.former : ''}))}>${l}<span className="seg-n tnum">${v ? stories.filter(s => storyTypeOf(s) === v).length : stories.length}</span></button>`)}</div>
+      <div className="seg" role="group" aria-label="Source">${[['', 'All sources'], ['internal', 'Internal interviews'], ['community', 'Community submissions']].map(([v, l]) => html`<button type="button" key=${v || 'all'} id=${'ls-' + (v || 'all')} className="seg-btn" aria-pressed=${(f.source || '') === v} onClick=${() => setF(x => Object.assign({}, x, {source: v}))}>${l}<span className="seg-n tnum">${v ? stories.filter(s => (v === 'community') === isCommunity(s)).length : stories.length}</span></button>`)}</div>
       ${f.type === 'staff' ? html`<button type="button" id="lt-former" className="chip chip-path" aria-pressed=${f.former === 'yes'} onClick=${() => setF(x => Object.assign({}, x, {former: x.former === 'yes' ? '' : 'yes'}))}>Former ABG students (Student → Staff) <span className="tnum">${stories.filter(isFormerStudent).length}</span></button>` : null}
     </div>
     <div className="filter-row">
@@ -4851,7 +5347,7 @@ function buildStakeholderReport({stories, period, external, selected, includesDe
   out.push('ABG staff documented ' + N + ' student' + (N === 1 ? '' : 's') + ' in ' + stories.length + ' stor' + (stories.length === 1 ? 'y' : 'ies') + (programs.length ? ' across ' + programs.length + ' program' + (programs.length === 1 ? '' : 's') : '') + '. ' + withOut + ' of ' + N + ' students (' + pct(withOut, N) + ') have at least one documented outcome.' +
     (top.length ? ' The most frequently documented areas were ' + top.map(a => a.o.label.toLowerCase() + ' (' + a.n + ' of ' + N + ')').join(', ') + '.' : '') +
     (edu[0].n || edu[1].n ? ' ' + edu[0].n + ' documented student' + (edu[0].n === 1 ? '' : 's') + ' graduated high school and ' + edu[1].n + ' went on to college or further education.' : '') +
-    ' Of ' + R + ' outcome records, ' + pct(cls.observed || 0, R) + ' were directly observed by ABG staff, ' + pct(cls.reported || 0, R) + ' were reported by students or others, ' + pct(cls.verified || 0, R) + ' were verified by documentation and ' + pct(cls.unconfirmed || 0, R) + ' are unconfirmed.', '');
+    ' Of ' + R + ' outcome records, ' + pct(cls.observed || 0, R) + ' were directly observed by ABG staff, ' + pct(cls.self || 0, R) + ' were self-reported, ' + pct(cls.community || 0, R) + ' were community-observed, ' + pct(cls.verified || 0, R) + ' were independently verified and ' + pct(cls.unconfirmed || 0, R) + ' are unconfirmed.', '');
   out.push('These figures describe the students ABG staff chose to document. They are not a representative sample and are not rates for all ABG students.', '');
   out.push('## Key findings', '');
   out.push('- Students documented: ' + N + ' (each counted once)');
@@ -4859,8 +5355,8 @@ function buildStakeholderReport({stories, period, external, selected, includesDe
   out.push('- Stories recorded: ' + stories.length + '; outcome records: ' + R);
   edu.filter(x => x.n > 0).forEach(x => out.push('- ' + x.m.label + ': ' + x.n + ' of ' + N + ' students'));
   out.push('');
-  out.push('## Outcomes by area', '', '| Outcome area | Students | Share of students documented | Verified | Staff-observed | Reported | Unconfirmed |', '|---|---|---|---|---|---|---|');
-  areas.forEach(a => out.push('| ' + [a.o.label, a.n, pct(a.n, N), a.by.verified || 0, a.by.observed || 0, a.by.reported || 0, a.by.unconfirmed || 0].join(' | ') + ' |'));
+  out.push('## Outcomes by area', '', '| Outcome area | Students | Share of students documented | Verified | Staff-observed | Self-reported | Community-observed | Unconfirmed |', '|---|---|---|---|---|---|---|---|');
+  areas.forEach(a => out.push('| ' + [a.o.label, a.n, pct(a.n, N), a.by.verified || 0, a.by.observed || 0, a.by.self || 0, a.by.community || 0, a.by.unconfirmed || 0].join(' | ') + ' |'));
   out.push('', '_A student counts once per area, using the strongest evidence on file. No-change, declines and planned outcomes are not counted._', '');
   const sx = staffImpactStats(stories);
   if (sx.N) {
@@ -4893,7 +5389,7 @@ function buildStakeholderReport({stories, period, external, selected, includesDe
   out.push('- These are the students ABG staff chose to record, so they are not a representative sample of all ABG participants. Results should not be read as program-wide rates.');
   out.push('- The reporting period is based on when stories were first recorded; some outcomes happened earlier.');
   out.push('- ' + incomplete + ' of ' + R + ' outcome records lack an initial condition, a current condition or a known source.');
-  out.push('- ' + pct((cls.reported || 0) + (cls.unconfirmed || 0), R) + ' of outcome records rely on reports from students or others, or are unconfirmed; ' + pct(cls.verified || 0, R) + ' are verified by documentation.');
+  out.push('- ' + pct((cls.self || 0) + (cls.community || 0) + (cls.unconfirmed || 0), R) + ' of outcome records are self-reported, community-observed or unconfirmed; ' + pct(cls.verified || 0, R) + ' are independently verified.');
   if (topGaps.length) out.push('- Most common data gaps: ' + topGaps.map(g => g[0] + ' (' + g[1] + ')').join('; ') + '.');
   if (external) out.push('- Student names appear only where publication permission is documented; sensitive experiences are left out unless consent is documented.');
   out.push('- ABG\'s contribution is described as staff observed or students reported it. These records do not establish that ABG caused an outcome.');
@@ -5080,7 +5576,8 @@ async function removeDemoData(db, allStories, allStudents, allStaff){
   for (const o of allStories.filter(x => !x.demo && (x.links || []).some(l => storyIds.includes(l.storyId)))) await db.collection('stories').doc(o.id).update({links: (o.links || []).filter(l => !storyIds.includes(l.storyId))});
 }
 /* demo records stay out of reports and exports unless included; when included they are clearly marked */
-function forReporting(stories, students, settings){
+function forReporting(all, students, settings){
+  const stories = all.filter(reportable);
   const inc = !!((settings && settings.demo) || {}).inExports;
   if (!inc) return {stories: stories.filter(x => !x.demo), students: (students || []).filter(x => !x.demo), demoN: stories.filter(x => x.demo).length, included: false};
   const mark = x => x.demo ? Object.assign({}, x, {title: '[DEMO, fictional] ' + (x.title || ''), summary: '[Fictional demo story] ' + (x.summary || '')}) : x;
@@ -5475,6 +5972,8 @@ function App(){
   const [metrics, setMetrics] = useState([]);
   const [students, setStudents] = useState([]);
   const [staffPeople, setStaffPeople] = useState([]);
+  const [subs, setSubs] = useState([]);
+  const [subsState, setSubsState] = useState('loading');
   const [backlog, setBacklog] = useState([]);
   const [backlogLoaded, setBacklogLoaded] = useState(false);
   const [settings, setSettings] = useState({programs: [], communities: [], programInfo: {}, outcomes: [], demo: {}});
@@ -5535,6 +6034,21 @@ function App(){
     }
   }, [caps.canWrite, showToast]);
 
+  /* community submissions: read through row-level security (submitted stories only, never unfinished drafts) */
+  const reloadSubs = useCallback(async () => {
+    const api = window.__platform && window.__platform.community;
+    if (!api) { setSubsState('none'); return; }
+    try { setSubs(await api.list()); setSubsState('ready'); }
+    catch (e) { setSubsState(/not set up/.test((e && e.message) || '') ? 'missing' : 'error'); }
+  }, []);
+  useEffect(() => {
+    if (caps.status !== 'ready') return;
+    reloadSubs();
+    const t = setInterval(reloadSubs, 120000);
+    const v = () => { if (!document.hidden) reloadSubs(); };
+    document.addEventListener('visibilitychange', v);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', v); };
+  }, [caps.status]);
   const updateMe = useCallback(patch => setCaps(c => Object.assign({}, c, {me: Object.assign({}, c.me, patch)})), []);
   /* fictional demo stories: added once so a new journal has something to explore; hidden or removed from Settings */
   useEffect(() => {
@@ -5562,7 +6076,7 @@ function App(){
   const shownStories = useMemo(() => demoHidden ? stories.filter(x => !x.demo) : stories, [stories, demoHidden]);
   const shownStudents = useMemo(() => demoHidden ? students.filter(x => !x.demo) : students, [students, demoHidden]);
   const shownStaff = useMemo(() => demoHidden ? staffPeople.filter(x => !x.demo) : staffPeople, [staffPeople, demoHidden]);
-  const ctx = {caps, updateMe, stories: shownStories, students: shownStudents, staffPeople: shownStaff, allStaff: staffPeople, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite,
+  const ctx = {caps, updateMe, stories: shownStories, students: shownStudents, staffPeople: shownStaff, allStaff: staffPeople, subs, subsState, reloadSubs, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite,
     readOnly, role: role || 'user', isAdmin: role === 'admin'};
   const focus = caps.status === 'ready' && (route.name === 'record' || route.name === 'review' || route.name === 'interview');
   let content;
@@ -5582,6 +6096,10 @@ function App(){
       case 'reports': content = html`<${DashboardView} key=${route.key} tab="reports" />`; break;
       case 'settings': content = html`<${SettingsView} />`; break;
       case 'guide': content = html`<${GuideView} key=${route.key} />`; break;
+      case 'submissions': content = html`<${SubmissionsView} key=${route.key} />`; break;
+      case 'submission': content = html`<${SubmissionView} key=${p.id} id=${p.id} />`; break;
+      case 'compare': content = html`<${CompareView} key=${route.key} a=${p.a} b=${p.b} />`; break;
+      case 'invite': content = html`<${InviteView} key=${route.key} />`; break;
       default: content = html`<${HomeView} />`;
     }
   }

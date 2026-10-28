@@ -292,3 +292,30 @@ export function makeRole(sb, email){
     return (data && data.role) || 'user';
   };
 }
+
+/* Community Submissions and contributor invitations for signed-in staff. Row-level security decides what each
+   person may do: active staff can read submitted stories and create ordinary invitations; only administrators
+   can review, change or delete submissions, or record guardian consent on an invitation. */
+const SUB_COLS = 'id,status,relationship,perspective,story_type,is_minor,intake,turns,data,analysis,contributor_edits,clarifications,publication_consent,recording_consent,review,story_id,invite_id,created_at,updated_at,submitted_at,removal_requested_at';
+function randomToken(){ const b = new Uint8Array(32); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+async function sha256Hex(s){ const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join(''); }
+export function makeCommunityAdmin(sb){
+  const err = e => { const m = (e && e.message) || ''; throw {message: /permission|row-level|policy/i.test(m) ? "You don't have permission to do that." : /relation .* does not exist|schema cache/i.test(m) ? 'Community submissions are not set up on the server yet.' : "That didn't work. Check your connection and try again.", code: e && e.code}; };
+  return {
+    async list(){ const {data, error} = await sb.from('community_submissions').select(SUB_COLS).order('submitted_at', {ascending: false}); if (error) err(error); return data || []; },
+    async get(id){ const {data, error} = await sb.from('community_submissions').select(SUB_COLS).eq('id', id).maybeSingle(); if (error) err(error); return data; },
+    async update(id, patch){ const {error} = await sb.from('community_submissions').update(patch).eq('id', id); if (error) err(error); },
+    async remove(id){ const {error} = await sb.from('community_submissions').delete().eq('id', id); if (error) err(error); },
+    async events(id){ const {data, error} = await sb.from('submission_events').select('at,actor,action,details').eq('submission_id', id).order('at', {ascending: true}); if (error) err(error); return data || []; },
+    async invites(){ const {data, error} = await sb.from('community_invites').select('id,label,relationship,minor_consent,note,created_by,created_at,expires_at,max_uses,uses,revoked_at').order('created_at', {ascending: false}); if (error) err(error); return data || []; },
+    async createInvite({label, relationship, minorConsent, note, maxUses, days, email}){
+      const token = randomToken();
+      const row = {token_hash: await sha256Hex(token), label: label || null, relationship: relationship || null, minor_consent: !!minorConsent, note: note || null, max_uses: maxUses || 1,
+        expires_at: new Date(Date.now() + (days || 30) * 864e5).toISOString(), created_by: (email || '').toLowerCase()};
+      const {error} = await sb.from('community_invites').insert(row);
+      if (error) err(error);
+      return token;
+    },
+    async revokeInvite(id){ const {error} = await sb.from('community_invites').update({revoked_at: new Date().toISOString()}).eq('id', id); if (error) err(error); },
+  };
+}
