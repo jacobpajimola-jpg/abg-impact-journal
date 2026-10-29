@@ -265,6 +265,31 @@ function fmtNum(v){ const n = toNum(v); return n == null ? '' : n.toLocaleString
 function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
 function lsDel(k){ try { localStorage.removeItem(k); } catch (e) {} }
+/* Unfinished interviews (Capture a Story). Each interview is its own session with an id. While it runs, it is
+   kept on this device ("state") so a closed tab or a trip to another page never loses words; "Save draft" also
+   stores a snapshot ("snap"). Capture a Story never reopens one by itself: it offers Resume Draft or Start New Story.
+   Start New Story throws away unsaved changes (after asking) but keeps a saved draft as it was saved. */
+const IV_DRAFTS = 'abg-iv-drafts';
+function ivDrafts(){
+  let l = [];
+  try { l = JSON.parse(lsGet(IV_DRAFTS) || '[]') || []; } catch (e) { l = []; }
+  /* the old single auto-restored interview becomes an ordinary draft */
+  try { const old = JSON.parse(lsGet('abg-interview:new') || 'null'); if (old && (asStr(old.first) || (old.turns || []).length)) { l.unshift({id: uid('iv'), at: old.at || Date.now(), state: old}); lsSet(IV_DRAFTS, JSON.stringify(l)); } lsDel('abg-interview:new'); } catch (e) {}
+  return Array.isArray(l) ? l.filter(d => d && d.id && d.state) : [];
+}
+function ivWrite(l){ lsSet(IV_DRAFTS, JSON.stringify(l.sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 12))); }
+function ivPut(id, patch){ const l = ivDrafts(); const i = l.findIndex(d => d.id === id); if (i >= 0) l[i] = Object.assign({}, l[i], patch); else l.push(Object.assign({id}, patch)); ivWrite(l); }
+function ivDel(id){ ivWrite(ivDrafts().filter(d => d.id !== id)); }
+/* drafts are referred to as "ivd:<id>"; older flows (story updates, the student list) keep their own keys */
+function clearDraft(ref){ if (!ref) return; if (String(ref).startsWith('ivd:')) ivDel(String(ref).slice(4)); else lsDel(ref); }
+/* leaving without saving: back to the last saved draft if there is one, otherwise gone */
+function discardDraft(ref){
+  if (!ref) return;
+  if (!String(ref).startsWith('ivd:')) { lsDel(ref); return; }
+  const id = String(ref).slice(4), d = ivDrafts().find(x => x.id === id);
+  if (d && d.snap) ivPut(id, {state: d.snap, at: d.snapAt || d.at}); else ivDel(id);
+}
+function ivSig(o){ const x = o || {}; return JSON.stringify([x.step, x.kind, x.first, x.pick, x.note, x.when, x.gender, x.school, x.demo, x.si, x.turns, x.answer, x.phase, (x.clips || []).length]); }
 function asStr(v){ return typeof v === 'string' ? v.trim() : (v == null ? '' : String(v)); }
 function asArr(v){ return Array.isArray(v) ? v : []; }
 function pickEnum(v, list, dflt){ return list.some(x => x.id === v) ? v : dflt; }
@@ -2539,7 +2564,7 @@ function GuidePanel({onClose, kind}){
   </aside>`;
 }
 function GuideButton({open, onToggle}){
-  return html`<button type="button" className="btn btn-ghost btn-sm guide-btn" aria-expanded=${open} onClick=${onToggle}><${Icon} name="compass" size=${16} /> ${open ? 'Hide guide' : 'View Interview Guide'}</button>`;
+  return html`<button type="button" className="btn btn-ghost btn-sm guide-btn" aria-expanded=${open} onClick=${onToggle}><${Icon} name="compass" size=${16} /> ${open ? 'Hide guide' : html`<span className="gb-long">View Interview Guide</span><span className="gb-short" aria-hidden="true">Guide</span>`}</button>`;
 }
 
 /* ================= recording building blocks ================= */
@@ -2764,11 +2789,14 @@ async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, app
 
 /* ================= general story composer (programs, murals, partnerships) ================= */
 function ComposerView({params}){
-  const {caps, stories, storiesLoaded, nav, readOnly, safeWrite, showToast, storyById} = useApp();
+  const {caps, stories, storiesLoaded, nav, readOnly, safeWrite, showToast, storyById, openSheet} = useApp();
   const storyId = params.storyId || null;
   const story = storyId ? storyById(storyId) : null;
   const draftKey = 'abg-draft:' + (storyId || 'new');
-  const initial = useMemo(() => { try { return JSON.parse(lsGet(draftKey) || 'null') || {}; } catch (e) { return {}; } }, [draftKey]);
+  const stored = useMemo(() => { try { return JSON.parse(lsGet(draftKey) || 'null') || {}; } catch (e) { return {}; } }, [draftKey]);
+  /* an unfinished general story is offered (Resume Draft / Start New Story), never reopened by itself */
+  const [choosing, setChoosing] = useState(() => !storyId && !params.resume && !params.fresh && !!(stored.text || (stored.clips || []).length));
+  const initial = choosing || params.fresh ? {} : stored;
   const [text, setText] = useState(initial.text || '');
   const [when, setWhen] = useState(initial.when || '');
   const [approx, setApprox] = useState(!!initial.approx);
@@ -2778,13 +2806,23 @@ function ComposerView({params}){
   const [clips, setClips] = useState(initial.clips || []);
   const [recBusy, setRecBusy] = useState(false);
   const ctlRef = useRef(null);
-  const restored = !!initial.text;
+  const restored = !!initial.text && !params.resume;
+  const recFlush = useRef(null), recEnded = useRef(false);
   const basePrompt = params.prompt || (storyId ? UPDATE_PROMPT : PROMPTS[0]);
   const prompt = pIdx === 0 ? basePrompt : PROMPTS[pIdx % PROMPTS.length];
   useEffect(() => {
-    const t = setTimeout(() => { if (text.trim() || when.trim() || clips.length) lsSet(draftKey, JSON.stringify({text, when, approx, clips, at: Date.now()})); else lsDel(draftKey); }, 350);
+    const write = () => { if (choosing || recEnded.current) return; if (text.trim() || when.trim() || clips.length) lsSet(draftKey, JSON.stringify({text, when, approx, clips, at: Date.now()})); else lsDel(draftKey); };
+    recFlush.current = write;
+    const t = setTimeout(write, 350);
     return () => clearTimeout(t);
-  }, [text, when, approx, clips, draftKey]);
+  }, [text, when, approx, clips, draftKey, choosing]);
+  useEffect(() => () => { if (!recEnded.current && recFlush.current) recFlush.current(); }, []);
+  const unsavedText = !!(text.trim() || clips.length);
+  const startNew = () => {
+    const go = () => { recEnded.current = true; if (ctlRef.current) ctlRef.current.abort(); lsDel(draftKey); nav('interview', {fresh: true}); };
+    if (!unsavedText) { go(); return; }
+    openSheet(close => html`<${ConfirmSheet} close=${close} title="Start a new story?" body="Your current unsaved progress will be lost." confirmLabel="Start New Story" onConfirm=${go} />`);
+  };
   useEffect(() => () => { if (ctlRef.current) ctlRef.current.abort(); }, []);
   const hasText = !!text.trim();
   function makeEntry(){
@@ -2813,7 +2851,7 @@ function ComposerView({params}){
     setBusy('save');
     const sid = await saveRawEntry({caps, safeWrite, story, entry: makeEntry(), title: titleFromText(text), whenText: when.trim(), approx, followupId: params.followupId});
     setBusy(null);
-    if (sid) { lsDel(draftKey); showToast(story ? 'Update saved' : 'Story saved'); nav('story', {id: sid}); }
+    if (sid) { recEnded.current = true; lsDel(draftKey); showToast(story ? 'Update saved' : 'Story saved'); nav('story', {id: sid}); }
   }
   const back = () => story ? nav('story', {id: story.id}) : nav('home');
   const [guideOpen, setGuideOpen] = useState(false);
@@ -2821,8 +2859,17 @@ function ComposerView({params}){
   if (readOnly) return html`<div className="view"><${FocusHeader} title=${title} onBack=${() => nav('home')} /><p className="notice">You have view-only access to this journal. Ask the person who shared it for Editor access to record stories.</p></div>`;
   if (storyId && !story) return html`<div className="view"><${FocusHeader} title=${title} onBack=${() => nav('library')} />${storiesLoaded ? html`<p className="notice">This story isn't in the journal anymore.</p>` : html`<div className="skeleton"></div>`}</div>`;
   if (busy === 'analyze') return html`<div className="view"><${FocusHeader} title=${title} sub=${story ? story.title : null} onBack=${() => ctlRef.current && ctlRef.current.abort()} /><${Analyzing} onStop=${() => ctlRef.current && ctlRef.current.abort()} /></div>`;
+  if (choosing) return html`<div className="view composer">
+    <${FocusHeader} title=${title} sub="You have an unfinished general story on this device" onBack=${back} />
+    <section className="card draft-card">
+      <p><strong>Unfinished draft</strong> <span className="small muted">from ${fmtDate(new Date(stored.at || Date.now()).toISOString())}</span></p>
+      <p className="small muted draft-preview">${asStr(stored.text).slice(0, 160)}${asStr(stored.text).length > 160 ? '…' : ''}</p>
+      <div className="row-btns"><button className="btn btn-primary" id="rec-resume" onClick=${() => nav('record', Object.assign({}, params, {resume: true}))}>Resume Draft</button>
+        <button className="btn btn-ghost" id="rec-start-new" onClick=${() => openSheet(close => html`<${ConfirmSheet} close=${close} title="Start a new story?" body="Your current unsaved progress will be lost." confirmLabel="Start New Story" onConfirm=${() => { recEnded.current = true; lsDel(draftKey); nav('record', {fresh: true}); }} />`)}>Start New Story</button></div>
+    </section>
+  </div>`;
   return html`<div className="view composer">
-    <${FocusHeader} title=${title} sub=${story ? story.title : 'For programs, murals, partnerships, and community moments. For a student, start a student story instead.'} onBack=${back} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+    <${FocusHeader} title=${title} sub=${story ? story.title : 'For programs, murals, partnerships, and community moments. For a student, start a student story instead.'} onBack=${back} action=${html`<div className="focus-actions"><button type="button" className="btn btn-ghost btn-sm new-story-btn" id="rec-new-story" onClick=${startNew}><${Icon} name="plus" size=${16} /> <span className="nsb-long">Start New Story</span><span className="nsb-short" aria-hidden="true">New story</span></button><${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} /></div>`} />
     ${guideOpen ? html`<${GuidePanel} onClose=${() => setGuideOpen(false)} />` : null}
     <div className="prompt-card">
       <p className="prompt-text">${prompt}</p>
@@ -2836,7 +2883,7 @@ function ComposerView({params}){
     <//>
     ${err ? html`<p className="error" role="alert">${err}</p>` : null}
     ${!caps.sample ? html`<p className="notice small">Claude analysis isn't available in this view, so this entry will be saved without a summary. You can analyze it later from the story page.</p>` : null}
-    ${restored ? html`<p className="small muted">Restored your unsaved draft from this device.</p>` : null}
+    ${restored || params.resume ? html`<p className="small muted">${params.resume ? 'Resumed your draft. It stays saved on this device until you save the story.' : 'Restored your unsaved draft from this device.'}</p>` : null}
     <div className="savebar"><div className="inner">
       <button className="btn btn-ghost" onClick=${saveRaw} disabled=${!hasText || !!busy || recBusy}>${busy === 'save' ? 'Saving…' : 'Save without analysis'}</button>
       ${caps.sample ? html`<button className="btn btn-primary" onClick=${analyze} disabled=${!hasText || !!busy || recBusy}><${Icon} name="spark" size=${18} /> Analyze with Claude</button>` : null}
@@ -2847,12 +2894,18 @@ function ComposerView({params}){
 /* ================= student interview ================= */
 function turnsToText(turns){ return turns.map(t => 'Q: ' + t.q + '\nA: ' + (t.status === 'skipped' ? '(skipped)' : t.a)).join('\n\n'); }
 function InterviewView({params}){
-  const {caps, stories, students, staffPeople, storiesLoaded, settings, nav, readOnly, safeWrite, showToast, storyById} = useApp();
+  const {caps, stories, students, staffPeople, storiesLoaded, settings, nav, readOnly, safeWrite, showToast, storyById, openSheet} = useApp();
   const storyId = params.storyId || null;
   const story = storyId ? storyById(storyId) : null;
   const mode = storyId ? 'update' : 'new';
-  const draftKey = 'abg-interview:' + (storyId || (params.backlogId ? 'bl-' + params.backlogId : 'new'));
-  const init = useMemo(() => { try { return JSON.parse(lsGet(draftKey) || 'null') || null; } catch (e) { return null; } }, [draftKey]);
+  /* a brand-new story is its own session (see ivDrafts); story updates and student-list interviews keep their own key */
+  const plainNew = mode === 'new' && !params.backlogId && !params.followupId;
+  const [drafts, setDrafts] = useState(() => plainNew ? ivDrafts() : []);
+  const resumeDraft = plainNew && params.resume ? drafts.find(d => d.id === params.resume) || null : null;
+  const [choosing, setChoosing] = useState(() => plainNew && !params.resume && !params.fresh && !params.kind && drafts.length > 0);
+  const [sid] = useState(() => resumeDraft ? resumeDraft.id : uid('iv'));
+  const draftKey = plainNew ? 'ivd:' + sid : 'abg-interview:' + (storyId || (params.backlogId ? 'bl-' + params.backlogId : 'new'));
+  const init = useMemo(() => { if (plainNew) return resumeDraft ? resumeDraft.state : null; try { return JSON.parse(lsGet(draftKey) || 'null') || null; } catch (e) { return null; } }, [draftKey]);
   const fresh = !init || (params.followupId && init.followupId !== params.followupId) || (params.backlogId && init.backlogId !== params.backlogId);
   const I = fresh ? {} : init;
   const presetKind = I.kind || params.kind || (params.backlogId ? 'student' : '');
@@ -2882,7 +2935,8 @@ function InterviewView({params}){
   const [busy, setBusy] = useState(null);
   const qCtl = useRef(null);
   const aCtl = useRef(null);
-  const restored = !fresh && (I.turns || []).length > 0;
+  const restored = !plainNew && !fresh && (I.turns || []).length > 0;
+  const [savedSig, setSavedSig] = useState(() => resumeDraft && resumeDraft.snap ? ivSig(resumeDraft.snap) : null);
 
   const K = mode === 'update' ? (isStaffStory(story) ? 'staff' : 'student') : (kind || 'student');
   const staff = K === 'staff';
@@ -2900,13 +2954,26 @@ function InterviewView({params}){
   useEffect(() => {
     if (mode === 'update' && story && !current && turns.length === 0) setCurrent({q: params.prompt || (staff ? STAFF_UPDATE_OPENING_Q(name) : UPDATE_OPENING_Q(name)), kind: 'opening'});
   }, [story && story.id]);
+  /* the latest unsaved state is written when leaving this screen too, so a quick tap on Back never loses an answer;
+     not after Start New Story or saving, which end the session on purpose */
+  const flush = useRef(null), ended = useRef(false);
+  useEffect(() => () => { if (!ended.current && flush.current) flush.current(); }, []);
   useEffect(() => {
-    const t = setTimeout(() => {
+    const write = () => {
+      if (choosing || ended.current) return;
+      const snap = {step, kind, si, staffP, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips, followupId, backlogId, memo, notes, at: Date.now()};
+      if (plainNew) {
+        if (!asStr(first) && !turns.length && !asStr(answer)) { const d = ivDrafts().find(x => x.id === sid); if (d && !d.snap) ivDel(sid); return; }
+        ivPut(sid, {at: Date.now(), state: snap});
+        return;
+      }
       if ((step === 'name' || step === 'type') && !asStr(first)) { lsDel(draftKey); return; }
-      lsSet(draftKey, JSON.stringify({step, kind, si, staffP, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips, followupId, backlogId, memo, notes, at: Date.now()}));
-    }, 350);
+      lsSet(draftKey, JSON.stringify(snap));
+    };
+    flush.current = write;
+    const t = setTimeout(write, 350);
     return () => clearTimeout(t);
-  }, [step, kind, si, staffP, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips, notes]);
+  }, [step, kind, si, staffP, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips, notes, choosing]);
   const storyStudentInfo = story ? {gender: (story.overview || {}).gender || '', school: story.community || '', demographics: (story.overview || {}).demographics || ''} : null;
   const studentInfo = mode === 'update' ? storyStudentInfo : (student ? {gender: student.gender || '', school: student.school || '', demographics: student.demographics || ''} : null);
   useEffect(() => () => { if (qCtl.current) qCtl.current.abort(); if (aCtl.current) aCtl.current.abort(); VOICE.stop(); }, []);
@@ -3025,21 +3092,53 @@ function InterviewView({params}){
     const sid = await saveRawEntry({caps, safeWrite, story, entry: makeEntry(nt), title: name + (staff ? "'s staff story" : "'s story"), whenText: asStr(when), newStudent: ns, studentId: !staff && student ? student.id : null, studentName: name, followupId, backlogId, studentInfo,
       kind: K, newStaff: nf, staffId: staff && staffP ? staffP.id : null, staffInfo: staffInfoNow});
     setBusy(null);
-    if (sid) { lsDel(draftKey); showToast('Interview saved'); nav('story', {id: sid}); }
+    if (sid) { ended.current = true; clearDraft(draftKey); showToast('Interview saved'); nav('story', {id: sid}); }
   }
-  function startOver(){ lsDel(draftKey); setClips([]); setStep(mode === 'update' ? 'interview' : (params.kind || params.backlogId) ? 'name' : 'type'); setTurns([]); setAnswer(''); setPhase('asking'); setErr(''); setTarget(mode === 'update' ? 3 : 5); setStudent(null); setFirst(''); setPick(''); setNote(''); setWhen(''); setGender(''); setSchool(''); setDemo(''); setNotes(null);
-    setSi(blankStaffInfo()); setStaffP(null); if (mode === 'new') setKind(params.kind || (params.backlogId ? 'student' : ''));
-    setCurrent(mode === 'update' ? {q: params.prompt || (staff ? STAFF_UPDATE_OPENING_Q(name) : UPDATE_OPENING_Q(name)), kind: 'opening'} : null); }
+  /* Start New Story: always available; asks first when there is unsaved progress. Saved stories are never touched. */
+  const hasContent = !!(asStr(first) || turns.length || asStr(answer) || clips.length);
+  const sigNow = ivSig({step, kind, first, pick, note, when, gender, school, demo, si, turns, answer, phase, clips});
+  const unsaved = hasContent && sigNow !== savedSig;
+  function startNew(){
+    const go = () => { ended.current = true; if (qCtl.current) qCtl.current.abort(); if (aCtl.current) aCtl.current.abort(); VOICE.stop(); discardDraft(draftKey); nav('interview', {fresh: true}); };
+    if (!unsaved) { go(); return; }
+    openSheet(close => html`<${ConfirmSheet} close=${close} title="Start a new story?" body="Your current unsaved progress will be lost." confirmLabel="Start New Story" onConfirm=${go} />`);
+  }
+  function saveDraft(){
+    const snap = {step, kind, si, staffP, first, pick, note, when, gender, school, demo, turns, current, answer, target, phase, student, clips, followupId, backlogId, memo, notes, at: Date.now()};
+    ivPut(sid, {at: Date.now(), state: snap, snap, snapAt: Date.now()});
+    setSavedSig(sigNow);
+    showToast('Draft saved on this device. Resume it any time from Capture a Story.');
+  }
+  const newBtn = html`<button type="button" className="btn btn-ghost btn-sm new-story-btn" id="iv-new-story" onClick=${startNew}><${Icon} name="plus" size=${16} /> <span className="nsb-long">Start New Story</span><span className="nsb-short" aria-hidden="true">New story</span></button>`;
+  const draftBtn = plainNew && hasContent ? html`<button type="button" className="btn btn-quiet btn-sm" id="iv-save-draft" disabled=${!unsaved} onClick=${saveDraft}>${unsaved ? 'Save draft' : 'Draft saved'}</button>` : null;
+  const headActions = html`<div className="focus-actions">${draftBtn}${newBtn}<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} /></div>`;
   const back = () => story ? nav('story', {id: story.id}) : nav('home');
 
   if (readOnly) return html`<div className="view"><${FocusHeader} title="Record a Story" onBack=${() => nav('home')} /><p className="notice">You have view-only access to this journal. Ask the person who shared it for Editor access to record stories.</p></div>`;
   if (storyId && !story) return html`<div className="view"><${FocusHeader} title="Add Story Update" onBack=${() => nav('library')} />${storiesLoaded ? html`<p className="notice">This story isn't in the journal anymore.</p>` : html`<div className="skeleton"></div>`}</div>`;
 
+  /* unfinished interviews on this device: resume one, or start a new story (never reopened automatically) */
+  if (choosing) {
+    const del = d => openSheet(close => html`<${ConfirmSheet} close=${close} title="Delete this draft?" body=${'The unfinished interview' + (asStr((d.state || {}).first) ? ' with ' + d.state.first : '') + ' will be deleted from this device. Saved stories are not affected.'} confirmLabel="Delete draft" onConfirm=${() => { ivDel(d.id); const l = ivDrafts(); setDrafts(l); if (!l.length) setChoosing(false); }} />`);
+    return html`<div className="view interview">
+      <${FocusHeader} title="Capture a Story" sub="You have unfinished interviews on this device" onBack=${back} />
+      <section className="card draft-card">
+        <p>Pick up where you left off, or start a new story. Starting a new story doesn't delete your drafts or any saved story.</p>
+        <button className="btn btn-purple btn-lg" id="iv-start-new" onClick=${() => setChoosing(false)}><${Icon} name="plus" size=${20} /> Start New Story</button>
+      </section>
+      <div className="draft-list">${drafts.map(d => { const st = d.state || {}; const n = (st.turns || []).filter(t => t.status === 'answered').length; return html`<div className="card draft-row" key=${d.id}>
+        <div className="draft-main"><strong>${asStr(st.first) || 'Unnamed interview'}</strong>
+          <small className="muted">${st.kind === 'staff' ? 'Staff Impact' : st.kind === 'student' ? 'Student Impact' : 'Story type not chosen'} · ${n} ${n === 1 ? 'answer' : 'answers'} · ${d.snap ? 'draft saved' : 'not saved as a draft'} ${fmtDate(new Date(d.at || Date.now()).toISOString())}</small></div>
+        <div className="row-btns"><button className="btn btn-primary btn-sm iv-resume" onClick=${() => nav('interview', {resume: d.id})}>Resume Draft</button><button className="btn btn-quiet btn-sm danger iv-del-draft" onClick=${() => del(d)}>Delete</button></div>
+      </div>`; })}</div>
+    </div>`;
+  }
+
   /* step 0: which kind of story */
   if (step === 'type') {
     const choose = k => { setKind(k); setPick(''); setStep('name'); };
     return html`<div className="view interview">
-      <${FocusHeader} title="Capture a Story" sub="What kind of story is this?" onBack=${back} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+      <${FocusHeader} title="Capture a Story" sub="What kind of story is this?" onBack=${back} action=${hasContent || mode === 'update' ? headActions : html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
       ${guideOpen ? html`<${GuidePanel} onClose=${() => setGuideOpen(false)} />` : null}
       <div className="type-grid" role="group" aria-label="Story type">
         <button type="button" className="type-card tone-teal-soft" id="type-student" onClick=${() => choose('student')}>
@@ -3064,7 +3163,7 @@ function InterviewView({params}){
     const programs = uniq((settings.programs || []).concat(stories.filter(x => !x.demo).map(x => x.program)));
     const yearInput = (id, label, key, hint) => html`<${Field} label=${label} hint=${hint}><input id=${id} className="input" inputMode="numeric" maxLength="4" placeholder="e.g. 2018" value=${si[key] || ''} onChange=${e => setInfo(key, e.target.value.replace(/\D/g, '').slice(0, 4))} /><//>`;
     return html`<div className="view interview">
-      <${FocusHeader} title="New Staff Impact Story" sub="Step 1 of 3: Staff member information" onBack=${() => { setStep('type'); setPick(''); }} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+      <${FocusHeader} title="New Staff Impact Story" sub="Step 1 of 3: Staff member information" onBack=${() => { setStep('type'); setPick(''); }} action=${headActions} />
       ${guideOpen ? html`<${GuidePanel} kind="staff" onClose=${() => setGuideOpen(false)} />` : null}
       <section className="card name-card">
         <h2 className="intake-h">Basic information</h2>
@@ -3109,7 +3208,7 @@ function InterviewView({params}){
     const fn = asStr(first);
     const needPick = matches.length > 0 && !pick;
     return html`<div className="view interview">
-      <${FocusHeader} title="New Student Impact Story" sub="Step 1 of 3: Student information" onBack=${backlogId ? () => nav('backlog') : params.kind ? back : () => { setStep('type'); setPick(''); }} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+      <${FocusHeader} title="New Student Impact Story" sub="Step 1 of 3: Student information" onBack=${backlogId ? () => nav('backlog') : params.kind ? back : () => { setStep('type'); setPick(''); }} action=${headActions} />
       ${guideOpen ? html`<${GuidePanel} onClose=${() => setGuideOpen(false)} />` : null}
       ${memo ? html`<p className="memo-note"><${Icon} name="users" size=${16} /><span><strong>From your student list:</strong> ${memo}</span></p>` : null}
       <section className="card name-card">
@@ -3140,11 +3239,12 @@ function InterviewView({params}){
   const answeredCount = turns.filter(t => t.status === 'answered').length;
   const stageLabel = !current ? '' : current.kind === 'opening' ? (mode === 'update' ? 'Story update' : 'Opening story') : current.kind === 'closing' ? 'Closing question' : 'Follow-up ' + (asked + 1) + ' of about ' + Math.max(target, asked + 1) + (current.stage ? ' · ' + labelOf(staff ? STAFF_STAGES : INTERVIEW_STAGES, current.stage) : '');
   return html`<div className="view interview">
-    <${FocusHeader} title=${(mode === 'update' ? 'Story update: ' : 'Interview: ') + name} sub=${mode === 'update' ? story.title : 'Step 2 of 3: ' + (staff ? 'Staff Impact interview' : 'Interview')} onBack=${back} action=${html`<${GuideButton} open=${guideOpen} onToggle=${() => setGuideOpen(o => !o)} />`} />
+    <${FocusHeader} title=${(mode === 'update' ? 'Story update: ' : 'Interview: ') + name} sub=${mode === 'update' ? story.title : 'Step 2 of 3: ' + (staff ? 'Staff Impact interview' : 'Interview')} onBack=${back} action=${headActions} />
     ${guideOpen ? html`<${GuidePanel} kind=${K} onClose=${() => setGuideOpen(false)} />` : null}
     ${(() => { const bits = staff && mode === 'new' && turns.length === 0 ? [staffInfoNow.status ? labelOf(STAFF_STATUS, staffInfoNow.status) : '', staffInfoNow.role, staffInfoNow.startYear ? 'since ' + staffInfoNow.startYear : '', staffInfoNow.formerStudent === 'yes' ? 'former ABG student' : staffInfoNow.formerStudent === 'no' ? 'not a former ABG student' : ''].filter(Boolean) : [];
       return bits.length ? html`<p className="memo-note"><${Icon} name="briefcase" size=${16} /><span><strong>From the intake:</strong> ${bits.join(' · ')}. The interviewer won't ask for these again.</span></p>` : null; })()}
-    ${restored ? html`<p className="small muted">Restored your unsaved interview from this device. <button className="btn btn-quiet btn-sm" onClick=${startOver}>Start over</button></p>` : null}
+    ${restored ? html`<p className="small muted">Restored your unsaved interview from this device. <button className="btn btn-quiet btn-sm" onClick=${startNew}>Start New Story</button></p>` : null}
+    ${resumeDraft && turns.length > 0 ? html`<p className="small muted" id="iv-resumed">Resumed your draft from ${fmtDate(new Date(resumeDraft.at || Date.now()).toISOString())}.</p>` : null}
     ${memo && turns.length === 0 ? html`<p className="memo-note"><${Icon} name="users" size=${16} /><span><strong>Your note:</strong> ${memo}</span></p>` : null}
     ${turns.length > 0 ? html`<details className="sec convo"><summary><span>Conversation so far<span className="count">${turns.length} ${turns.length === 1 ? 'answer' : 'answers'}</span></span><${Icon} name="chev" size=${18} /></summary>
       <div className="sec-body">${turns.map((t, i) => html`<div className="turn" key=${i}><p className="turn-q">${t.q}</p><p className=${'turn-a' + (t.status === 'skipped' ? ' muted' : '')}>${t.status === 'skipped' ? 'Skipped' : t.a}</p></div>`)}</div>
@@ -3568,7 +3668,7 @@ function QuickReview({draft, setDraft, mode}){
   </div>`;
 }
 function ReviewView({params}){
-  const {caps, stories, students, staffPeople, nav, safeWrite, showToast, storyById} = useApp();
+  const {caps, stories, students, staffPeople, nav, safeWrite, showToast, storyById, openSheet} = useApp();
   const {mode, storyId, analysis, entry, items, draftKey, whenHint, approx, followupId, answered, analyzedEntryIds, returnTo, studentId, studentName, newStudent, backlogId, studentInfo, kind, staffId, newStaff, staffInfo} = params;
   const base = storyId ? storyById(storyId) : null;
   const me = caps.me || {};
@@ -3612,11 +3712,12 @@ function ReviewView({params}){
       await markBacklogRecorded(db, backlogId, s.id, s.studentId);
     });
     setSaving(false);
-    if (ok) { if (draftKey) lsDel(draftKey); showToast(mode === 'edit' ? 'Changes saved' : 'Story saved'); nav('story', {id: s.id}); }
+    if (ok) { if (draftKey) clearDraft(draftKey); showToast(mode === 'edit' ? 'Changes saved' : 'Story saved'); nav('story', {id: s.id}); }
   }
   const title = mode === 'edit' ? 'Edit story' : mode === 'update' ? 'Review the update' : isStaffStory(draft) ? 'Staff Impact Report' : 'Student Impact Report';
   return html`<div className="view review">
-    <${FocusHeader} title=${title} sub=${mode === 'update' && base ? base.title : mode === 'new' ? 'Step 3 of 3' + (draft.alias ? ': ' + draft.alias : '') : (draft.alias || null)} onBack=${back} />
+    <${FocusHeader} title=${title} sub=${mode === 'update' && base ? base.title : mode === 'new' ? 'Step 3 of 3' + (draft.alias ? ': ' + draft.alias : '') : (draft.alias || null)} onBack=${back}
+      action=${mode !== 'edit' ? html`<div className="focus-actions"><button type="button" className="btn btn-ghost btn-sm new-story-btn" id="rv-new-story" onClick=${() => openSheet(close => html`<${ConfirmSheet} close=${close} title="Start a new story?" body="Your current unsaved progress will be lost." confirmLabel="Start New Story" onConfirm=${() => { discardDraft(draftKey); nav('interview', {fresh: true}); }} />`)}><${Icon} name="plus" size=${16} /> <span className="nsb-long">Start New Story</span><span className="nsb-short" aria-hidden="true">New story</span></button></div>` : null} />
     ${mode !== 'edit' ? html`<p className="review-note"><${Icon} name="spark" size=${16} /><span>Claude drafted this from your words. Nothing is saved until you press Save, and nothing is approved for outside use until you approve it.${mode === 'update' ? ' New items are marked with an orange edge.' : ''}</span></p>` : null}
     ${mode === 'edit' ? html`<${StoryEditor} draft=${draft} setDraft=${setDraft} items=${items || []} mode=${mode} />` : html`
       <${QuickReview} draft=${draft} setDraft=${setDraft} mode=${mode} />

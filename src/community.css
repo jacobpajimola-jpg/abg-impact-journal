@@ -195,3 +195,9 @@ textarea.sh-input{resize:vertical}
 .sh-dialog p{margin:0;color:var(--ink-2);line-height:1.5}
 
 @media (min-width:700px){.sh-page{padding:0 24px}.sh-body{padding-top:20px}}
+
+/* Start New Story / Resume Draft */
+.sh-progress-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.sh-new{font-size:.88rem;min-height:40px;padding:4px 0}
+.sh-resume{gap:10px;text-align:left;width:100%;max-width:440px;box-sizing:border-box}
+.sh-resume .sh-row{justify-content:flex-start}

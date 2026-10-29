@@ -81,14 +81,15 @@ function StaffMenu({staff}){
     </div>` : null}
   </div>`;
 }
-function Header({onBack, step, staff}){
+function Header({onBack, step, staff, onNew}){
   return html`<header className="sh-top">
     <div className="sh-top-l">${onBack ? html`<button type="button" className="sh-icon" onClick=${onBack} aria-label="Back"><${Icon} name="back" /></button>` : null}</div>
     <a className="sh-brand" href="/share" aria-label="Share Your Story home"><img src="/abg-logo.png" alt="Arts Bridging the Gap" /></a>
     <div className="sh-top-r">${staff ? html`<${StaffMenu} staff=${staff} />` : null}</div>
     ${step != null ? html`<div className="sh-progress" role="progressbar" aria-valuemin="1" aria-valuemax=${STEPS.length} aria-valuenow=${step + 1} aria-label=${'Step ' + (step + 1) + ' of ' + STEPS.length + ': ' + STEPS[step]}>
       <div className="sh-progress-bar"><span style=${{width: Math.round(100 * (step + 1) / STEPS.length) + '%'}}></span></div>
-      <p className="sh-progress-text"><b>Step ${step + 1} of ${STEPS.length}</b> · ${STEPS[step]}</p>
+      <div className="sh-progress-row"><p className="sh-progress-text"><b>Step ${step + 1} of ${STEPS.length}</b> · ${STEPS[step]}</p>
+        ${onNew ? html`<button type="button" className="sh-link sh-new" id="sh-new-story" onClick=${onNew}>Start New Story</button>` : null}</div>
     </div>` : null}
   </header>`;
 }
@@ -163,7 +164,7 @@ const HOW = [
   {icon: 'edit', tone: 'orange', title: 'Review Your Story', text: 'Review your responses and make changes before submitting.'},
   {icon: 'spark', tone: 'blue', title: 'Make an Impact', text: 'Your story helps ABG understand and communicate the difference its programs make.'},
 ];
-function Welcome({go, invite, onStatus, staff}){
+function Welcome({go, invite, onStatus, staff, pending, onResume, onDiscard}){
   return html`<main className="sh-page sh-wide sh-welcome">
     <${Header} staff=${staff} />
     <${ModeBanner} staff=${staff} />
@@ -175,7 +176,10 @@ function Welcome({go, invite, onStatus, staff}){
         <p className="sh-lede">Your story matters. Help us understand how ABG has made a difference in your life, education, career, or community.</p>
         ${invite && invite.valid ? html`<p className="sh-note sh-invite"><${Icon} name="check" size=${18} /> <span>${invite.firstName ? 'Hi ' + invite.firstName + '! ' : ''}You have a personal invitation from ABG.</span></p>` : null}
         ${invite && !invite.valid ? html`<p className="sh-note sh-warn" role="alert">This invitation link has expired or was already used. You can still share your story, or ask ABG for a new link.</p>` : null}
-        <button type="button" className="sh-btn sh-btn-primary sh-btn-lg" id="sh-start" onClick=${go}>Share My Story</button>
+        ${pending ? html`<div className="sh-card sh-resume" id="sh-resume-card"><p className="sh-label">You have an unfinished story</p>
+          <p className="sh-small">${pending.turns && pending.turns.length ? 'You answered ' + pending.turns.length + ' question' + (pending.turns.length === 1 ? '' : 's') + '. ' : ''}Pick up where you left off, or start again.</p>
+          <div className="sh-row"><button type="button" className="sh-btn sh-btn-ghost" id="sh-discard-draft" onClick=${onDiscard}>Start New Story</button><button type="button" className="sh-btn sh-btn-primary" id="sh-resume" onClick=${onResume}>Resume Draft</button></div></div>`
+          : html`<button type="button" className="sh-btn sh-btn-primary sh-btn-lg" id="sh-start" onClick=${go}>Share My Story</button>`}
         <p className="sh-small sh-hero-note">A short, guided conversation. Speak or type in about 10 minutes. No account needed.</p>
       </div>
     </section>
@@ -207,7 +211,7 @@ function Welcome({go, invite, onStatus, staff}){
   </main>`;
 }
 
-function Intake({st, set, step, setStep, invite, api, onStarted, staff, previewJwt}){
+function Intake({st, set, step, setStep, invite, api, onStarted, staff, previewJwt, onNew}){
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const i = st.intake;
@@ -299,7 +303,7 @@ function Intake({st, set, step, setStep, invite, api, onStarted, staff, previewJ
     canNext = !!i.method && !!st.privacy && (i.method !== 'voice' || !!st.recording);
   }
   return html`<main className="sh-page">
-    <${Header} onBack=${back} step=${step} staff=${staff} />
+    <${Header} onBack=${back} step=${step} staff=${staff} onNew=${onNew} />
     <section className="sh-body">${body}
       ${err ? html`<p className="sh-error" role="alert">${err}</p>` : null}
     </section>
@@ -312,7 +316,7 @@ function Intake({st, set, step, setStep, invite, api, onStarted, staff, previewJ
 
 const AbgSays = ({children, current, id}) => html`<div className="sh-msg sh-msg-abg"><span className="sh-avatar sh-avatar-abg" aria-hidden="true">ABG</span><p className=${'sh-bubble sh-q-bubble' + (current ? ' sh-current' : '')} id=${id}><span className="sh-sr">ABG asks: </span>${children}</p></div>`;
 const YouSaid = ({children, skipped}) => html`<div className="sh-msg sh-msg-you"><p className=${'sh-bubble sh-a-bubble' + (skipped ? ' skipped' : '')}><span className="sh-sr">You answered: </span>${children}</p></div>`;
-function Interview({st, set, api, staff}){
+function Interview({st, set, api, staff, onNew}){
   const [answer, setAnswer] = useState(st.answerDraft || '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -340,7 +344,7 @@ function Interview({st, set, api, staff}){
   const answered = st.turns.filter(t => !t.skipped).length;
   const n = st.turns.length + 1;
   return html`<main className="sh-page sh-chat">
-    <${Header} step=${4} staff=${staff} />
+    <${Header} step=${4} staff=${staff} onNew=${onNew} />
     <section className="sh-body">
       ${st.test ? html`<p className="sh-note sh-test" id="sh-test-note"><strong>Test story.</strong> Saved for testing only; it never counts in reporting.</p>` : null}
       <div className="sh-thread" aria-live="polite">
@@ -365,17 +369,17 @@ function Interview({st, set, api, staff}){
   </main>`;
 }
 
-function Writing({st, set, api, staff}){
+function Writing({st, set, api, staff, onNew}){
   const [err, setErr] = useState('');
   const run = async () => { setErr(''); try { const v = await api('finish', {token: st.token}); set(Object.assign({}, st, {screen: 'review', view: v, edits: {story: v.story || '', removed: [], note: ''}, publication: ''})); } catch (e) { setErr(e.message); } };
   useEffect(() => { run(); }, []);
-  return html`<main className="sh-page"><${Header} step=${5} staff=${staff} /><section className="sh-body sh-center">
+  return html`<main className="sh-page"><${Header} step=${5} staff=${staff} onNew=${onNew} /><section className="sh-body sh-center">
     ${err ? html`<p className="sh-error" role="alert">${err}</p><button type="button" className="sh-btn sh-btn-primary" onClick=${run}>Try again</button>` : html`<${Loading} label="Writing up your story" /><h1 className="sh-q">Writing up your story…</h1><p className="sh-sub">This takes a few seconds. Next, you'll check it before anything is sent.</p>`}
   </section></main>`;
 }
 
 const PUB = {public_name: ['ABG may share my story publicly, with my first name', 'For example in newsletters, on social media or for funders'], anonymous: ['ABG may share it publicly without names', 'Shared only with names and identifying details removed'], internal: ['Keep it within ABG', 'Used only inside ABG and in reports that never quote or identify it']};
-function Review({st, set, api, onSubmitted, staff}){
+function Review({st, set, api, onSubmitted, staff, onNew}){
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const v = st.view || {}; const ed = st.edits || {story: '', removed: [], note: ''};
@@ -388,7 +392,7 @@ function Review({st, set, api, onSubmitted, staff}){
     catch (e) { setErr(e.message); setBusy(false); }
   }
   return html`<main className="sh-page">
-    <${Header} step=${5} staff=${staff} />
+    <${Header} step=${5} staff=${staff} onNew=${onNew} />
     <section className="sh-body">
       <h1 className="sh-q">Review your story</h1>
       <p className="sh-sub">Here's what we wrote down from your answers. Fix anything that isn't right. Nothing is sent until you press Send to ABG.</p>
@@ -408,7 +412,7 @@ function Review({st, set, api, onSubmitted, staff}){
   </main>`;
 }
 
-function Done({token, onView, test, staff}){
+function Done({token, onView, test, staff, onAnother}){
   const link = location.origin + '/share#s=' + token;
   const [copied, setCopied] = useState(false);
   const copy = async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {} };
@@ -422,7 +426,8 @@ function Done({token, onView, test, staff}){
       <p className="sh-small">Save this link to check your story's status, answer any questions from ABG, make corrections or ask us to remove it. Anyone with the link can see your story, so keep it private. We can't recover it if it's lost.</p>
       <div className="sh-linkbox"><input id="sh-private-link" className="sh-input" readOnly=${true} value=${link} onFocus=${e => e.target.select()} aria-label="Your private link" /><button type="button" className="sh-btn sh-btn-secondary" onClick=${copy}><${Icon} name="copy" size=${18} /> ${copied ? 'Copied' : 'Copy'}</button></div>
     </div>
-    <button type="button" className="sh-btn sh-btn-primary" id="sh-view" onClick=${onView}>View my story</button>
+    <div className="sh-row" style=${{justifyContent: 'center'}}><button type="button" className="sh-btn sh-btn-primary" id="sh-view" onClick=${onView}>View my story</button>
+      <button type="button" className="sh-btn sh-btn-ghost" id="sh-another" onClick=${onAnother}>Share another story</button></div>
   </section></main>`;
 }
 
@@ -477,6 +482,19 @@ function Status({token, api, staff}){
   </section></main>`;
 }
 
+/* Start New Story: asks first, because the story in progress hasn't been sent */
+function ConfirmNew({onConfirm, onCancel}){
+  const first = useRef(null);
+  useEffect(() => { try { first.current && first.current.focus(); } catch (e) {} const esc = e => { if (e.key === 'Escape') onCancel(); }; document.addEventListener('keydown', esc); return () => document.removeEventListener('keydown', esc); }, []);
+  return html`<div className="sh-scrim" onClick=${e => { if (e.target === e.currentTarget) onCancel(); }}>
+    <div className="sh-dialog" role="dialog" aria-modal="true" aria-labelledby="sh-new-h">
+      <h2 id="sh-new-h">Start a new story?</h2>
+      <p>Your current unsaved progress will be lost.</p>
+      <div className="sh-row"><button type="button" ref=${first} className="sh-btn sh-btn-ghost" id="sh-new-cancel" onClick=${onCancel}>Cancel</button>
+        <button type="button" className="sh-btn sh-btn-primary" id="sh-new-confirm" onClick=${onConfirm}>Start New Story</button></div>
+    </div>
+  </div>`;
+}
 /* switching between Preview Mode and a real submission always asks first */
 function ModeDialog({to, hasDraft, onConfirm, onCancel}){
   const first = useRef(null);
@@ -499,7 +517,11 @@ function App({api, hash, cfg}){
   // an invitation survives a refresh in this tab, but the link itself is removed from the address bar
   const inviteToken = params.get('i') || (ssGet('abg-share-invite') || {}).t || null;
   const saved = ssGet(DRAFT);
-  const [st, setSt] = useState(() => saved || FRESH());
+  /* an unfinished story in this tab is offered on the welcome page (Resume Draft / Start New Story), never reopened by itself */
+  const inFlight = d => !!(d && d.screen && !['welcome', 'done', 'open'].includes(d.screen));
+  const [pending, setPending] = useState(() => inFlight(saved) ? saved : null);
+  const [st, setSt] = useState(() => inFlight(saved) ? FRESH() : (saved || FRESH()));
+  const [confirmNew, setConfirmNew] = useState(false);
   const [invite, setInvite] = useState(null);
   const [status, setStatus] = useState(statusToken || null);
   /* Preview Mode: only after the server confirms this browser's staff sign-in belongs to an authorized consultant */
@@ -520,7 +542,7 @@ function App({api, hash, cfg}){
       ssSet(MODE, mode); setStaffMode(mode);
       // a draft started in the other mode can't continue here
       const d = ssGet(DRAFT);
-      if (d && d.token && !!d.test !== (mode === 'preview')) { ssDel(DRAFT); setSt(FRESH()); }
+      if (d && d.token && !!d.test !== (mode === 'preview')) { ssDel(DRAFT); setSt(FRESH()); setPending(null); }
     })();
     return () => { gone = true; };
   }, []);
@@ -528,25 +550,30 @@ function App({api, hash, cfg}){
     if (!inviteToken) return;
     api('invite', {invite: inviteToken}).then(r => {
       const inv = Object.assign({token: inviteToken}, r); setInvite(inv);
-      if (r.valid && !saved) setSt(s => Object.assign({}, s, {intake: Object.assign({}, s.intake, {relationship: r.relationship || s.intake.relationship, firstName: r.firstName || s.intake.firstName})}));
+      if (r.valid && !inFlight(saved)) setSt(s => Object.assign({}, s, {intake: Object.assign({}, s.intake, {relationship: r.relationship || s.intake.relationship, firstName: r.firstName || s.intake.firstName})}));
     }, () => setInvite({valid: false}));
   }, []);
   useEffect(() => { try { window.scrollTo(0, 0); } catch (e) {} }, [st.screen, st.step, status]);
   if (staffMode === 'checking') return html`<main className="sh-page"><section className="sh-body sh-center"><${Loading} label="Opening Share Your Story" /></section></main>`;
-  const switchMode = to => { ssSet(MODE, to); setStaffMode(to); ssDel(DRAFT); ssDel('abg-share-invite'); setSt(FRESH()); setStatus(null); setAsking(null); history.replaceState(null, '', '/share'); };
+  const switchMode = to => { ssSet(MODE, to); setStaffMode(to); ssDel(DRAFT); ssDel('abg-share-invite'); setSt(FRESH()); setPending(null); setStatus(null); setAsking(null); history.replaceState(null, '', '/share'); };
+  /* a completely new session: nothing from the previous story carries over (an unsent story on the server expires) */
+  const startFresh = () => { speech.stop(); ssDel(DRAFT); setPending(null); setConfirmNew(false); setStatus(null); const n = FRESH(); setSt(n); history.replaceState(null, '', '/share'); };
+  const askNew = () => setConfirmNew(true);
   const staff = staffMode ? {mode: staffMode, ask: to => setAsking(to), leave: () => { ssDel(MODE); if (cfg.leavePortal) cfg.leavePortal(); }} : null;
   const hasDraft = !!(st.token && st.screen !== 'done');
-  const dialog = asking ? html`<${ModeDialog} to=${asking} hasDraft=${hasDraft} onCancel=${() => setAsking(null)} onConfirm=${() => switchMode(asking)} />` : null;
+  const dialog = asking ? html`<${ModeDialog} to=${asking} hasDraft=${hasDraft} onCancel=${() => setAsking(null)} onConfirm=${() => switchMode(asking)} />`
+    : confirmNew ? html`<${ConfirmNew} onCancel=${() => setConfirmNew(false)} onConfirm=${startFresh} />` : null;
   let screen = null;
   if (status) screen = html`<${Status} token=${status} api=${api} staff=${staff} />`;
   else if (st.screen === 'open') screen = html`<${OpenLink} staff=${staff} onBack=${() => set(Object.assign({}, st, {screen: 'welcome'}))} onOpen=${t => { history.replaceState(null, '', '/share#s=' + t); setStatus(t); }} />`;
-  else if (st.screen === 'welcome') screen = html`<${Welcome} staff=${staff} invite=${invite} go=${() => set(Object.assign({}, st, {screen: 'intake', step: 0}))} onStatus=${() => set(Object.assign({}, st, {screen: 'open'}))} />`;
-  else if (st.screen === 'intake') screen = html`<${Intake} staff=${staff} previewJwt=${cfg.staffToken} st=${st} set=${set} step=${st.step || 0} setStep=${n => set(Object.assign({}, st, {step: n}))} invite=${invite} api=${api}
+  else if (st.screen === 'welcome') screen = html`<${Welcome} staff=${staff} invite=${invite} go=${() => set(Object.assign({}, st, {screen: 'intake', step: 0}))} onStatus=${() => set(Object.assign({}, st, {screen: 'open'}))}
+    pending=${pending} onResume=${() => { const d = pending; setPending(null); set(d); }} onDiscard=${askNew} />`;
+  else if (st.screen === 'intake') screen = html`<${Intake} staff=${staff} onNew=${askNew} previewJwt=${cfg.staffToken} st=${st} set=${set} step=${st.step || 0} setStep=${n => set(Object.assign({}, st, {step: n}))} invite=${invite} api=${api}
     onStarted=${r => set(Object.assign({}, st, {screen: 'interview', token: r.token, test: !!r.test, type: r.type || communityStoryType(st.intake), current: {q: r.question, kind: r.kind}, turns: []}))} />`;
-  else if (st.screen === 'interview') screen = html`<${Interview} staff=${staff} st=${st} set=${set} api=${api} />`;
-  else if (st.screen === 'writing') screen = html`<${Writing} staff=${staff} st=${st} set=${set} api=${api} />`;
-  else if (st.screen === 'review') screen = html`<${Review} staff=${staff} st=${st} set=${set} api=${api} onSubmitted=${() => set(Object.assign({}, st, {screen: 'done'}))} />`;
-  else if (st.screen === 'done') screen = html`<${Done} staff=${staff} token=${st.token} test=${!!st.test} onView=${() => { history.replaceState(null, '', '/share#s=' + st.token); setStatus(st.token); }} />`;
+  else if (st.screen === 'interview') screen = html`<${Interview} staff=${staff} onNew=${askNew} st=${st} set=${set} api=${api} />`;
+  else if (st.screen === 'writing') screen = html`<${Writing} staff=${staff} onNew=${askNew} st=${st} set=${set} api=${api} />`;
+  else if (st.screen === 'review') screen = html`<${Review} staff=${staff} onNew=${askNew} st=${st} set=${set} api=${api} onSubmitted=${() => set(Object.assign({}, st, {screen: 'done'}))} />`;
+  else if (st.screen === 'done') screen = html`<${Done} staff=${staff} onAnother=${startFresh} token=${st.token} test=${!!st.test} onView=${() => { history.replaceState(null, '', '/share#s=' + st.token); setStatus(st.token); }} />`;
   return html`<${React.Fragment}>${screen}${dialog}<//>`;
 }
 
