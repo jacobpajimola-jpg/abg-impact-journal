@@ -39,7 +39,16 @@ async function transcribe(bytes: Uint8Array, mime: string): Promise<string> {
   if (!res.ok) throw new Error('Groq ' + res.status);
   return (data && data.text) || '';
 }
+// Preview Mode: confirm a staff sign-in token with Supabase Auth (the handler then checks the preview list and role)
+// deno-lint-ignore no-explicit-any
+async function getUser(db: any, jwt: string){
+  const {data, error} = await db.auth.getUser(jwt);
+  const u = data && data.user;
+  if (error || !u || !u.email) return null;
+  return {email: String(u.email), banned: !!(u.banned_until && new Date(u.banned_until).getTime() > Date.now())};
+}
 Deno.serve(req => {
   const ip = req.headers.get('cf-connecting-ip') || (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || '';
-  return handle(req, {db: createClient(Deno.env.get('SUPABASE_URL')!, serverKey(), {auth: {persistSession: false}}), claude, transcribe, ip});
+  const db = createClient(Deno.env.get('SUPABASE_URL')!, serverKey(), {auth: {persistSession: false, autoRefreshToken: false}});
+  return handle(req, {db, claude, transcribe, ip, getUser: (jwt: string) => getUser(db, jwt)});
 });

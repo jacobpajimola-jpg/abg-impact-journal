@@ -1,7 +1,7 @@
 import './globals.js';
 import './styles.css';
 import { createClient } from '@supabase/supabase-js';
-import { makeDb, makeUser, makeSample, makeAudio, makeSpeech, makeAdmin, makeRole, makeCommunityAdmin, downloads } from './platform.js';
+import { makeDb, makeUser, makeSample, makeAudio, makeSpeech, makeAdmin, makeRole, makeCommunityAdmin, makePortalAccess, downloads } from './platform.js';
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -11,7 +11,8 @@ const ARRIVED_HASH = /access_token|error/.test(window.location.hash) ? window.lo
 /* Two experiences on one site:
    /share  Community Story Collection Portal (public, no account; talks only to the community Edge Function)
    /app    Internal Impact Management Portal (invited staff, signed in)
-   /       Landing page: "Share Your Story" and "Staff Sign In". Signed-in staff go straight to /app. */
+   /       Landing page: "Share Your Story" and "Staff Sign In". Signed-in staff go straight to /app
+           (or back to the Share Your Story page in Preview Mode, if that's the portal they last switched to). */
 const PATH = (window.location.pathname.replace(/\/+$/, '') || '/').toLowerCase();
 const PORTAL = PATH === '/share' || PATH.startsWith('/share/') ? 'share' : PATH === '/app' || PATH.startsWith('/app/') ? 'app' : 'root';
 const toApp = () => { if (PORTAL !== 'app') history.replaceState(null, '', '/app' + window.location.search + window.location.hash); };
@@ -152,6 +153,8 @@ async function boot(){
   const show = el => { if (!screen) screen = ReactDOM.createRoot(root); screen.render(el); };
   const start = user => {
     if (mounted) return;
+    // Portal Access: reopen the portal an authorized consultant last switched to (the portal re-checks on the server)
+    if (PORTAL === 'root' && !ARRIVED_HASH && lsGet('abg-portal') === 'community') { mounted = true; window.location.replace('/share#preview'); return; }
     mounted = true; userId = user.id;
     if (screen) { screen.unmount(); screen = null; }
     const db = makeDb(sb);
@@ -163,6 +166,9 @@ async function boot(){
       // logs out this device only; other devices stay signed in
       signOut: async () => { leaving = true; await keeper.forget(); try { await sb.auth.signOut({scope: 'local'}); } catch (e) {} window.location.replace(window.location.pathname); }};
     window.__platform.community = makeCommunityAdmin(sb, URL_, KEY);
+    window.__platform.canPreviewPortal = makePortalAccess(sb);
+    window.__platform.openCommunityPreview = () => { lsSet('abg-portal', 'community'); window.location.assign('/share#preview'); };
+    lsSet('abg-portal', 'staff');
     window.claude = {use: async name => caps[name] || null};
     toApp();
     if (/access_token|error_description/.test(window.location.hash)) history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -195,6 +201,19 @@ async function boot(){
   show(html`<${Login} sb=${sb} notice=${linkProblem} />`);
 }
 if (PORTAL === 'share') {
-  // the public portal never creates a Supabase client or touches staff sign-in
-  import('./community.js').then(m => m.mountCommunity(root, {url: URL_, key: KEY})).catch(() => { root.innerHTML = '<p style="padding:24px;font-family:sans-serif">The page could not load. Check your connection and reload.</p>'; });
+  // the public portal doesn't sign anyone in. Only when an authorized consultant switched here from Settings
+  // (Preview Mode) does it read their existing staff sign-in, to prove to the server who is testing.
+  let staffSb = null;
+  const staffToken = async () => {
+    if (!URL_ || !KEY) return null;
+    if (!staffSb) staffSb = createClient(URL_, KEY, {auth: {persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, flowType: 'implicit'}});
+    try {
+      const {data} = await staffSb.auth.getSession();
+      if (data && data.session) return data.session.access_token;
+      const r = await makeKeeper(staffSb).restore();
+      return r.session ? r.session.access_token : null;
+    } catch (e) { return null; }
+  };
+  const leavePortal = () => lsSet('abg-portal', 'staff');
+  import('./community.js').then(m => m.mountCommunity(root, {url: URL_, key: KEY, staffToken, leavePortal, wantsPreview: () => lsGet('abg-portal') === 'community'})).catch(() => { root.innerHTML = '<p style="padding:24px;font-family:sans-serif">The page could not load. Check your connection and reload.</p>'; });
 } else boot();

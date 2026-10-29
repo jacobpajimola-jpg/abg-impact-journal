@@ -998,3 +998,21 @@ button.ins-stat:hover{box-shadow:var(--shadow)}
 .home-community p{margin:0}
 .hc-text{flex:1 1 260px}
 .source-card .overview{margin-bottom:8px}
+
+/* ===== Preview Mode test records and Settings > Portal Access ===== */
+.tone-test{background:var(--purple-soft);color:var(--purple-ink);border:1px dashed var(--purple)}
+.banner-test{background:var(--purple-soft);color:var(--purple-ink)}
+.banner-test .small{color:var(--ink-2)}
+.test-note{display:flex;gap:10px;align-items:flex-start}
+.portal-picks{display:grid;gap:12px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:700px){.portal-picks{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.portal-pick{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px;align-items:start;padding:16px;border-radius:var(--r-md);border:1.5px solid var(--line);background:var(--surface);cursor:pointer}
+.portal-pick input{position:absolute;opacity:0;pointer-events:none}
+.portal-pick.on{border-color:var(--purple);box-shadow:0 0 0 1px var(--purple) inset;background:#FDF8FD}
+.portal-pick:focus-within{outline:3px solid var(--purple);outline-offset:2px}
+.portal-ic{display:grid;place-items:center;width:46px;height:46px;border-radius:14px}
+.portal-text{display:grid;gap:4px;min-width:0}
+.portal-text strong{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;font-family:var(--font-display)}
+.portal-text small{color:var(--ink-2);line-height:1.45}
+:root[data-theme="dark"] .portal-pick.on{background:var(--surface-2)}
+@media (prefers-color-scheme: dark){:root[data-theme="auto"] .portal-pick.on{background:var(--surface-2)}}

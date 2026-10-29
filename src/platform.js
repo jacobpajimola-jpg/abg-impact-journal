@@ -293,17 +293,26 @@ export function makeRole(sb, email){
   };
 }
 
+/* Portal Access (switch to the Share Your Story page in Preview Mode): decided on the server by
+   public.can_preview_portal() (on the preview list, an administrator, account active). The community Edge Function
+   repeats the same check before it accepts a test story, so hiding or showing the switch is never the only guard. */
+export function makePortalAccess(sb){
+  return async () => { try { const {data, error} = await sb.rpc('can_preview_portal'); return !error && data === true; } catch (e) { return false; } };
+}
+
 /* Community Submissions and contributor invitations for signed-in staff. Row-level security decides what each
    person may do: active staff can read submitted stories and create ordinary invitations; only administrators
    can review, change or delete submissions, or record guardian consent on an invitation. */
 const SUB_COLS = 'id,status,relationship,perspective,story_type,is_minor,intake,turns,data,analysis,contributor_edits,clarifications,publication_consent,recording_consent,review,story_id,invite_id,created_at,updated_at,submitted_at,removal_requested_at';
+const SUB_COLS_TEST = SUB_COLS + ',is_test,test_by';
 function randomToken(){ const b = new Uint8Array(32); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 async function sha256Hex(s){ const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join(''); }
 export function makeCommunityAdmin(sb){
   const err = e => { const m = (e && e.message) || ''; throw {message: /permission|row-level|policy/i.test(m) ? "You don't have permission to do that." : /relation .* does not exist|schema cache/i.test(m) ? 'Community submissions are not set up on the server yet.' : "That didn't work. Check your connection and try again.", code: e && e.code}; };
   return {
-    async list(){ const {data, error} = await sb.from('community_submissions').select(SUB_COLS).order('submitted_at', {ascending: false}); if (error) err(error); return data || []; },
-    async get(id){ const {data, error} = await sb.from('community_submissions').select(SUB_COLS).eq('id', id).maybeSingle(); if (error) err(error); return data; },
+    /* is_test / test_by arrive with the Preview Mode update to community.sql; until it runs, read without them */
+    async list(){ let r = await sb.from('community_submissions').select(SUB_COLS_TEST).order('submitted_at', {ascending: false}); if (r.error && /is_test|test_by|column/i.test(r.error.message || '')) r = await sb.from('community_submissions').select(SUB_COLS).order('submitted_at', {ascending: false}); if (r.error) err(r.error); return r.data || []; },
+    async get(id){ let r = await sb.from('community_submissions').select(SUB_COLS_TEST).eq('id', id).maybeSingle(); if (r.error && /is_test|test_by|column/i.test(r.error.message || '')) r = await sb.from('community_submissions').select(SUB_COLS).eq('id', id).maybeSingle(); if (r.error) err(r.error); return r.data; },
     async update(id, patch){ const {error} = await sb.from('community_submissions').update(patch).eq('id', id); if (error) err(error); },
     async remove(id){ const {error} = await sb.from('community_submissions').delete().eq('id', id); if (error) err(error); },
     async events(id){ const {data, error} = await sb.from('submission_events').select('at,actor,action,details').eq('submission_id', id).order('at', {ascending: true}); if (error) err(error); return data || []; },

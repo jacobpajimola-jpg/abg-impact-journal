@@ -74,6 +74,31 @@ create policy "Admins review submissions" on public.community_submissions for up
 create policy "Admins delete submissions" on public.community_submissions for delete to authenticated using (public.is_admin() and public.is_active_user());
 -- no insert policy: only the community Edge Function (service key) creates submissions
 
+-- 2b. Preview Mode (test submissions). An authorized consultant can switch to the Share Your Story page and
+-- complete the whole interview as a test. Only the community Edge Function can mark a submission as a test,
+-- and only after checking the caller's real sign-in against the list below. Test submissions never count in
+-- reporting; the journal labels them "Test" and keeps them out of every total, chart and export.
+alter table public.community_submissions add column if not exists is_test boolean not null default false;
+alter table public.community_submissions add column if not exists test_by text;
+create table if not exists public.portal_preview_users (
+  email     text primary key check (email = lower(email)),
+  note      text,
+  added_at  timestamptz not null default now()
+);
+alter table public.portal_preview_users enable row level security;
+-- no policies: nobody can read or change this list from the browser. To add someone, insert their email here
+-- in the SQL Editor; they must also be an active administrator.
+insert into public.portal_preview_users (email, note) values ('jacob.pajimola@pepperdine.edu', 'Consultant (Seas the Day Consulting): portal switching and Preview Mode')
+  on conflict (email) do nothing;
+-- used by the journal to decide whether to show Settings > Portal Access (the Edge Function repeats the check)
+create or replace function public.can_preview_portal() returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.is_admin() and public.is_active_user()
+    and exists (select 1 from public.portal_preview_users where email = lower(coalesce(auth.jwt()->>'email', '')));
+$$;
+revoke all on function public.can_preview_portal() from public;
+grant execute on function public.can_preview_portal() to authenticated;
+
 -- 3. Review history (kept even after a submission is deleted)
 create table if not exists public.submission_events (
   id             bigserial primary key,
@@ -96,6 +121,11 @@ begin
   if tg_op = 'DELETE' then
     insert into public.submission_events (submission_id, actor, action, details) values (old.id, who, 'deleted', jsonb_build_object('status', old.status));
     return old;
+  end if;
+  -- a test stays a test (and a real story stays real): only the server sets this when the story is started
+  if (new.is_test is distinct from old.is_test or new.test_by is distinct from old.test_by)
+     and auth.uid() is not null and coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception 'Only the server can mark a submission as a test';
   end if;
   new.updated_at := now();
   if new.status is distinct from old.status then

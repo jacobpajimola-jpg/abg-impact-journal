@@ -4,6 +4,8 @@
 // The server builds every AI prompt itself, so this function can't be used as a general AI proxy.
 // Minors: anyone under 18 can only take part through an individual invitation link that an ABG administrator
 // created after recording guardian consent. Voice recordings are transcribed and discarded, never stored.
+// Preview Mode: an authorized consultant (listed in portal_preview_users, an active administrator) can start
+// test submissions by sending their own sign-in token. The server checks it; the browser can't mark a test.
 // Bundled with src/core/shared.js into index.ts by scripts/build-community.mjs.
 import { RELATIONSHIPS, PERSPECTIVES, SUBJECTS, communityStoryType, communityOpeningQ, communityInterviewPrompt, communityAnalysisPrompt, COMMUNITY_CLOSING_Q } from '../../../src/core/shared.js';
 
@@ -15,7 +17,7 @@ export const CORS = {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {status, headers: {...CORS, 'Content-Type': 'application/json'}});
 const fail = (status: number, code: string, error: string) => json({error, code}, status);
 
-export const LIMITS = {startsPerHourPerIp: 6, followUps: 7, targetFollowUps: 5, aiCalls: 24, answerChars: 6000, clips: 40, clipBytes: 15 * 1024 * 1024, draftDays: 14, rejectedDays: 180};
+export const LIMITS = {startsPerHourPerIp: 6, followUps: 7, targetFollowUps: 5, aiCalls: 24, answerChars: 6000, clips: 40, clipBytes: 15 * 1024 * 1024, draftDays: 14, rejectedDays: 180, testDays: 30, testStartsPerHour: 30};
 const STATUS_TEXT: Record<string, string> = {
   in_progress: 'Not submitted yet',
   pending_review: 'Received. Waiting for ABG to review it',
@@ -33,6 +35,7 @@ export interface Deps {
   transcribe: (bytes: Uint8Array, mime: string) => Promise<string>;
   now?: () => Date;
   ip?: string;
+  getUser?: (jwt: string) => Promise<{email: string; banned?: boolean} | null>;   // checks a staff sign-in token
 }
 
 const clean = (v: unknown, max = 300) => String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max);
@@ -96,7 +99,7 @@ function view(sub: Any){
     question: sub.status === 'needs_clarification' && clar.length ? clean(clar[clar.length - 1].text, 1000) : '',
     replies: (sub.clarifications || []).map((c: Any) => ({from: c.from === 'abg' ? 'ABG' : 'You', text: clean(c.text, 2000), at: c.at})),
     canEdit: sub.status === 'pending_review' || sub.status === 'needs_clarification',
-    reviewing: sub.status === 'in_progress', analysisFailed: !!(sub.data && sub.data.analysisFailed),
+    reviewing: sub.status === 'in_progress', analysisFailed: !!(sub.data && sub.data.analysisFailed), test: !!sub.is_test,
   };
 }
 /* identifiable public use only for adults telling their own story; minors and witnessed stories: no names */
@@ -133,6 +136,20 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     const {error} = await db.from('community_submissions').update(Object.assign({}, patch, {updated_at: now.toISOString()})).eq('id', id);
     if (error) throw new Error(error.message);
   };
+  /* Preview Mode is for authorized consultants only: a valid staff sign-in, on the preview list, an administrator, not deactivated */
+  const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  const previewUser = async () => {
+    if (!bearer || !deps.getUser) return null;
+    let u: Any = null;
+    try { u = await deps.getUser(bearer); } catch { return null; }
+    if (!u || !u.email || u.banned) return null;
+    const email = String(u.email).toLowerCase();
+    const {data: listed} = await db.from('portal_preview_users').select('email').eq('email', email).maybeSingle();
+    if (!listed) return null;
+    const {data: role} = await db.from('user_roles').select('role').eq('email', email).maybeSingle();
+    if (!role || role.role !== 'admin') return null;
+    return {email};
+  };
   const logEvent = async (id: string, what: string, details: Any = {}) => { try { await db.from('submission_events').insert({submission_id: id, actor: 'contributor', action: what, details}); } catch { /* best effort */ } };
 
   try {
@@ -142,18 +159,32 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
       return json({valid: r.valid, reason: r.reason || null, firstName: r.valid ? clean(r.row.label, 40) : '', relationship: r.valid ? (r.row.relationship || '') : '', guardianConsent: r.valid ? !!r.row.minor_consent : false});
     }
 
+    if (action === 'preview_check') {
+      const u = await previewUser();
+      return json({preview: !!u});
+    }
+
     if (action === 'start') {
       const intake = cleanIntake(body.intake);
       if (!intake.relationship || !intake.perspective) return fail(400, 'intake', 'Choose how you are connected to ABG and whose experience you are sharing.');
       if (intake.adult === null) return fail(400, 'age', 'Tell us whether you are 18 or older.');
       if (body.privacyAccepted !== true) return fail(400, 'privacy', 'Please read and accept how ABG will use your story.');
       if (intake.method === 'voice' && body.recordingConsent !== true) return fail(400, 'recording_consent', 'Please agree to the voice recording terms, or choose a written interview.');
+      let tester: Any = null;
+      if (body.preview === true) {
+        tester = await previewUser();
+        if (!tester) return fail(403, 'preview_denied', 'Preview Mode is only for authorized ABG accounts. Open the staff dashboard and switch portals from Settings, or leave Preview Mode.');
+      }
       const inv = body.invite ? await findInvite(body.invite) : null;
       if (body.invite && (!inv || !inv.valid)) return fail(403, 'invite_invalid', 'This invitation link is no longer valid. Ask ABG for a new one.');
       // minors: only with an individual invitation that records guardian consent
       if (intake.adult === false && !(inv && inv.valid && inv.row.minor_consent)) return fail(403, 'guardian_required', 'Because you are under 18, ABG needs permission from your parent or guardian first.');
       const ipHash = deps.ip ? await sha256('ip:' + deps.ip) : null;
-      if (ipHash && !inv) {
+      if (tester) {
+        const since = new Date(now.getTime() - 3600e3).toISOString();
+        const {count} = await db.from('community_submissions').select('id', {count: 'exact', head: true}).eq('test_by', tester.email).gte('created_at', since);
+        if ((count || 0) >= LIMITS.testStartsPerHour) return fail(429, 'rate_limited', 'Too many test stories this hour. Please try again later.');
+      } else if (ipHash && !inv) {
         const since = new Date(now.getTime() - 3600e3).toISOString();
         const {count} = await db.from('community_submissions').select('id', {count: 'exact', head: true}).eq('ip_hash', ipHash).gte('created_at', since);
         if ((count || 0) >= LIMITS.startsPerHourPerIp) return fail(429, 'rate_limited', 'Too many stories were started from this connection. Please try again in an hour.');
@@ -161,16 +192,17 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
       // retention: unfinished drafts and long-rejected submissions are deleted
       await db.from('community_submissions').delete().eq('status', 'in_progress').lt('updated_at', new Date(now.getTime() - LIMITS.draftDays * 864e5).toISOString());
       await db.from('community_submissions').delete().eq('status', 'rejected').lt('updated_at', new Date(now.getTime() - LIMITS.rejectedDays * 864e5).toISOString());
+      await db.from('community_submissions').delete().eq('is_test', true).lt('created_at', new Date(now.getTime() - LIMITS.testDays * 864e5).toISOString());
       const token = newToken();
       const type = communityStoryType(intake);
       const q = communityOpeningQ(intake);
       const row = {token_hash: await sha256(token), invite_id: inv && inv.valid ? inv.row.id : null, status: 'in_progress', relationship: intake.relationship, perspective: intake.perspective, story_type: type,
         is_minor: intake.adult === false || (intake.perspective === 'witnessed' && intake.subjectMinor === 'yes'), intake, turns: [], data: {current: {q, kind: 'opening'}, notes: null},
-        recording_consent: intake.method === 'voice' && body.recordingConsent === true, publication_consent: 'internal', ip_hash: ipHash, created_at: now.toISOString(), updated_at: now.toISOString()};
+        recording_consent: intake.method === 'voice' && body.recordingConsent === true, publication_consent: 'internal', ip_hash: tester ? null : ipHash, is_test: !!tester, test_by: tester ? tester.email : null, created_at: now.toISOString(), updated_at: now.toISOString()};
       const {error} = await db.from('community_submissions').insert(row);
       if (error) throw new Error(error.message);
       if (inv && inv.valid) await db.from('community_invites').update({uses: (inv.row.uses || 0) + 1}).eq('id', inv.row.id);
-      return json({token, type, question: q, kind: 'opening'});
+      return json({token, type, question: q, kind: 'opening', test: !!tester});
     }
 
     const sub = await loadSub();

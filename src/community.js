@@ -1,9 +1,15 @@
-/* ABG Impact Journal: Community Story Collection Portal (/share).
-   A separate, welcoming experience for students, alumni, staff, parents, volunteers and friends of ABG.
+/* ABG Impact Journal: Share Your Story (/share), the community side of the platform.
+   A welcoming, mobile-first experience for students, alumni, staff, parents, volunteers and friends of ABG.
    It never signs anyone in and talks only to the "community" Edge Function, which checks a private link
-   token for every request. Nothing here can read the journal, other submissions or staff tools. */
+   token for every request. Nothing here can read the journal, other submissions or staff tools.
+
+   Preview Mode: an authorized consultant who switches here from the staff dashboard's Settings > Portal Access
+   gets a small staff menu and test stories. The browser only asks; the server decides. The Edge Function checks
+   the consultant's real staff sign-in (preview list + active administrator) before it shows the staff menu or
+   accepts a test story, and test stories are marked on the server so they never count in reporting. */
 import './community.css';
 import { RELATIONSHIPS, SUBJECTS, communityStoryType } from './core/shared.js';
+import { PALETTE_ART } from './ui/art.js';
 
 const {React, ReactDOM, htm} = window;
 const html = htm.bind(React.createElement);
@@ -13,11 +19,14 @@ const ssGet = k => { try { return JSON.parse(sessionStorage.getItem(k) || 'null'
 const ssSet = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 const ssDel = k => { try { sessionStorage.removeItem(k); } catch (e) {} };
 const DRAFT = 'abg-share-draft';
+const MODE = 'abg-share-mode';            // consultant only: 'preview' (default) or 'live'
+const FRESH = () => ({screen: 'welcome', step: 0, intake: {method: ''}, privacy: false, recording: false, token: null, turns: [], current: null});
 
 function makeApi(url, key){
-  return async (action, payload) => {
+  return async (action, payload, opts) => {
     let res;
-    try { res = await fetch(url + '/functions/v1/community', {method: 'POST', headers: {'Content-Type': 'application/json', apikey: key, Authorization: 'Bearer ' + key}, body: JSON.stringify(Object.assign({action}, payload || {}))}); }
+    const bearer = (opts && opts.jwt) || key;
+    try { res = await fetch(url + '/functions/v1/community', {method: 'POST', headers: {'Content-Type': 'application/json', apikey: key, Authorization: 'Bearer ' + bearer}, body: JSON.stringify(Object.assign({action}, payload || {}))}); }
     catch (e) { throw {message: "We couldn't connect. Check your internet connection and try again. Your answers are saved."}; }
     const data = await res.json().catch(() => null);
     if (!res.ok) throw {message: (data && data.error) || 'Something went wrong. Please try again.', code: data && data.code, status: res.status};
@@ -38,29 +47,56 @@ const ICON = {
   back: '<path d="M15 5l-7 7 7 7"/>', check: '<path d="M5 12.5l4.5 4.5L19 7"/>', stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
   volume: '<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/>', lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.2-4.5 4.2-7 8-7s6.8 2.5 8 7"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>', spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', chev: '<path d="M6 9l6 6 6-6"/>',
+  home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>', exit: '<path d="M15 4h4v16h-4"/><path d="M10 17l5-5-5-5M15 12H3"/>',
 };
 const Icon = ({name, size}) => html`<svg width=${size || 22} height=${size || 22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{__html: ICON[name] || ''}}></svg>`;
 const REL_ICON = {current_student: 'student', alumni: 'alumni', staff: 'staff', parent: 'parent', volunteer: 'volunteer', friend: 'friend'};
-const STEPS = ['Connection', 'Whose story', 'About you', 'Interview style', 'Interview', 'Review'];
+const STEPS = ['Your connection', 'Whose story', 'About you', 'How to share', 'Interview', 'Review'];
+/* a slightly larger frame than the dashboard's, which bleeds the art off the card edge on purpose; here it shows whole */
+const Art = ({className}) => html`<svg className=${className} viewBox="-8 -8 352 276" overflow="visible" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{__html: PALETTE_ART}}></svg>`;
 
-function Art(){
-  return html`<svg className="sh-art" viewBox="0 0 320 200" aria-hidden="true" focusable="false">
-    <path d="M30 120c10-60 80-95 140-80s110 60 120 110c-60 25-200 30-260-30z" fill="var(--sh-blob-1)"/>
-    <circle cx="250" cy="55" r="34" fill="var(--sh-blob-2)"/>
-    <path d="M70 150c30-40 70-55 110-45 25 7 45 25 60 45" fill="none" stroke="var(--sh-accent)" stroke-width="7" stroke-linecap="round"/>
-    <circle cx="96" cy="78" r="13" fill="#F4C542"/><circle cx="138" cy="62" r="11" fill="#EC6FB5"/><circle cx="178" cy="70" r="12" fill="#2B9FE0"/><circle cx="214" cy="92" r="10" fill="#F59A3C"/>
-  </svg>`;
+/* the consultant's staff menu: visible only after the server confirmed Preview Mode access */
+function StaffMenu({staff}){
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const off = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = e => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', off); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('pointerdown', off); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  const preview = staff.mode === 'preview';
+  return html`<div ref=${ref}>
+    <button type="button" className=${'sh-chip' + (preview ? '' : ' live')} id="sh-staff-menu" aria-haspopup="true" aria-expanded=${open} onClick=${() => setOpen(!open)}>
+      <${Icon} name=${preview ? 'eye' : 'user'} size=${16} /> ${preview ? 'Preview' : 'Live'} <${Icon} name="chev" size=${14} /></button>
+    ${open ? html`<div className="sh-menu" role="menu" aria-label="Staff menu">
+      <p>${preview ? "You're in Preview Mode. Test stories never count in ABG's reporting." : "Live mode: a story you send now is a real submission."}</p>
+      <a role="menuitem" href="/app" id="sh-return-staff" onClick=${staff.leave}><${Icon} name="home" size=${18} /> Return to Staff Dashboard</a>
+      ${preview ? html`<button type="button" role="menuitem" id="sh-exit-preview" onClick=${() => { setOpen(false); staff.ask('live'); }}><${Icon} name="exit" size=${18} /> Exit Preview Mode</button>`
+        : html`<button type="button" role="menuitem" id="sh-enter-preview" onClick=${() => { setOpen(false); staff.ask('preview'); }}><${Icon} name="eye" size=${18} /> Back to Preview Mode</button>`}
+    </div>` : null}
+  </div>`;
 }
-function Header({onBack, step}){
+function Header({onBack, step, staff}){
   return html`<header className="sh-top">
-    ${onBack ? html`<button type="button" className="sh-icon" onClick=${onBack} aria-label="Back"><${Icon} name="back" /></button>` : html`<span className="sh-icon-spacer"></span>`}
+    <div className="sh-top-l">${onBack ? html`<button type="button" className="sh-icon" onClick=${onBack} aria-label="Back"><${Icon} name="back" /></button>` : null}</div>
     <a className="sh-brand" href="/share" aria-label="Share Your Story home"><img src="/abg-logo.png" alt="Arts Bridging the Gap" /></a>
-    <span className="sh-icon-spacer"></span>
+    <div className="sh-top-r">${staff ? html`<${StaffMenu} staff=${staff} />` : null}</div>
     ${step != null ? html`<div className="sh-progress" role="progressbar" aria-valuemin="1" aria-valuemax=${STEPS.length} aria-valuenow=${step + 1} aria-label=${'Step ' + (step + 1) + ' of ' + STEPS.length + ': ' + STEPS[step]}>
       <div className="sh-progress-bar"><span style=${{width: Math.round(100 * (step + 1) / STEPS.length) + '%'}}></span></div>
-      <p className="sh-progress-text">Step ${step + 1} of ${STEPS.length} · ${STEPS[step]}</p>
+      <p className="sh-progress-text"><b>Step ${step + 1} of ${STEPS.length}</b> · ${STEPS[step]}</p>
     </div>` : null}
   </header>`;
+}
+function ModeBanner({staff}){
+  if (!staff) return null;
+  return staff.mode === 'preview'
+    ? html`<div className="sh-banner" id="sh-preview-banner" role="status"><${Icon} name="eye" size=${20} /><p><strong>Preview Mode.</strong> You're seeing exactly what contributors see. Stories you send are saved as tests: they're labeled Test for staff and never count in Impact Insights, totals or exports.</p></div>`
+    : html`<div className="sh-banner live" id="sh-live-banner" role="status"><${Icon} name="user" size=${20} /><p><strong>Live mode.</strong> A story you send now is a real submission and goes to the review queue like anyone else's.</p></div>`;
 }
 const Choice = ({id, icon, label, sub, on, onClick}) => html`<button type="button" id=${id} className=${'sh-choice' + (on ? ' on' : '')} aria-pressed=${!!on} onClick=${onClick}>
   ${icon ? html`<span className="sh-choice-ic"><${Icon} name=${icon} /></span>` : null}<span className="sh-choice-text"><strong>${label}</strong>${sub ? html`<small>${sub}</small>` : null}</span>
@@ -68,6 +104,7 @@ const Choice = ({id, icon, label, sub, on, onClick}) => html`<button type="butto
 </button>`;
 const Seg = ({value, onChange, options, label, idp}) => html`<div className="sh-seg" role="group" aria-label=${label}>${options.map(o => html`<button type="button" key=${o[0]} id=${idp ? idp + '-' + o[0] : undefined} aria-pressed=${value === o[0]} onClick=${() => onChange(value === o[0] ? '' : o[0])}>${o[1]}</button>`)}</div>`;
 const Field = ({label, hint, children}) => html`<label className="sh-field"><span>${label}</span>${children}${hint ? html`<small>${hint}</small>` : null}</label>`;
+const Loading = ({label}) => html`<span className="sh-dots big" role="status" aria-label=${label || 'Loading'}><i></i><i></i><i></i></span>`;
 
 function pickMime(){
   const c = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
@@ -79,6 +116,7 @@ const speech = (() => {
   const ss = window.speechSynthesis; const ok = !!(ss && window.SpeechSynthesisUtterance);
   return {ok, say(t){ if (!ok || !t) return; try { ss.cancel(); const u = new SpeechSynthesisUtterance(t); u.lang = 'en-US'; u.rate = 0.95; ss.speak(u); } catch (e) {} }, stop(){ if (ok) { try { ss.cancel(); } catch (e) {} } }};
 })();
+const clock = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 
 /* voice answer: record, stop, transcribe on the server (the audio is never stored), then edit the text */
 function Recorder({api, token, onText, disabled}){
@@ -111,43 +149,65 @@ function Recorder({api, token, onText, disabled}){
   }
   const stop = () => { try { rec.current && rec.current.stop(); } catch (e) {} };
   return html`<div className="sh-rec">
-    ${state === 'rec' ? html`<button type="button" className="sh-rec-btn on" id="sh-stop" onClick=${stop}><${Icon} name="stop" size=${26} /><span>Stop · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}</span></button>`
+    ${state === 'rec' ? html`<button type="button" className="sh-rec-btn on" id="sh-stop" onClick=${stop} aria-label=${'Recording, ' + clock(secs) + '. Tap to stop.'}><span className="sh-rec-dot"><${Icon} name="stop" size=${22} /></span><span>Recording ${clock(secs)} · Tap to stop</span></button>`
       : state === 'busy' ? html`<button type="button" className="sh-rec-btn" disabled=${true}><span className="sh-dots"><i></i><i></i><i></i></span><span>Turning your words into text…</span></button>`
-      : html`<button type="button" className="sh-rec-btn" id="sh-record" disabled=${disabled} onClick=${start}><${Icon} name="mic" size=${26} /><span>Tap to record your answer</span></button>`}
+      : html`<button type="button" className="sh-rec-btn" id="sh-record" disabled=${disabled} onClick=${start}><span className="sh-rec-dot"><${Icon} name="mic" size=${22} /></span><span>Tap to record your answer</span></button>`}
+    <p className="sh-sr" aria-live="polite">${state === 'rec' ? 'Recording started.' : state === 'busy' ? 'Recording stopped. Turning your words into text.' : ''}</p>
     ${err ? html`<p className="sh-error" role="alert">${err}</p>` : null}
   </div>`;
 }
 
-function Welcome({go, invite, onStatus}){
-  return html`<main className="sh-page sh-welcome">
-    <${Header} />
-    <section className="sh-hero">
-      <${Art} />
-      <p className="sh-eyebrow">Arts Bridging the Gap</p>
-      <h1>Share Your Story</h1>
-      <p className="sh-lede">Your story matters. Help us understand how ABG has made a difference in your life, education, career, or community.</p>
-      ${invite && invite.valid ? html`<p className="sh-note sh-invite"><${Icon} name="check" size=${18} /> <span>${invite.firstName ? 'Hi ' + invite.firstName + '! ' : ''}You have a personal invitation from ABG.</span></p>` : null}
-      ${invite && !invite.valid ? html`<p className="sh-note sh-warn" role="alert">This invitation link has expired or was already used. You can still share your story, or ask ABG for a new link.</p>` : null}
-      <button type="button" className="sh-btn sh-btn-primary sh-btn-lg" id="sh-start" onClick=${go}>Get Started</button>
-      <p className="sh-small">A short, guided conversation. Speak or type, about 10 minutes. No account needed.</p>
+const HOW = [
+  {icon: 'user', tone: 'purple', title: 'Tell Us About Yourself', text: "Share how you're connected to ABG."},
+  {icon: 'chat', tone: 'teal', title: 'Share Your Experience', text: 'Answer friendly questions by speaking or typing.'},
+  {icon: 'edit', tone: 'orange', title: 'Review Your Story', text: 'Review your responses and make changes before submitting.'},
+  {icon: 'spark', tone: 'blue', title: 'Make an Impact', text: 'Your story helps ABG understand and communicate the difference its programs make.'},
+];
+function Welcome({go, invite, onStatus, staff}){
+  return html`<main className="sh-page sh-wide sh-welcome">
+    <${Header} staff=${staff} />
+    <${ModeBanner} staff=${staff} />
+    <section className="sh-hero" aria-labelledby="sh-hero-h">
+      <${Art} className="sh-hero-art" />
+      <div className="sh-hero-copy">
+        <p className="sh-eyebrow">Arts Bridging the Gap</p>
+        <h1 className="sh-title" id="sh-hero-h">Share Your Story.</h1>
+        <p className="sh-lede">Your story matters. Help us understand how ABG has made a difference in your life, education, career, or community.</p>
+        ${invite && invite.valid ? html`<p className="sh-note sh-invite"><${Icon} name="check" size=${18} /> <span>${invite.firstName ? 'Hi ' + invite.firstName + '! ' : ''}You have a personal invitation from ABG.</span></p>` : null}
+        ${invite && !invite.valid ? html`<p className="sh-note sh-warn" role="alert">This invitation link has expired or was already used. You can still share your story, or ask ABG for a new link.</p>` : null}
+        <button type="button" className="sh-btn sh-btn-primary sh-btn-lg" id="sh-start" onClick=${go}>Share My Story</button>
+        <p className="sh-small sh-hero-note">A short, guided conversation. Speak or type in about 10 minutes. No account needed.</p>
+      </div>
     </section>
-    <section className="sh-how" aria-labelledby="how-h">
+    <section className="sh-section" aria-labelledby="how-h">
       <h2 id="how-h">How it works</h2>
-      <ol className="sh-how-list">
-        <li><strong>Tell us how you know ABG.</strong> A student, alum, staff member, parent, volunteer or friend.</li>
-        <li><strong>Talk or type.</strong> A friendly interviewer asks a few questions, one at a time. Skip anything you like.</li>
-        <li><strong>Check your story.</strong> You see what we wrote down and fix anything before you send it.</li>
-        <li><strong>ABG reviews it.</strong> Staff read every story. You choose whether it can ever be shared publicly.</li>
-      </ol>
-      <details className="sh-faq"><summary>How will my story be used?</summary><p>ABG staff read your story and may use what you share, without private details, to understand and report on the difference its programs make, for example to funders and schools. Your story is only shared publicly if you say yes. Please don't include last names, addresses or other private details.</p></details>
-      <details className="sh-faq"><summary>What if I'm under 18?</summary><p>We need permission from your parent or guardian first. Ask ABG staff for a personal link: they will check with your parent or guardian. A parent or guardian can also share what they've seen.</p></details>
-      <details className="sh-faq"><summary>Can I change or remove my story later?</summary><p>Yes. After you send it, you get a private link. Use it to check your story's status, answer ABG's questions, make corrections or ask us to remove it.</p></details>
-      <p className="sh-small"><button type="button" className="sh-link" onClick=${onStatus}>Already shared a story? Open it with your private link</button></p>
+      <ol className="sh-steps">${HOW.map((s, k) => html`<li className="sh-step" key=${k}>
+        <span className=${'sh-step-ic sh-tone-' + s.tone}><${Icon} name=${s.icon} size=${24} /></span>
+        <p className="sh-step-n">Step ${k + 1}</p><h3>${s.title}</h3><p>${s.text}</p></li>`)}</ol>
     </section>
+    <section className="sh-section" aria-labelledby="trust-h">
+      <h2 id="trust-h">Your story, your choice</h2>
+      <div className="sh-faqs">
+        <details className="sh-faq" id="sh-faq-use"><summary>How will my story be used?</summary><div className="sh-faq-body">
+          <ul className="sh-bullets">
+            <li>Taking part is voluntary. You can stop at any time.</li>
+            <li>You can skip any question. "I don't know" is a fine answer.</li>
+            <li>You'll see your story and can change it before you send it.</li>
+            <li>ABG staff review every story before it's used. Stories help ABG understand and report the difference its programs make, for example to funders and schools.</li>
+            <li>Your story is only shared publicly if you give permission. You choose before you send it.</li>
+            <li>We only ask for first names. Please leave out last names, addresses and other private details.</li>
+            <li>If you talk instead of typing, your recording is turned into text and then deleted. Only the text is kept.</li>
+            <li>Stories that are started but not sent are deleted after 14 days.</li>
+          </ul></div></details>
+        <details className="sh-faq"><summary>What if I'm under 18?</summary><div className="sh-faq-body"><p>We need permission from your parent or guardian first. Ask ABG staff for a personal link: they will check with your parent or guardian. A parent or guardian can also share what they've seen.</p></div></details>
+        <details className="sh-faq"><summary>Can I change or remove my story later?</summary><div className="sh-faq-body"><p>Yes. After you send it, you get a private link. Use it to check your story's status, answer ABG's questions, make corrections or ask ABG to remove it.</p></div></details>
+      </div>
+    </section>
+    <footer className="sh-foot-links"><button type="button" className="sh-link" onClick=${onStatus}>Already shared a story? Open it with your private link</button></footer>
   </main>`;
 }
 
-function Intake({st, set, step, setStep, invite, api, onStarted}){
+function Intake({st, set, step, setStep, invite, api, onStarted, staff, previewJwt}){
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const i = st.intake;
@@ -161,7 +221,10 @@ function Intake({st, set, step, setStep, invite, api, onStarted}){
     if (i.method === 'voice' && !st.recording) { setErr('Please agree to the voice recording terms, or choose a written interview.'); return; }
     setBusy(true);
     try {
-      const r = await api('start', {intake: i, invite: invite && invite.valid ? invite.token : undefined, privacyAccepted: true, recordingConsent: i.method === 'voice' && !!st.recording});
+      const preview = !!(staff && staff.mode === 'preview');
+      const jwt = preview ? await previewJwt() : null;
+      if (preview && !jwt) throw {message: 'Your staff sign-in has ended, so Preview Mode is off. Return to the Staff Dashboard and switch portals again.'};
+      const r = await api('start', {intake: i, invite: invite && invite.valid ? invite.token : undefined, privacyAccepted: true, recordingConsent: i.method === 'voice' && !!st.recording, preview: preview || undefined}, preview ? {jwt} : undefined);
       onStarted(r);
     } catch (e) { setErr(e.message); }
     setBusy(false);
@@ -216,12 +279,13 @@ function Intake({st, set, step, setStep, invite, api, onStarted}){
       </div>` : null}`;
   } else {
     body = html`<h1 className="sh-q">How would you like to share?</h1>
+      <p className="sh-sub">Either way, you get the same friendly questions. If you talk, your words appear as text you can fix or add to before sending.</p>
       <div className="sh-choices">
-        <${Choice} id="method-voice" icon="mic" label="Talk" sub="Answer out loud. Your words are turned into text." on=${i.method === 'voice'} onClick=${() => up({method: 'voice'})} />
+        <${Choice} id="method-voice" icon="mic" label="Talk" sub="Answer out loud. Your words are turned into text you can check." on=${i.method === 'voice'} onClick=${() => up({method: 'voice'})} />
         <${Choice} id="method-written" icon="chat" label="Type" sub="A chat-style conversation. Answer in your own words." on=${i.method === 'written'} onClick=${() => up({method: 'written'})} />
       </div>
       <div className="sh-card sh-consent">
-        <p className="sh-label"><${Icon} name="lock" size=${16} /> Before you start</p>
+        <p className="sh-label"><${Icon} name="lock" size=${18} /> Before you start</p>
         <ul className="sh-bullets">
           <li>ABG staff will read your story. It may be used, without private details, in ABG's internal impact reports.</li>
           <li>You'll choose separately whether it can ever be shared publicly.</li>
@@ -235,7 +299,7 @@ function Intake({st, set, step, setStep, invite, api, onStarted}){
     canNext = !!i.method && !!st.privacy && (i.method !== 'voice' || !!st.recording);
   }
   return html`<main className="sh-page">
-    <${Header} onBack=${back} step=${step} />
+    <${Header} onBack=${back} step=${step} staff=${staff} />
     <section className="sh-body">${body}
       ${err ? html`<p className="sh-error" role="alert">${err}</p>` : null}
     </section>
@@ -246,17 +310,20 @@ function Intake({st, set, step, setStep, invite, api, onStarted}){
   </main>`;
 }
 
-function Interview({st, set, api}){
+const AbgSays = ({children, current, id}) => html`<div className="sh-msg sh-msg-abg"><span className="sh-avatar sh-avatar-abg" aria-hidden="true">ABG</span><p className=${'sh-bubble sh-q-bubble' + (current ? ' sh-current' : '')} id=${id}><span className="sh-sr">ABG asks: </span>${children}</p></div>`;
+const YouSaid = ({children, skipped}) => html`<div className="sh-msg sh-msg-you"><p className=${'sh-bubble sh-a-bubble' + (skipped ? ' skipped' : '')}><span className="sh-sr">You answered: </span>${children}</p></div>`;
+function Interview({st, set, api, staff}){
   const [answer, setAnswer] = useState(st.answerDraft || '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [voiceOn, setVoiceOn] = useState(st.intake.method === 'voice');
   const voice = st.intake.method === 'voice';
-  const endRef = useRef(null);
+  const endRef = useRef(null), footRef = useRef(null);
   const cur = st.current;
   useEffect(() => { set(Object.assign({}, st, {answerDraft: answer})); }, [answer]);
   useEffect(() => { if (cur && voiceOn && voice) { const t = setTimeout(() => speech.say(cur.q), 250); return () => { clearTimeout(t); speech.stop(); }; } }, [cur && cur.q, voiceOn]);
-  useEffect(() => { try { endRef.current && endRef.current.scrollIntoView({block: 'end'}); } catch (e) {} }, [st.turns.length, busy]);
+  /* keep the newest question in view above the answer box, which stays pinned to the bottom of the screen */
+  useEffect(() => { try { const end = endRef.current; if (!end) return; end.style.scrollMarginBottom = ((footRef.current && footRef.current.offsetHeight) || 0) + 16 + 'px'; end.scrollIntoView({block: 'end'}); } catch (e) {} }, [st.turns.length, busy]);
   async function send(opts){
     const o = opts || {};
     if (!o.skip && !o.finish && !answer.trim()) return;
@@ -271,17 +338,19 @@ function Interview({st, set, api}){
     setBusy(false);
   }
   const answered = st.turns.filter(t => !t.skipped).length;
+  const n = st.turns.length + 1;
   return html`<main className="sh-page sh-chat">
-    <${Header} step=${4} />
+    <${Header} step=${4} staff=${staff} />
     <section className="sh-body">
+      ${st.test ? html`<p className="sh-note sh-test" id="sh-test-note"><strong>Test story.</strong> Saved for testing only; it never counts in reporting.</p>` : null}
       <div className="sh-thread" aria-live="polite">
-        ${st.turns.map((t, k) => html`<div key=${k} className="sh-turn"><p className="sh-bubble sh-q-bubble">${t.q}</p><p className=${'sh-bubble sh-a-bubble' + (t.skipped ? ' skipped' : '')}>${t.skipped ? 'Skipped' : t.a}</p></div>`)}
-        ${cur ? html`<div className="sh-turn"><p className="sh-bubble sh-q-bubble sh-current" id="sh-question">${cur.q}</p></div>` : null}
-        ${busy ? html`<p className="sh-bubble sh-q-bubble sh-typing"><span className="sh-dots"><i></i><i></i><i></i></span></p>` : null}
+        ${st.turns.map((t, k) => html`<div key=${k} className="sh-turn"><${AbgSays}>${t.q}<//><${YouSaid} skipped=${t.skipped}>${t.skipped ? 'Skipped' : t.a}<//></div>`)}
+        ${cur ? html`<div className="sh-turn"><${AbgSays} current=${true} id="sh-question">${cur.q}<//></div>` : null}
+        ${busy ? html`<div className="sh-msg sh-msg-abg"><span className="sh-avatar sh-avatar-abg" aria-hidden="true">ABG</span><p className="sh-bubble sh-q-bubble sh-typing"><span className="sh-dots" role="status" aria-label="ABG is writing the next question"><i></i><i></i><i></i></span></p></div>` : null}
         <div ref=${endRef}></div>
       </div>
     </section>
-    <footer className="sh-foot sh-compose">
+    <footer className="sh-foot sh-compose" ref=${footRef}>
       ${voice && speech.ok ? html`<button type="button" className="sh-link sh-voice-toggle" aria-pressed=${voiceOn} onClick=${() => { setVoiceOn(!voiceOn); speech.stop(); }}><${Icon} name="volume" size=${16} /> ${voiceOn ? 'Questions read aloud: on' : 'Read questions aloud'}</button>` : null}
       ${voice && cur ? html`<${Recorder} api=${api} token=${st.token} disabled=${busy} onText=${t => setAnswer(a => (a ? a + ' ' : '') + t)} />` : null}
       ${cur ? html`<label className="sh-sr" htmlFor="sh-answer">Your answer</label><textarea id="sh-answer" className="sh-input sh-answer" rows=${voice ? 3 : 4} placeholder=${voice ? 'Your words appear here. You can fix them before sending.' : 'Type your answer…'} value=${answer} onChange=${e => setAnswer(e.target.value)} disabled=${busy}></textarea>` : null}
@@ -291,22 +360,22 @@ function Interview({st, set, api}){
         ${answered > 0 ? html`<button type="button" className="sh-btn sh-btn-ghost" id="sh-finish" disabled=${busy} onClick=${() => send({finish: true})}>I'm done</button>` : null}
         ${cur ? html`<button type="button" className="sh-btn sh-btn-primary" id="sh-send" disabled=${busy || !answer.trim()} onClick=${() => send()}>${cur.kind === 'closing' ? 'Finish' : 'Send'}</button>` : null}
       </div>
-      <p className="sh-small">${cur && cur.kind === 'opening' ? 'Take your time. Follow-up questions come after this one.' : 'Question ' + (st.turns.length + 1) + ' · you can skip any question.'}</p>
+      <p className="sh-small">${cur && cur.kind === 'opening' ? 'Take your time. A few short follow-up questions come after this one.' : cur && cur.kind === 'closing' ? 'Last question. You can skip it.' : 'Question ' + n + ' · usually 5 to 7 in all · skip any you like.'}</p>
     </footer>
   </main>`;
 }
 
-function Writing({st, set, api}){
+function Writing({st, set, api, staff}){
   const [err, setErr] = useState('');
-  const run = async () => { setErr(''); try { const v = await api('finish', {token: st.token}); set(Object.assign({}, st, {screen: 'review', view: v, edits: {story: v.story || '', removed: [], note: ''}, publication: v.publicationOptions.includes('anonymous') ? '' : ''})); } catch (e) { setErr(e.message); } };
+  const run = async () => { setErr(''); try { const v = await api('finish', {token: st.token}); set(Object.assign({}, st, {screen: 'review', view: v, edits: {story: v.story || '', removed: [], note: ''}, publication: ''})); } catch (e) { setErr(e.message); } };
   useEffect(() => { run(); }, []);
-  return html`<main className="sh-page"><${Header} step=${5} /><section className="sh-body sh-center">
-    ${err ? html`<p className="sh-error" role="alert">${err}</p><button type="button" className="sh-btn sh-btn-primary" onClick=${run}>Try again</button>` : html`<span className="sh-dots big"><i></i><i></i><i></i></span><h1 className="sh-q">Writing up your story…</h1><p className="sh-sub">This takes a few seconds. Next, you'll check it before anything is sent.</p>`}
+  return html`<main className="sh-page"><${Header} step=${5} staff=${staff} /><section className="sh-body sh-center">
+    ${err ? html`<p className="sh-error" role="alert">${err}</p><button type="button" className="sh-btn sh-btn-primary" onClick=${run}>Try again</button>` : html`<${Loading} label="Writing up your story" /><h1 className="sh-q">Writing up your story…</h1><p className="sh-sub">This takes a few seconds. Next, you'll check it before anything is sent.</p>`}
   </section></main>`;
 }
 
 const PUB = {public_name: ['ABG may share my story publicly, with my first name', 'For example in newsletters, on social media or for funders'], anonymous: ['ABG may share it publicly without names', 'Shared only with names and identifying details removed'], internal: ['Keep it within ABG', 'Used only inside ABG and in reports that never quote or identify it']};
-function Review({st, set, api, onSubmitted}){
+function Review({st, set, api, onSubmitted, staff}){
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const v = st.view || {}; const ed = st.edits || {story: '', removed: [], note: ''};
@@ -319,13 +388,14 @@ function Review({st, set, api, onSubmitted}){
     catch (e) { setErr(e.message); setBusy(false); }
   }
   return html`<main className="sh-page">
-    <${Header} step=${5} />
+    <${Header} step=${5} staff=${staff} />
     <section className="sh-body">
       <h1 className="sh-q">Review your story</h1>
       <p className="sh-sub">Here's what we wrote down from your answers. Fix anything that isn't right. Nothing is sent until you press Send to ABG.</p>
+      ${v.test ? html`<p className="sh-note sh-test"><strong>Test story.</strong> When you send it, it goes to Community Submissions as a test and never counts in reporting.</p>` : null}
       ${v.analysisFailed ? html`<p className="sh-note">We couldn't write a summary right now. That's OK: ABG staff will read your answers directly. You can still add a note below.</p>` : html`
         <${Field} label="Your story"><textarea id="sh-story" className="sh-input" rows="10" value=${ed.story} onChange=${e => upd({story: e.target.value})}></textarea><//>
-        ${(v.outcomes || []).length ? html`<div className="sh-card"><p className="sh-label">What we heard</p><p className="sh-small">Untick anything that isn't right.</p>
+        ${(v.outcomes || []).length ? html`<div className="sh-card"><p className="sh-label">What we heard</p><p className="sh-small">These are the changes you described, in your words. Untick anything that isn't right.</p>
           <ul className="sh-outcomes">${v.outcomes.map(o => html`<li key=${o.i}><label className="sh-check"><input type="checkbox" className="sh-outcome" checked=${!ed.removed.includes(o.i)} onChange=${() => toggle(o.i)} /> ${o.statement}</label></li>`)}</ul></div>` : null}`}
       <${Field} label="Anything to add or correct? (optional)"><textarea id="sh-note" className="sh-input" rows="3" value=${ed.note} onChange=${e => upd({note: e.target.value})}></textarea><//>
       <div className="sh-card"><p className="sh-label" id="pub-l">May ABG share your story publicly?</p>
@@ -338,34 +408,35 @@ function Review({st, set, api, onSubmitted}){
   </main>`;
 }
 
-function Done({token, onView}){
+function Done({token, onView, test, staff}){
   const link = location.origin + '/share#s=' + token;
   const [copied, setCopied] = useState(false);
   const copy = async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {} };
-  return html`<main className="sh-page"><${Header} /><section className="sh-body sh-center sh-done">
-    <span className="sh-done-mark"><${Icon} name="check" size=${40} /></span>
+  return html`<main className="sh-page"><${Header} staff=${staff} /><section className="sh-body sh-center sh-done">
+    <span className="sh-done-mark"><${Icon} name="check" size=${42} /></span>
     <h1>Thank you for sharing your story!</h1>
     <p className="sh-lede">Your story has been submitted to ABG for review. Thank you for helping us understand the difference our programs make.</p>
+    ${test ? html`<p className="sh-note sh-test sh-left" id="sh-test-done"><strong>This was a test.</strong> It's in Community Submissions under Test submissions, labeled Test, and never counts in Impact Insights, totals or exports.</p>` : null}
     <div className="sh-card sh-left">
-      <p className="sh-label"><${Icon} name="lock" size=${16} /> Your private link</p>
+      <p className="sh-label"><${Icon} name="lock" size=${18} /> Your private link</p>
       <p className="sh-small">Save this link to check your story's status, answer any questions from ABG, make corrections or ask us to remove it. Anyone with the link can see your story, so keep it private. We can't recover it if it's lost.</p>
-      <div className="sh-linkbox"><input id="sh-private-link" className="sh-input" readOnly=${true} value=${link} onFocus=${e => e.target.select()} /><button type="button" className="sh-btn sh-btn-ghost" onClick=${copy}><${Icon} name="copy" size=${18} /> ${copied ? 'Copied' : 'Copy'}</button></div>
+      <div className="sh-linkbox"><input id="sh-private-link" className="sh-input" readOnly=${true} value=${link} onFocus=${e => e.target.select()} aria-label="Your private link" /><button type="button" className="sh-btn sh-btn-secondary" onClick=${copy}><${Icon} name="copy" size=${18} /> ${copied ? 'Copied' : 'Copy'}</button></div>
     </div>
     <button type="button" className="sh-btn sh-btn-primary" id="sh-view" onClick=${onView}>View my story</button>
   </section></main>`;
 }
 
-function OpenLink({onOpen, onBack}){
+function OpenLink({onOpen, onBack, staff}){
   const [v, setV] = useState('');
   const tok = (() => { const m = v.match(/[#&?]s=([A-Za-z0-9_-]{30,})/); return m ? m[1] : (/^[A-Za-z0-9_-]{30,}$/.test(v.trim()) ? v.trim() : ''); })();
-  return html`<main className="sh-page"><${Header} onBack=${onBack} /><section className="sh-body">
+  return html`<main className="sh-page"><${Header} onBack=${onBack} staff=${staff} /><section className="sh-body">
     <h1 className="sh-q">Open your story</h1><p className="sh-sub">Paste the private link you saved after sharing your story.</p>
     <${Field} label="Private link"><input id="sh-open-link" className="sh-input" value=${v} onChange=${e => setV(e.target.value)} placeholder="https://…/share#s=…" /><//>
-    ${v && !tok ? html`<p className="sh-error">That doesn't look like a complete private link.</p>` : null}
+    ${v && !tok ? html`<p className="sh-error" role="alert">That doesn't look like a complete private link.</p>` : null}
   </section><footer className="sh-foot"><button type="button" className="sh-btn sh-btn-primary sh-btn-block" disabled=${!tok} onClick=${() => onOpen(tok)}>Open my story</button></footer></main>`;
 }
 
-function Status({token, api}){
+function Status({token, api, staff}){
   const [v, setV] = useState(null);
   const [err, setErr] = useState('');
   const [reply, setReply] = useState('');
@@ -377,27 +448,28 @@ function Status({token, api}){
   const load = async () => { setErr(''); try { const r = await api('status', {token}); setV(r); setStory(r.story || ''); } catch (e) { setErr(e.message); } };
   useEffect(() => { load(); }, [token]);
   const act = async (action, payload, done) => { setBusy(true); setErr(''); try { const r = await api(action, Object.assign({token}, payload)); setV(r); setStory(r.story || ''); if (done) setMsg(done); } catch (e) { setErr(e.message); } setBusy(false); };
-  if (!v) return html`<main className="sh-page"><${Header} /><section className="sh-body sh-center">${err ? html`<p className="sh-error" role="alert">${err}</p>` : html`<span className="sh-dots big"><i></i><i></i><i></i></span>`}</section></main>`;
+  if (!v) return html`<main className="sh-page"><${Header} staff=${staff} /><section className="sh-body sh-center">${err ? html`<p className="sh-error" role="alert">${err}</p><button type="button" className="sh-btn sh-btn-primary" onClick=${load}>Try again</button>` : html`<${Loading} label="Opening your story" />`}</section></main>`;
   const tone = {pending_review: 'wait', needs_clarification: 'ask', approved: 'ok', rejected: 'muted', removal_requested: 'muted', in_progress: 'wait'}[v.status];
-  return html`<main className="sh-page"><${Header} /><section className="sh-body">
+  return html`<main className="sh-page"><${Header} staff=${staff} /><section className="sh-body">
     <p className="sh-eyebrow">Your story</p>
     <h1 className="sh-q">${v.title || 'Your story'}</h1>
     <p className=${'sh-status tone-' + tone} id="sh-status">${v.statusText}</p>
+    ${v.test ? html`<p className="sh-note sh-test"><strong>Test story.</strong> Created in Preview Mode. It never counts in reporting.</p>` : null}
     ${msg ? html`<p className="sh-note sh-ok" role="status">${msg}</p>` : null}
     ${v.status === 'in_progress' ? html`<p className="sh-note">This story wasn't sent yet. Open the page on the device where you started it to finish.</p>` : null}
-    ${v.question ? html`<div className="sh-card sh-ask"><p className="sh-label">ABG's question</p><p id="sh-abg-question">${v.question}</p>
+    ${v.question ? html`<div className="sh-card sh-ask"><p className="sh-label">ABG's question</p><p id="sh-abg-question" style=${{margin: 0}}>${v.question}</p>
       <${Field} label="Your answer"><textarea id="sh-reply" className="sh-input" rows="3" value=${reply} onChange=${e => setReply(e.target.value)}></textarea><//>
       <button type="button" className="sh-btn sh-btn-primary" id="sh-send-reply" disabled=${busy || !reply.trim()} onClick=${() => act('reply', {text: reply}, 'Thanks! Your answer was sent to ABG.').then(() => setReply(''))}>Send answer</button></div>` : null}
     <div className="sh-card">
       <div className="sh-row-between"><p className="sh-label">Your story</p>${v.canEdit && !editing ? html`<button type="button" className="sh-link" id="sh-edit" onClick=${() => setEditing(true)}>Make a correction</button>` : null}</div>
-      ${editing ? html`<textarea id="sh-edit-story" className="sh-input" rows="10" value=${story} onChange=${e => setStory(e.target.value)}></textarea>
+      ${editing ? html`<label className="sh-sr" htmlFor="sh-edit-story">Your story</label><textarea id="sh-edit-story" className="sh-input" rows="10" value=${story} onChange=${e => setStory(e.target.value)}></textarea>
         <div className="sh-row"><button type="button" className="sh-btn sh-btn-ghost" onClick=${() => { setEditing(false); setStory(v.story || ''); }}>Cancel</button><button type="button" className="sh-btn sh-btn-primary" id="sh-save-edit" disabled=${busy} onClick=${() => act('update', {edits: {story}}, 'Your correction was saved.').then(() => setEditing(false))}>Save correction</button></div>`
         : html`<p className="sh-story">${v.story || 'Your answers were sent to ABG.'}</p>`}
       ${(v.outcomes || []).filter(o => !o.removed).length ? html`<p className="sh-label">What we heard</p><ul className="sh-bullets">${v.outcomes.filter(o => !o.removed).map(o => html`<li key=${o.i}>${o.statement}</li>`)}</ul>` : null}
       <p className="sh-small">Sharing: ${PUB[v.publication] ? PUB[v.publication][0] : ''}</p>
     </div>
     ${v.status !== 'removal_requested' ? html`<div className="sh-card">
-      ${confirmRemove ? html`<p>Remove your story? ABG will stop using it and delete it.</p><div className="sh-row"><button type="button" className="sh-btn sh-btn-ghost" onClick=${() => setConfirmRemove(false)}>Keep it</button><button type="button" className="sh-btn sh-btn-danger" id="sh-confirm-remove" disabled=${busy} onClick=${() => act('remove', {}, 'Your removal request was sent. ABG will delete your story.').then(() => setConfirmRemove(false))}>Yes, remove it</button></div>`
+      ${confirmRemove ? html`<p style=${{margin: 0}}>Remove your story? ABG will stop using it and delete it.</p><div className="sh-row"><button type="button" className="sh-btn sh-btn-ghost" onClick=${() => setConfirmRemove(false)}>Keep it</button><button type="button" className="sh-btn sh-btn-danger" id="sh-confirm-remove" disabled=${busy} onClick=${() => act('remove', {}, 'Your removal request was sent. ABG will delete your story.').then(() => setConfirmRemove(false))}>Yes, remove it</button></div>`
         : html`<button type="button" className="sh-link" id="sh-remove" onClick=${() => setConfirmRemove(true)}>Ask ABG to remove my story</button>`}
     </div>` : null}
     ${err ? html`<p className="sh-error" role="alert">${err}</p>` : null}
@@ -405,16 +477,53 @@ function Status({token, api}){
   </section></main>`;
 }
 
-function App({api, hash}){
+/* switching between Preview Mode and a real submission always asks first */
+function ModeDialog({to, hasDraft, onConfirm, onCancel}){
+  const first = useRef(null);
+  useEffect(() => { try { first.current && first.current.focus(); } catch (e) {} const esc = e => { if (e.key === 'Escape') onCancel(); }; document.addEventListener('keydown', esc); return () => document.removeEventListener('keydown', esc); }, []);
+  const live = to === 'live';
+  return html`<div className="sh-scrim" onClick=${e => { if (e.target === e.currentTarget) onCancel(); }}>
+    <div className="sh-dialog" role="dialog" aria-modal="true" aria-labelledby="sh-mode-h">
+      <h2 id="sh-mode-h">${live ? 'Exit Preview Mode?' : 'Back to Preview Mode?'}</h2>
+      <p>${live ? "A story you send after this is a real submission. It goes to Community Submissions for review and can count in ABG's reporting once an administrator approves it." : 'Stories you send are saved as tests again. They never count in reporting.'}</p>
+      ${hasDraft ? html`<p><strong>The story you've started will be discarded.</strong></p>` : null}
+      <div className="sh-row"><button type="button" className="sh-btn sh-btn-ghost" onClick=${onCancel}>${live ? 'Stay in Preview' : 'Cancel'}</button>
+        <button type="button" ref=${first} className="sh-btn sh-btn-primary" id="sh-mode-confirm" onClick=${onConfirm}>${live ? 'Exit Preview Mode' : 'Switch to Preview'}</button></div>
+    </div>
+  </div>`;
+}
+
+function App({api, hash, cfg}){
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const statusToken = params.get('s');
   // an invitation survives a refresh in this tab, but the link itself is removed from the address bar
   const inviteToken = params.get('i') || (ssGet('abg-share-invite') || {}).t || null;
   const saved = ssGet(DRAFT);
-  const [st, setSt] = useState(() => saved || {screen: 'welcome', step: 0, intake: {method: ''}, privacy: false, recording: false, token: null, turns: [], current: null});
+  const [st, setSt] = useState(() => saved || FRESH());
   const [invite, setInvite] = useState(null);
   const [status, setStatus] = useState(statusToken || null);
+  /* Preview Mode: only after the server confirms this browser's staff sign-in belongs to an authorized consultant */
+  const candidate = !!(cfg.staffToken && (cfg.wantsPreview && cfg.wantsPreview() || ssGet(MODE)));
+  const [staffMode, setStaffMode] = useState(candidate ? 'checking' : null);
+  const [asking, setAsking] = useState(null);
   const set = n => { setSt(n); if (n.screen === 'done') { ssDel(DRAFT); ssDel('abg-share-invite'); } else ssSet(DRAFT, n); };
+  useEffect(() => {
+    if (!candidate) return;
+    let gone = false;
+    (async () => {
+      const jwt = await cfg.staffToken();
+      let ok = false;
+      if (jwt) { try { ok = !!(await api('preview_check', {}, {jwt})).preview; } catch (e) { ok = false; } }
+      if (gone) return;
+      if (!ok) { ssDel(MODE); if (cfg.leavePortal) cfg.leavePortal(); setStaffMode(null); return; }
+      const mode = ssGet(MODE) || 'preview';
+      ssSet(MODE, mode); setStaffMode(mode);
+      // a draft started in the other mode can't continue here
+      const d = ssGet(DRAFT);
+      if (d && d.token && !!d.test !== (mode === 'preview')) { ssDel(DRAFT); setSt(FRESH()); }
+    })();
+    return () => { gone = true; };
+  }, []);
   useEffect(() => {
     if (!inviteToken) return;
     api('invite', {invite: inviteToken}).then(r => {
@@ -423,24 +532,34 @@ function App({api, hash}){
     }, () => setInvite({valid: false}));
   }, []);
   useEffect(() => { try { window.scrollTo(0, 0); } catch (e) {} }, [st.screen, st.step, status]);
-  if (status) return html`<${Status} token=${status} api=${api} />`;
-  if (st.screen === 'open') return html`<${OpenLink} onBack=${() => set(Object.assign({}, st, {screen: 'welcome'}))} onOpen=${t => { history.replaceState(null, '', '/share#s=' + t); setStatus(t); }} />`;
-  if (st.screen === 'welcome') return html`<${Welcome} invite=${invite} go=${() => set(Object.assign({}, st, {screen: 'intake', step: 0}))} onStatus=${() => set(Object.assign({}, st, {screen: 'open'}))} />`;
-  if (st.screen === 'intake') return html`<${Intake} st=${st} set=${set} step=${st.step || 0} setStep=${n => set(Object.assign({}, st, {step: n}))} invite=${invite} api=${api}
-    onStarted=${r => set(Object.assign({}, st, {screen: 'interview', token: r.token, type: r.type || communityStoryType(st.intake), current: {q: r.question, kind: r.kind}, turns: []}))} />`;
-  if (st.screen === 'interview') return html`<${Interview} st=${st} set=${set} api=${api} />`;
-  if (st.screen === 'writing') return html`<${Writing} st=${st} set=${set} api=${api} />`;
-  if (st.screen === 'review') return html`<${Review} st=${st} set=${set} api=${api} onSubmitted=${() => set(Object.assign({}, st, {screen: 'done'}))} />`;
-  if (st.screen === 'done') return html`<${Done} token=${st.token} onView=${() => { history.replaceState(null, '', '/share#s=' + st.token); setStatus(st.token); }} />`;
-  return null;
+  if (staffMode === 'checking') return html`<main className="sh-page"><section className="sh-body sh-center"><${Loading} label="Opening Share Your Story" /></section></main>`;
+  const switchMode = to => { ssSet(MODE, to); setStaffMode(to); ssDel(DRAFT); ssDel('abg-share-invite'); setSt(FRESH()); setStatus(null); setAsking(null); history.replaceState(null, '', '/share'); };
+  const staff = staffMode ? {mode: staffMode, ask: to => setAsking(to), leave: () => { ssDel(MODE); if (cfg.leavePortal) cfg.leavePortal(); }} : null;
+  const hasDraft = !!(st.token && st.screen !== 'done');
+  const dialog = asking ? html`<${ModeDialog} to=${asking} hasDraft=${hasDraft} onCancel=${() => setAsking(null)} onConfirm=${() => switchMode(asking)} />` : null;
+  let screen = null;
+  if (status) screen = html`<${Status} token=${status} api=${api} staff=${staff} />`;
+  else if (st.screen === 'open') screen = html`<${OpenLink} staff=${staff} onBack=${() => set(Object.assign({}, st, {screen: 'welcome'}))} onOpen=${t => { history.replaceState(null, '', '/share#s=' + t); setStatus(t); }} />`;
+  else if (st.screen === 'welcome') screen = html`<${Welcome} staff=${staff} invite=${invite} go=${() => set(Object.assign({}, st, {screen: 'intake', step: 0}))} onStatus=${() => set(Object.assign({}, st, {screen: 'open'}))} />`;
+  else if (st.screen === 'intake') screen = html`<${Intake} staff=${staff} previewJwt=${cfg.staffToken} st=${st} set=${set} step=${st.step || 0} setStep=${n => set(Object.assign({}, st, {step: n}))} invite=${invite} api=${api}
+    onStarted=${r => set(Object.assign({}, st, {screen: 'interview', token: r.token, test: !!r.test, type: r.type || communityStoryType(st.intake), current: {q: r.question, kind: r.kind}, turns: []}))} />`;
+  else if (st.screen === 'interview') screen = html`<${Interview} staff=${staff} st=${st} set=${set} api=${api} />`;
+  else if (st.screen === 'writing') screen = html`<${Writing} staff=${staff} st=${st} set=${set} api=${api} />`;
+  else if (st.screen === 'review') screen = html`<${Review} staff=${staff} st=${st} set=${set} api=${api} onSubmitted=${() => set(Object.assign({}, st, {screen: 'done'}))} />`;
+  else if (st.screen === 'done') screen = html`<${Done} staff=${staff} token=${st.token} test=${!!st.test} onView=${() => { history.replaceState(null, '', '/share#s=' + st.token); setStatus(st.token); }} />`;
+  return html`<${React.Fragment}>${screen}${dialog}<//>`;
 }
 
 export function mountCommunity(el, cfg){
   document.title = 'Share Your Story · Arts Bridging the Gap';
   document.body.classList.add('share-portal');
+  /* always the warm light theme: the device's dark mode (or a theme picked in the staff app) never applies here */
+  const doc = document.documentElement;
+  doc.classList.add('share-portal-root'); doc.removeAttribute('data-theme');
+  try { let m = document.querySelector('meta[name="color-scheme"]'); if (!m) { m = document.createElement('meta'); m.name = 'color-scheme'; document.head.appendChild(m); } m.content = 'light only'; } catch (e) {}
   const api = makeApi(cfg.url, cfg.key);
   if (!cfg.url || !cfg.key) { el.innerHTML = '<p style="padding:24px">This page is not set up yet.</p>'; return; }
-  const hash = window.location.hash || '';
+  let hash = window.location.hash || '';
   // private tokens live in the URL fragment, which browsers never send to servers; keep the invite out of history
   if (/[#&]i=/.test(hash)) {
     // a personal invitation starts a new story in this tab
@@ -448,5 +567,7 @@ export function mountCommunity(el, cfg){
     if (t) { ssSet('abg-share-invite', {t}); ssDel(DRAFT); }
     history.replaceState(null, '', '/share');
   }
-  ReactDOM.createRoot(el).render(html`<${App} api=${api} hash=${hash} />`);
+  // arriving from Settings > Portal Access: start in Preview Mode (the server still has to confirm the account)
+  if (/^#preview\b/.test(hash)) { ssSet(MODE, 'preview'); history.replaceState(null, '', '/share'); hash = ''; }
+  ReactDOM.createRoot(el).render(html`<${App} api=${api} hash=${hash} cfg=${cfg} />`);
 }

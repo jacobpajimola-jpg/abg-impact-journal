@@ -94,9 +94,11 @@ One site, one database, two experiences:
 
 | Address | Who | What |
 |---|---|---|
-| `/` | Everyone | Landing page with **Share Your Story** and **Staff Sign In**. Signed-in staff go straight to the journal. |
+| `/` | Everyone | Landing page with **Share Your Story** and **Staff Sign In**. Signed-in staff go straight to the journal (or, for an authorized consultant, back to Preview Mode if that was the last portal they switched to). |
 | `/app` | Invited staff (Kyle, ABG staff, consultants) | The internal journal. Unchanged sign-in: existing users never register again. |
 | `/share` | Students, alumni, staff, parents, volunteers, friends | The public **Community Portal**. No account. It never signs anyone in and can't reach the journal. |
+
+**Design.** The community portal uses the staff dashboard's design tokens from `src/styles.css` (cream background, navy headings, ABG purple primary buttons, teal secondary accents, warm gray borders) and the same palette illustration (`src/ui/art.js`). It is always light: the device's dark mode never applies (`color-scheme: light`, no dark rules in `src/community.css`).
 
 **Community Portal flow:** Welcome → how you're connected to ABG (and whether you're 18 or older) → your own experience or one you witnessed → a little about you (optional; staff are asked whether they were an ABG student first) → talk or type → a short AI interview → review your story (edit it, untick anything wrong, choose whether ABG may ever share it publicly) → submitted. Contributors get a **private link** (`/share#s=…`) to check the status, answer ABG's questions, correct their story or ask for its removal.
 
@@ -106,7 +108,8 @@ One site, one database, two experiences:
 - The database (`supabase/community.sql`) lets signed-in active staff **read** submitted stories (never unfinished drafts); only **administrators** can review, change or delete them. Nobody can insert submissions except the function. Every status or review change is logged in `submission_events` by a database trigger.
 - **Minors:** anyone under 18 can only take part through a personal invitation that an administrator created after recording a parent or guardian's permission. This is enforced on the server, not just hidden in the page. Stories by or about minors are never shared publicly with names.
 - **Voice:** contributors must agree to recording first. Audio is transcribed by Groq and immediately discarded; only the text is kept.
-- **Retention:** unfinished drafts are deleted after 14 days, and rejected submissions after 180 days. A contributor's removal request withdraws an approved story from all reporting at once; an administrator then deletes it. Administrators can delete any submission at any time.
+- **Preview Mode (portal switching):** accounts listed in `public.portal_preview_users` (seeded with `jacob.pajimola@pepperdine.edu`) who are also active administrators see **Settings › Portal Access** and can switch to `/share` without signing out. The journal shows the section only when `public.can_preview_portal()` returns true, and the community function re-checks the person's real Supabase sign-in, the list and the admin role before it accepts a test story. Test submissions are marked `is_test` by the server only (a database trigger blocks changing it from the browser), appear under Community Submissions › Test submissions, become journal stories labeled Test if approved, and are excluded from every count, chart, Source Comparison and export. The browser can't read or change the preview list. To add someone, insert their email into `portal_preview_users` in the SQL Editor.
+- **Retention:** unfinished drafts are deleted after 14 days, rejected submissions after 180 days, and test submissions after 30 days. A contributor's removal request withdraws an approved story from all reporting at once; an administrator then deletes it. Administrators can delete any submission at any time.
 
 **Inside the journal**
 - **Community Submissions** (review queue): pending review, needs clarification, approved for internal reporting, rejected / excluded, removal requested. Open a submission to read the transcript, check the outcomes Claude extracted (same model as Kyle's interviews), fix the story type, then approve, ask the contributor a question (they see it on their private link), or exclude it (for example as a duplicate). Pending submissions never count in Impact Insights; approval creates an ordinary journal story labeled with its source. Public sharing stays a separate decision.
@@ -116,7 +119,7 @@ One site, one database, two experiences:
 - **Invite Contributors:** the community link, a QR code (also downloadable), a ready-made message, and personal invitation links (shown once, stored only as a hash, limited uses and expiry). Only administrators can record guardian permission on an invitation.
 
 **Setup for the Community Portal** (once)
-1. Supabase > SQL Editor: run `supabase/community.sql` (after `admin-roles.sql`).
+1. Supabase > SQL Editor: run `supabase/community.sql` (after `admin-roles.sql`). It is safe to run again; re-run it after updates (the Preview Mode update added `is_test`, `test_by`, `portal_preview_users` and `can_preview_portal()`).
 2. Supabase > Edge Functions: create a function named `community` from `supabase/functions/community/index.ts` and turn **Verify JWT off** (the public calls it without signing in; it checks its own tokens). It uses the same `ANTHROPIC_API_KEY` and `GROQ_API_KEY` secrets as the `ai` and `transcribe` functions.
 3. `index.ts` is generated: edit `handler.ts`, `entry.ts` or `src/core/shared.js`, then run `node scripts/build-community.mjs`.
 4. Cloudflare Pages serves the app for `/app` and `/share` automatically (single-page app fallback). Don't add a `_redirects` rule to `/index.html`: Cloudflare turns it into a redirect to `/`.

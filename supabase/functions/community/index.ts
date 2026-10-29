@@ -284,7 +284,7 @@ var CORS = {
 };
 var json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 var fail = (status, code, error) => json({ error, code }, status);
-var LIMITS = { startsPerHourPerIp: 6, followUps: 7, targetFollowUps: 5, aiCalls: 24, answerChars: 6e3, clips: 40, clipBytes: 15 * 1024 * 1024, draftDays: 14, rejectedDays: 180 };
+var LIMITS = { startsPerHourPerIp: 6, followUps: 7, targetFollowUps: 5, aiCalls: 24, answerChars: 6e3, clips: 40, clipBytes: 15 * 1024 * 1024, draftDays: 14, rejectedDays: 180, testDays: 30, testStartsPerHour: 30 };
 var STATUS_TEXT = {
   in_progress: "Not submitted yet",
   pending_review: "Received. Waiting for ABG to review it",
@@ -387,7 +387,8 @@ function view(sub) {
     replies: (sub.clarifications || []).map((c) => ({ from: c.from === "abg" ? "ABG" : "You", text: clean(c.text, 2e3), at: c.at })),
     canEdit: sub.status === "pending_review" || sub.status === "needs_clarification",
     reviewing: sub.status === "in_progress",
-    analysisFailed: !!(sub.data && sub.data.analysisFailed)
+    analysisFailed: !!(sub.data && sub.data.analysisFailed),
+    test: !!sub.is_test
   };
 }
 function publicationOptions(intake) {
@@ -427,6 +428,23 @@ async function handle(req, deps) {
     const { error } = await db.from("community_submissions").update(Object.assign({}, patch, { updated_at: now.toISOString() })).eq("id", id);
     if (error) throw new Error(error.message);
   };
+  const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  const previewUser = async () => {
+    if (!bearer || !deps.getUser) return null;
+    let u = null;
+    try {
+      u = await deps.getUser(bearer);
+    } catch {
+      return null;
+    }
+    if (!u || !u.email || u.banned) return null;
+    const email = String(u.email).toLowerCase();
+    const { data: listed } = await db.from("portal_preview_users").select("email").eq("email", email).maybeSingle();
+    if (!listed) return null;
+    const { data: role } = await db.from("user_roles").select("role").eq("email", email).maybeSingle();
+    if (!role || role.role !== "admin") return null;
+    return { email };
+  };
   const logEvent = async (id, what, details = {}) => {
     try {
       await db.from("submission_events").insert({ submission_id: id, actor: "contributor", action: what, details });
@@ -439,23 +457,37 @@ async function handle(req, deps) {
       if (!r) return json({ valid: false, reason: "missing" });
       return json({ valid: r.valid, reason: r.reason || null, firstName: r.valid ? clean(r.row.label, 40) : "", relationship: r.valid ? r.row.relationship || "" : "", guardianConsent: r.valid ? !!r.row.minor_consent : false });
     }
+    if (action === "preview_check") {
+      const u = await previewUser();
+      return json({ preview: !!u });
+    }
     if (action === "start") {
       const intake = cleanIntake(body.intake);
       if (!intake.relationship || !intake.perspective) return fail(400, "intake", "Choose how you are connected to ABG and whose experience you are sharing.");
       if (intake.adult === null) return fail(400, "age", "Tell us whether you are 18 or older.");
       if (body.privacyAccepted !== true) return fail(400, "privacy", "Please read and accept how ABG will use your story.");
       if (intake.method === "voice" && body.recordingConsent !== true) return fail(400, "recording_consent", "Please agree to the voice recording terms, or choose a written interview.");
+      let tester = null;
+      if (body.preview === true) {
+        tester = await previewUser();
+        if (!tester) return fail(403, "preview_denied", "Preview Mode is only for authorized ABG accounts. Open the staff dashboard and switch portals from Settings, or leave Preview Mode.");
+      }
       const inv = body.invite ? await findInvite(body.invite) : null;
       if (body.invite && (!inv || !inv.valid)) return fail(403, "invite_invalid", "This invitation link is no longer valid. Ask ABG for a new one.");
       if (intake.adult === false && !(inv && inv.valid && inv.row.minor_consent)) return fail(403, "guardian_required", "Because you are under 18, ABG needs permission from your parent or guardian first.");
       const ipHash = deps.ip ? await sha256("ip:" + deps.ip) : null;
-      if (ipHash && !inv) {
+      if (tester) {
+        const since = new Date(now.getTime() - 36e5).toISOString();
+        const { count } = await db.from("community_submissions").select("id", { count: "exact", head: true }).eq("test_by", tester.email).gte("created_at", since);
+        if ((count || 0) >= LIMITS.testStartsPerHour) return fail(429, "rate_limited", "Too many test stories this hour. Please try again later.");
+      } else if (ipHash && !inv) {
         const since = new Date(now.getTime() - 36e5).toISOString();
         const { count } = await db.from("community_submissions").select("id", { count: "exact", head: true }).eq("ip_hash", ipHash).gte("created_at", since);
         if ((count || 0) >= LIMITS.startsPerHourPerIp) return fail(429, "rate_limited", "Too many stories were started from this connection. Please try again in an hour.");
       }
       await db.from("community_submissions").delete().eq("status", "in_progress").lt("updated_at", new Date(now.getTime() - LIMITS.draftDays * 864e5).toISOString());
       await db.from("community_submissions").delete().eq("status", "rejected").lt("updated_at", new Date(now.getTime() - LIMITS.rejectedDays * 864e5).toISOString());
+      await db.from("community_submissions").delete().eq("is_test", true).lt("created_at", new Date(now.getTime() - LIMITS.testDays * 864e5).toISOString());
       const token = newToken();
       const type = communityStoryType(intake);
       const q = communityOpeningQ(intake);
@@ -472,14 +504,16 @@ async function handle(req, deps) {
         data: { current: { q, kind: "opening" }, notes: null },
         recording_consent: intake.method === "voice" && body.recordingConsent === true,
         publication_consent: "internal",
-        ip_hash: ipHash,
+        ip_hash: tester ? null : ipHash,
+        is_test: !!tester,
+        test_by: tester ? tester.email : null,
         created_at: now.toISOString(),
         updated_at: now.toISOString()
       };
       const { error } = await db.from("community_submissions").insert(row);
       if (error) throw new Error(error.message);
       if (inv && inv.valid) await db.from("community_invites").update({ uses: (inv.row.uses || 0) + 1 }).eq("id", inv.row.id);
-      return json({ token, type, question: q, kind: "opening" });
+      return json({ token, type, question: q, kind: "opening", test: !!tester });
     }
     const sub = await loadSub();
     if (!sub) return fail(404, "not_found", "We couldn't find that story. Check that you used the full private link.");
@@ -673,7 +707,14 @@ async function transcribe(bytes, mime) {
   if (!res.ok) throw new Error("Groq " + res.status);
   return data && data.text || "";
 }
+async function getUser(db, jwt) {
+  const { data, error } = await db.auth.getUser(jwt);
+  const u = data && data.user;
+  if (error || !u || !u.email) return null;
+  return { email: String(u.email), banned: !!(u.banned_until && new Date(u.banned_until).getTime() > Date.now()) };
+}
 Deno.serve((req) => {
   const ip = req.headers.get("cf-connecting-ip") || (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "";
-  return handle(req, { db: createClient(Deno.env.get("SUPABASE_URL"), serverKey(), { auth: { persistSession: false } }), claude, transcribe, ip });
+  const db = createClient(Deno.env.get("SUPABASE_URL"), serverKey(), { auth: { persistSession: false, autoRefreshToken: false } });
+  return handle(req, { db, claude, transcribe, ip, getUser: (jwt) => getUser(db, jwt) });
 });

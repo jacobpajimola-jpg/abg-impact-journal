@@ -1,5 +1,6 @@
 import { DEMO_STORIES, DEMO_VERSION } from './demoData.js';
 import qrcode from 'qrcode-generator';
+import { PALETTE_ART, PALETTE_ART_VIEWBOX } from './ui/art.js';
 import { CATEGORIES, THEMES, AUDIENCES, DOMAIN_GROUPS, DOMAINS, STAFF_DOMAINS, OBSERVERS, LINK_TYPES, METRIC_FIELDS, METRIC_STATUS, STORY_TYPES, STAFF_STATUS, EMPLOYMENT_TYPES, FORMER_STUDENT, STAFF_FIELDS, STAFF_STAGES, JOURNEY_STAGES, ABG_CONTEXT, INTERVIEW_STAGES, LISTEN_FOR, STAFF_LISTEN_FOR, ANALYSIS_SHAPE, STAFF_ANALYSIS_SHAPE, RELATIONSHIPS, SUBJECTS, communityAnalysisPrompt, communityContextText } from './core/shared.js';
 (function(){
 'use strict';
@@ -328,8 +329,12 @@ const SOURCE_KINDS = [
   {id:'community_self', label:'Community member', group:'community'},
 ];
 function isCommunity(s){ return !!(s && s.source === 'community'); }
+/* Preview Mode test stories (made by an authorized consultant testing the Share Your Story page) never count anywhere */
+function isTest(s){ return !!(s && s.test); }
+/* a community story the contributor asked ABG to remove */
+function isWithdrawn(s){ return isCommunity(s) && (s.review || {}).status !== 'approved'; }
 /* community stories count in reporting only while approved (a contributor's removal request withdraws them at once) */
-function reportable(s){ return !isCommunity(s) || ((s.review || {}).status === 'approved'); }
+function reportable(s){ return !isTest(s) && (!isCommunity(s) || ((s.review || {}).status === 'approved')); }
 function sourceKind(s){
   if (!isCommunity(s)) return 'internal';
   const c = s.contributor || {};
@@ -1068,7 +1073,7 @@ const lbls = (list, ids) => (ids || []).map(id => labelOf(list, id)).join('; ');
 function storiesCSV(stories){
   return toCSV([
     ['Story ID', s => s.id], ['Story type', s => storyTypeLabel(s)], ['Source', s => isCommunity(s) ? 'Community submission' : 'Internal interview'], ['Source type', s => sourceLabel(s)],
-    ['Contributor relationship', s => isCommunity(s) ? labelOf(RELATIONSHIPS, (s.contributor || {}).relationship) : 'ABG staff'], ['Review status', s => isCommunity(s) ? (reportable(s) ? 'Approved for internal reporting' : 'Withdrawn') : labelOf(STATUSES, s.status)], ['Student record ID', s => s.studentId], ['Staff record ID', s => s.staffId], ['First name', s => s.alias], ['Public alias', s => s.publicName], ['Title', s => s.title], ['Status', s => labelOf(STATUSES, s.status)], ['Type', s => s.period === 'past' ? 'Historical' : 'Recent'],
+    ['Contributor relationship', s => isCommunity(s) ? labelOf(RELATIONSHIPS, (s.contributor || {}).relationship) : 'ABG staff'], ['Review status', s => isCommunity(s) ? (!isWithdrawn(s) ? 'Approved for internal reporting' : 'Withdrawn') : labelOf(STATUSES, s.status)], ['Student record ID', s => s.studentId], ['Staff record ID', s => s.staffId], ['First name', s => s.alias], ['Public alias', s => s.publicName], ['Title', s => s.title], ['Status', s => labelOf(STATUSES, s.status)], ['Type', s => s.period === 'past' ? 'Historical' : 'Recent'],
     ['Staff role', s => isStaffStory(s) ? ((staffVal(s, 'role') || {}).value || (s.staffInfo || {}).role || '') : ''], ['Current or former staff', s => isStaffStory(s) ? labelOf(STAFF_STATUS, (s.staffInfo || {}).status) : ''], ['Former ABG student', s => isStaffStory(s) ? (labelOf(FORMER_STUDENT, (s.staffInfo || {}).formerStudent) || 'Unknown') : ''],
     ['When it happened', s => fmtEventDate(s.eventDate)], ['Sort date', s => s.eventDate && s.eventDate.iso], ['Approximate date', s => s.eventDate && s.eventDate.approximate ? 'Yes' : 'No'],
     ['Gender', s => (s.overview || {}).gender ? labelOf(GENDERS, s.overview.gender) : ''], ['Age or grade', s => (s.overview || {}).ageOrGrade], ['Other details', s => (s.overview || {}).demographics], ['Program', s => s.program], ['Metrics known', s => isStudentStory(s) ? metricsKnown(s) + ' of ' + METRIC_FIELDS.length : isStaffStory(s) ? staffKnown(s) + ' of ' + STAFF_FIELDS.length + ' (staff card)' : ''], ['School or community', s => s.community], ['Summary', s => s.summary], ['Impact story', s => s.story],
@@ -1111,7 +1116,7 @@ function impactRecords(stories){
     participantId: isStaffStory(s) ? (s.staffId ? 'staff:' + s.staffId : 'story:' + s.id) : isStudentStory(s) ? (s.studentId ? 'student:' + s.studentId : 'story:' + s.id) : null,
     source: isCommunity(s) ? 'Community submission' : 'Internal interview', sourceType: sourceLabel(s),
     contributor: isCommunity(s) ? {submissionId: n(s.submissionId), relationship: labelOf(RELATIONSHIPS, (s.contributor || {}).relationship) || null, perspective: (s.contributor || {}).perspective === 'self' ? 'Firsthand (own experience)' : 'Observed (witnessed)', firstName: n((s.contributor || {}).firstName)} : {submissionId: null, relationship: 'ABG staff', perspective: 'Staff interview', firstName: null},
-    reviewStatus: isCommunity(s) ? (reportable(s) ? 'Approved for internal reporting' : 'Withdrawn by contributor') : labelOf(STATUSES, s.status),
+    reviewStatus: isCommunity(s) ? (!isWithdrawn(s) ? 'Approved for internal reporting' : 'Withdrawn by contributor') : labelOf(STATUSES, s.status),
     lastReviewedBy: n((s.review || {}).by), lastReviewedDate: n((s.review || {}).at),
     publicationConsent: isCommunity(s) ? (PUBLICATION[(s.publication || {}).choice] || null) : null,
     linkedAccounts: (s.links || []).filter(l => l.type === 'same_person').map(l => ({storyId: l.storyId, comparison: l.comparison ? labelOf(COMPARISON, l.comparison) : null})),
@@ -1461,7 +1466,7 @@ function storyMarkdown(s, entries){
   const ov = s.overview || {};
   const staff = isStaffStory(s);
   const out = ['# ' + s.title, '', 'INTERNAL ' + (staff ? 'STAFF' : 'STUDENT') + ' IMPACT REPORT. Contains full transcripts. Status: ' + labelOf(STATUSES, s.status) + '.', ''];
-  if (isCommunity(s)) out.push('**Source:** community submission (' + contributorText(s) + '). ' + (reportable(s) ? 'Approved for internal reporting' : 'Withdrawn by the contributor') + ((s.review || {}).by ? ' by ' + s.review.by : '') + '. Public sharing: ' + (PUBLICATION[(s.publication || {}).choice] || 'not recorded') + '.', '');
+  if (isCommunity(s)) out.push('**Source:** community submission (' + contributorText(s) + '). ' + (!isWithdrawn(s) ? 'Approved for internal reporting' : 'Withdrawn by the contributor') + ((s.review || {}).by ? ' by ' + s.review.by : '') + '. Public sharing: ' + (PUBLICATION[(s.publication || {}).choice] || 'not recorded') + '.', '');
   if (staff) {
     const si = cleanStaffInfo(s.staffInfo);
     out.push('## Staff overview');
@@ -1638,6 +1643,8 @@ const REDUCED = (() => { try { return window.matchMedia('(prefers-reduced-motion
 
 /* ================= icons ================= */
 const ICONS = {
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  swap: '<path d="M7 4L3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="M17 20l4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/>',
   home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
   book: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5V5.5"/><path d="M8 7h8"/>',
@@ -1787,7 +1794,7 @@ function initialsOf(name){ const p = asStr(name).split(/[\s._-]+/).filter(Boolea
 function Sidebar(){
   const {route, nav, readOnly, stories, caps, openSheet, subs} = useApp();
   const due = countDue(stories);
-  const pending = subs.filter(x => x.status === 'pending_review' || x.status === 'removal_requested').length;
+  const pending = subs.filter(x => !x.is_test && (x.status === 'pending_review' || x.status === 'removal_requested')).length;
   const me = caps.me || {};
   const shown = asStr(me.name) || firstNameOf(window.__platform && window.__platform.email) || 'Signed in';
   return html`<aside className="sidebar">
@@ -2272,7 +2279,8 @@ function StoryCard({story, why}){
     <div className="sc-top">
       ${story.demo ? html`<${DemoPill} />` : null}
       <${TypePill} story=${story} />
-      ${isCommunity(story) ? html`<${Pill} tone=${reportable(story) ? 'purple' : 'bad'}>${reportable(story) ? 'Community · ' + sourceLabel(story) : 'Withdrawn by contributor'}<//>` : null}
+      ${isTest(story) ? html`<${TestPill} />` : null}
+      ${isCommunity(story) ? html`<${Pill} tone=${!isWithdrawn(story) ? 'purple' : 'bad'}>${!isWithdrawn(story) ? 'Community · ' + sourceLabel(story) : 'Withdrawn by contributor'}<//>` : null}
       <${StatusPill} status=${story.status} />
       ${story.period === 'past' ? html`<${Pill} tone="orange">Historical<//>` : null}
       ${updates > 0 ? html`<${Pill} tone="blue">${updates} update${updates > 1 ? 's' : ''}<//>` : null}
@@ -2295,16 +2303,7 @@ function StoryCard({story, why}){
 
 /* ================= home ================= */
 function PaletteArt(){
-  return html`<svg className="hero-art" viewBox="0 0 320 260" aria-hidden="true" focusable="false">
-    <path d="M40 40c40-30 120-20 140 30s-30 60 0 90 70 20 50 60-120 50-170 10S0 70 40 40z" fill="var(--blob-1)" opacity=".55"/>
-    <path d="M210 10c50-10 110 30 100 90s-60 80-100 60-60-60-50-100 20-45 50-50z" fill="var(--blob-2)" opacity=".7"/>
-    <path d="M150 250c-20-45 10-80 45-120s40-95 85-110 70 40 40 90c-12 22-38 28-30 50 8 22 46 16 46 45 0 30-40 45-100 45z" fill="var(--palette)" stroke="#16323a" stroke-width="5" stroke-linejoin="round"/>
-    <circle cx="268" cy="58" r="17" fill="#6B3FA0" stroke="#16323a" stroke-width="4"/>
-    <circle cx="226" cy="86" r="17" fill="#1E7FC4" stroke="#16323a" stroke-width="4"/>
-    <circle cx="200" cy="133" r="17" fill="#F5A03C" stroke="#16323a" stroke-width="4"/>
-    <circle cx="178" cy="185" r="17" fill="#E84FB8" stroke="#16323a" stroke-width="4"/>
-    <circle cx="290" cy="228" r="24" fill="var(--surface)" stroke="#16323a" stroke-width="4"/>
-  </svg>`;
+  return html`<svg className="hero-art" viewBox=${PALETTE_ART_VIEWBOX} aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{__html: PALETTE_ART}}></svg>`;
 }
 const ROW_TONES = ['teal', 'purple', 'orange'];
 function outcomeCount(s){ return (s.evidence || []).filter(e => e.status !== 'future').length; }
@@ -2326,7 +2325,7 @@ function RecentStoryRow({story, i}){
 function HomeView(){
   const {caps, stories: allStoriesShown, storiesLoaded, nav, readOnly, subs, subsState, isAdmin} = useApp();
   const stories = allStoriesShown.filter(reportable);
-  const pending = subs.filter(x => x.status === 'pending_review').length;
+  const pending = subs.filter(x => x.status === 'pending_review' && !x.is_test).length;
   const first = firstNameOf(caps.me && caps.me.name) || firstNameOf(window.__platform && window.__platform.email) || firstNameOf(caps.me && caps.me.email);
   const recent = stories.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5);
   const studentsN = studentProfiles(stories).length;
@@ -2461,13 +2460,24 @@ function GuideContent({compact, kind}){
       <ul className="small guide-list">
         <li><strong>What it is:</strong> a short, guided conversation about how ABG has made a difference, for students, alumni, staff, parents, volunteers and friends. No account is needed.</li>
         <li><strong>Why ABG asks:</strong> to understand and show funders, schools and partners the difference its programs make.</li>
-        <li><strong>How to begin:</strong> open the link or scan the QR code, press Get Started, and answer a few questions about how you know ABG.</li>
+        <li><strong>How to begin:</strong> open the link or scan the QR code, press Share My Story, and answer a few questions about how you know ABG.</li>
         <li><strong>Talk or type:</strong> answer out loud (your words become text and the recording is deleted) or type in a chat. Both work the same way.</li>
         <li><strong>Skip anything:</strong> every question can be skipped, and "I don't know" is a fine answer.</li>
         <li><strong>How it's used:</strong> ABG staff read every story. It's only shared publicly if the contributor says yes, and never with the name of anyone under 18.</li>
         <li><strong>Changes later:</strong> after sending, contributors get a private link to check the status, answer ABG's questions, correct their story or ask for it to be removed.</li>
         <li><strong>Under 18:</strong> students under 18 need a personal invitation from ABG, created after a parent or guardian gives permission.</li>
+        <li><strong>Looks the same everywhere:</strong> the page always uses ABG's light cream design, even on phones set to dark mode.</li>
       </ul>
+    <//>
+    <${GuideSec} id="preview" title="Preview Mode and Portal Access" sub="authorized consultants" open=${false}>
+      <p className="small">Accounts on the server's preview list (currently Jacob Pajimola, who must also be an active administrator) see <strong>Settings › Portal Access</strong>. Nobody else sees it, and the server checks again before it accepts any test story.</p>
+      <ol className="small guide-list">
+        <li>Open Settings › Portal Access, choose Community Story Portal and press <strong>Switch Portal</strong>. You stay signed in.</li>
+        <li>The Share Your Story page opens in <strong>Preview Mode</strong>, with a Preview menu at the top. Complete the interview by voice or typing, exactly as a contributor would.</li>
+        <li>Stories you send are tests. They appear under <strong>Community Submissions › Test submissions</strong>, labeled Test, where you can review and even approve them to check the result.</li>
+        <li>Test stories never count in Impact Insights, home totals, Source Comparison or exports, can't be shared, and are deleted automatically after 30 days.</li>
+        <li>To send a real story from the same browser, choose <strong>Exit Preview Mode</strong> in the Preview menu and confirm. To go back, choose <strong>Return to Staff Dashboard</strong>.</li>
+      </ol>
     <//>
     <${GuideSec} id="script" title=${'Guided storytelling script' + (kind === 'staff' ? ' (student stories)' : '')} sub="5 prompts, optional" open=${!!compact && kind !== 'staff'}>
       <p className="small muted">Use these as a guide if it helps. You don't need to read them word for word, follow the order, or fill every blank.</p>
@@ -2754,9 +2764,9 @@ async function saveRawEntry({caps, safeWrite, story, entry, title, whenText, app
 
 /* ================= general story composer (programs, murals, partnerships) ================= */
 function ComposerView({params}){
-  const {caps, stories, storiesLoaded, nav, readOnly, safeWrite, showToast} = useApp();
+  const {caps, stories, storiesLoaded, nav, readOnly, safeWrite, showToast, storyById} = useApp();
   const storyId = params.storyId || null;
-  const story = storyId ? stories.find(s => s.id === storyId) : null;
+  const story = storyId ? storyById(storyId) : null;
   const draftKey = 'abg-draft:' + (storyId || 'new');
   const initial = useMemo(() => { try { return JSON.parse(lsGet(draftKey) || 'null') || {}; } catch (e) { return {}; } }, [draftKey]);
   const [text, setText] = useState(initial.text || '');
@@ -2837,9 +2847,9 @@ function ComposerView({params}){
 /* ================= student interview ================= */
 function turnsToText(turns){ return turns.map(t => 'Q: ' + t.q + '\nA: ' + (t.status === 'skipped' ? '(skipped)' : t.a)).join('\n\n'); }
 function InterviewView({params}){
-  const {caps, stories, students, staffPeople, storiesLoaded, settings, nav, readOnly, safeWrite, showToast} = useApp();
+  const {caps, stories, students, staffPeople, storiesLoaded, settings, nav, readOnly, safeWrite, showToast, storyById} = useApp();
   const storyId = params.storyId || null;
-  const story = storyId ? stories.find(s => s.id === storyId) : null;
+  const story = storyId ? storyById(storyId) : null;
   const mode = storyId ? 'update' : 'new';
   const draftKey = 'abg-interview:' + (storyId || (params.backlogId ? 'bl-' + params.backlogId : 'new'));
   const init = useMemo(() => { try { return JSON.parse(lsGet(draftKey) || 'null') || null; } catch (e) { return null; } }, [draftKey]);
@@ -3180,6 +3190,7 @@ function InterviewView({params}){
 
 /* ================= review / edit ================= */
 function PrivacyPanel({value, onChange, disabled, live}){
+  if (isTest(value)) return html`<p className="notice small" id="pv-test">This is a test story from Preview Mode. Test stories can't be approved for external use or shared, and are never counted.</p>`;
   const p = Object.assign({minor: 'unknown', identifying: 'unknown', permission: 'unknown', external: 'unknown', redact: 'unknown', sensitive: 'unknown', sensitiveConsent: 'unknown'}, value.privacy || {});
   const [pending, setPending] = useState(false);
   const [tick, setTick] = useState(false);
@@ -3557,9 +3568,9 @@ function QuickReview({draft, setDraft, mode}){
   </div>`;
 }
 function ReviewView({params}){
-  const {caps, stories, students, staffPeople, nav, safeWrite, showToast} = useApp();
+  const {caps, stories, students, staffPeople, nav, safeWrite, showToast, storyById} = useApp();
   const {mode, storyId, analysis, entry, items, draftKey, whenHint, approx, followupId, answered, analyzedEntryIds, returnTo, studentId, studentName, newStudent, backlogId, studentInfo, kind, staffId, newStaff, staffInfo} = params;
-  const base = storyId ? stories.find(s => s.id === storyId) : null;
+  const base = storyId ? storyById(storyId) : null;
   const me = caps.me || {};
   const [draft, setDraft] = useState(() => buildReviewDraft({mode, base, analysis, whenHint, approx, me, followupId, answered, entry, studentId, studentName, studentInfo, kind, staffId, staffInfo}));
   const [saving, setSaving] = useState(false);
@@ -3644,8 +3655,8 @@ function AnalysisRunner({close, mode, story, items, params}){
   return html`<${Analyzing} title=${mode === 'update' ? 'Claude is adding this to the story' : 'Claude is reading the story'} onStop=${() => ctlRef.current && ctlRef.current.abort()} />`;
 }
 function AnswerSheet({storyId, close}){
-  const {caps, stories, safeWrite, showToast} = useApp();
-  const story = stories.find(s => s.id === storyId);
+  const {caps, stories, safeWrite, showToast, storyById} = useApp();
+  const story = storyById(storyId);
   const [qs] = useState(() => story ? openQuestions(story) : []);
   const [ans, setAns] = useState({});
   const [running, setRunning] = useState(null);
@@ -3694,8 +3705,8 @@ function AnswerSheet({storyId, close}){
   </div>`;
 }
 function AdaptSheet({storyId, close}){
-  const {caps, stories, safeWrite, showToast} = useApp();
-  const story = stories.find(s => s.id === storyId);
+  const {caps, stories, safeWrite, showToast, storyById} = useApp();
+  const story = storyById(storyId);
   const [aud, setAud] = useState(() => (story && (story.audiences || [])[0]) || 'donors');
   const [fmt, setFmt] = useState(() => { const a0 = story && (story.audiences || [])[0]; const f0 = FORMATS.find(f => f.aud === a0); return f0 ? f0.id : 'donor_story'; });
   const [text, setText] = useState('');
@@ -3742,12 +3753,12 @@ function AdaptSheet({storyId, close}){
   </div>`;
 }
 function AddEvidenceSheet({storyId, close, kind}){
-  const {caps, stories, safeWrite, showToast} = useApp();
+  const {caps, stories, safeWrite, showToast, storyById} = useApp();
   const numeric = kind !== 'qualitative';
   const [f, setF] = useState({statement: '', category: numeric ? 'reach' : 'personal', value: '', unit: '', before: '', after: '', timeframe: '', observer: 'abg_staff', status: numeric ? 'reported' : 'qualitative', note: '', metric: '', domain: numeric ? 'attendance' : 'confidence', direction: 'improved'});
   const set = (k, v) => setF(x => Object.assign({}, x, {[k]: v}));
   async function save(){
-    const story = stories.find(s => s.id === storyId);
+    const story = storyById(storyId);
     if (!story || !asStr(f.statement)) return;
     const v = toNum(f.value);
     const ev = clone(story.evidence || []);
@@ -3783,11 +3794,11 @@ function AddEvidenceSheet({storyId, close, kind}){
   </div>`;
 }
 function AddTaskSheet({storyId, close}){
-  const {caps, stories, safeWrite, showToast} = useApp();
+  const {caps, stories, safeWrite, showToast, storyById} = useApp();
   const [q, setQ] = useState('');
   const [due, setDue] = useState('');
   async function save(){
-    const story = stories.find(s => s.id === storyId);
+    const story = storyById(storyId);
     if (!story || !asStr(q)) return;
     const fu = clone(story.followUps || []);
     fu.push({id: uid('f'), kind: 'task', question: asStr(q), due: due, status: 'open', answer: '', entryId: null});
@@ -3865,11 +3876,11 @@ function Timeline({milestones, entries}){
   </li>`; })}</ol>`;
 }
 function MaterialSheet({storyId, close}){
-  const {caps, stories, safeWrite, showToast} = useApp();
+  const {caps, stories, safeWrite, showToast, storyById} = useApp();
   const [type, setType] = useState('photo');
   const [desc, setDesc] = useState('');
   async function save(){
-    const story = stories.find(s => s.id === storyId);
+    const story = storyById(storyId);
     if (!story || !asStr(desc)) return;
     const m = clone(story.materials || []); m.push({id: uid('mat'), type, description: asStr(desc)});
     const ok = await safeWrite(() => caps.db.collection('stories').doc(storyId).update({materials: m, updatedAt: nowISO()}));
@@ -3887,8 +3898,8 @@ function TurnsView({turns}){
   return html`<div className="view" style=${{gap: '12px'}}>${turns.map((t, i) => html`<div className="turn" key=${i}><p className="turn-q">${t.q}</p><p className=${'turn-a transcript' + (t.status === 'skipped' ? ' muted' : '')}>${t.status === 'skipped' ? 'Skipped' : t.a}</p>${(t.audio || []).map((c, j) => html`<${AudioClip} key=${c.path} path=${c.path} label=${'Play recording' + ((t.audio || []).length > 1 ? ' ' + (j + 1) : '') + (c.seconds ? ' (' + mmss(c.seconds) + ')' : '')} />`)}</div>`)}</div>`;
 }
 function StoryView({id}){
-  const {caps, stories, students, staffPeople, storiesLoaded, nav, openSheet, safeWrite, showToast, readOnly, role} = useApp();
-  const story = stories.find(s => s.id === id);
+  const {caps, stories, students, staffPeople, storiesLoaded, nav, openSheet, safeWrite, showToast, readOnly, role, storyById} = useApp();
+  const story = storyById(id);
   const [entries, setEntries] = useState(null);
   const [openEntry, setOpenEntry] = useState(null);
   const [showOrig, setShowOrig] = useState({});
@@ -3996,7 +4007,8 @@ function StoryView({id}){
   return html`<div className="view story">
     <div className="crumbs"><button className="btn btn-quiet btn-sm" onClick=${() => nav('library')}><${Icon} name="back" size=${16} /> Story Library</button></div>
     ${story.demo ? html`<p className="notice demo-note small"><strong>Fictional demo story.</strong> This student, school and outcomes are invented to show how a recorded story becomes impact evidence. Demo stories are left out of reports and exports unless included in Settings.</p>` : null}
-    ${isCommunity(story) && !reportable(story) ? html`<div className="banner banner-bad"><${Icon} name="trash" size=${22} /><div><strong>The contributor asked ABG to remove this story.</strong><p className="small">It's left out of Impact Insights and reports. An administrator should delete it from Community Submissions.</p></div>${story.submissionId ? html`<button className="btn btn-primary btn-sm" onClick=${() => nav('submission', {id: story.submissionId})}>Open submission</button>` : null}</div>` : null}
+    ${isTest(story) ? html`<div className="banner banner-test" id="story-test-banner"><${Icon} name="eye" size=${22} /><div><strong>Test story from Preview Mode.</strong><p className="small">${(story.review || {}).testBy ? 'Created by ' + story.review.testBy + ' while testing the Share Your Story page. ' : ''}It's never counted in Impact Insights, totals, Source Comparison or exports, and can't be shared.</p></div></div>` : null}
+    ${isCommunity(story) && isWithdrawn(story) ? html`<div className="banner banner-bad"><${Icon} name="trash" size=${22} /><div><strong>The contributor asked ABG to remove this story.</strong><p className="small">It's left out of Impact Insights and reports. An administrator should delete it from Community Submissions.</p></div>${story.submissionId ? html`<button className="btn btn-primary btn-sm" onClick=${() => nav('submission', {id: story.submissionId})}>Open submission</button>` : null}</div>` : null}
     <header className="story-head">
       <div className="chips">
         ${story.demo ? html`<${DemoPill} />` : null}
@@ -4035,7 +4047,7 @@ function StoryView({id}){
         <div><dt>Contributor</dt><dd>${contributorText(story)}</dd></div>
         <div><dt>Evidence</dt><dd>${(story.contributor || {}).perspective === 'self' ? 'Self-reported' : 'Community-observed'} unless ABG later verifies an outcome against a record</dd></div>
         <div><dt>Public sharing</dt><dd>${PUBLICATION[(story.publication || {}).choice] || 'Not recorded'}${(story.publication || {}).choice && story.publication.choice !== 'internal' ? (story.publication.confirmed ? ' (checked by ABG)' : ' (not yet checked by ABG)') : ''}</dd></div>
-        <div><dt>Review</dt><dd>${reportable(story) ? 'Approved for internal reporting' : 'Withdrawn'}${(story.review || {}).by ? ' by ' + story.review.by : ''}${(story.review || {}).at ? ' on ' + fmtDate(story.review.at) : ''}</dd></div>
+        <div><dt>Review</dt><dd>${isTest(story) ? 'Test only (never counted)' : !isWithdrawn(story) ? 'Approved for internal reporting' : 'Withdrawn'}${(story.review || {}).by ? ' by ' + story.review.by : ''}${(story.review || {}).at ? ' on ' + fmtDate(story.review.at) : ''}</dd></div>
       </dl>
       ${story.submissionId ? html`<div><button className="btn btn-ghost btn-sm" onClick=${() => nav('submission', {id: story.submissionId})}><${Icon} name="inbox" size=${16} /> Open the submission and its review history</button></div>` : null}
     </section>` : null}
@@ -4250,20 +4262,23 @@ function SubmissionsView(){
   const {subs, subsState, reloadSubs, nav, isAdmin} = useApp();
   const [tab, setTab] = useState('pending_review');
   useEffect(() => { reloadSubs(); }, []);
-  const count = id => subs.filter(x => x.status === id).length;
-  const list = subs.filter(x => x.status === tab).sort((a, b) => (b.submitted_at || '').localeCompare(a.submitted_at || ''));
+  const real = subs.filter(x => !x.is_test), tests = subs.filter(x => x.is_test);
+  const count = id => real.filter(x => x.status === id).length;
+  const list = (tab === 'test' ? tests : real.filter(x => x.status === tab)).sort((a, b) => (b.submitted_at || '').localeCompare(a.submitted_at || ''));
+  const tabs = SUB_STATUS.map(x => ({id: x.id, label: x.label, badge: count(x.id) || null})).concat(tests.length || tab === 'test' ? [{id: 'test', label: 'Test submissions', badge: tests.length || null}] : []);
   return html`<div className="view subs">
     <header className="page-head row-between"><div><h1>Community Submissions</h1><p className="muted">Stories shared through the Share Your Story page. They count in Impact Insights only after an administrator approves them.</p></div>
       <button className="btn btn-ghost btn-sm" onClick=${() => nav('invite')}><${Icon} name="share" size=${16} /> Invite contributors</button></header>
     ${!isAdmin ? html`<p className="notice small">You can read submissions. Only administrators can approve, reject or ask contributors questions.</p>` : null}
     ${subsState === 'missing' ? html`<p className="notice">Community submissions aren't set up on the server yet. An administrator needs to run <code>supabase/community.sql</code> in Supabase (see the README).</p>` : null}
     ${subsState === 'error' ? html`<p className="error">Couldn't load submissions. Check your connection. <button className="btn btn-quiet btn-sm" onClick=${reloadSubs}>Try again</button></p>` : null}
-    <${PageTabs} label="Submission status" value=${tab} onChange=${setTab} tabs=${SUB_STATUS.map(x => ({id: x.id, label: x.label, badge: count(x.id) || null}))} />
+    <${PageTabs} label="Submission status" value=${tab} onChange=${setTab} tabs=${tabs} />
+    ${tab === 'test' ? html`<p className="notice small test-note"><${TestPill} /> <span>Stories sent from Preview Mode while testing the Share Your Story page. They're kept out of every count, chart, comparison and export, even if approved, and are deleted automatically after 30 days.</span></p>` : null}
     ${subsState === 'loading' ? html`<div className="skeleton"></div>`
-      : list.length === 0 ? html`<div className="empty"><h3>Nothing here</h3><p className="muted">${tab === 'pending_review' ? 'New community stories will appear here for review.' : 'No submissions with this status.'}</p></div>`
+      : list.length === 0 ? html`<div className="empty"><h3>Nothing here</h3><p className="muted">${tab === 'pending_review' ? 'New community stories will appear here for review.' : tab === 'test' ? 'No test submissions.' : 'No submissions with this status.'}</p></div>`
       : html`<div className="sub-list">${list.map(x => { const i = x.intake || {}; const nm = subName(x); return html`<button className="card sub-row" key=${x.id} onClick=${() => nav('submission', {id: x.id})}>
         <span className="sub-main">
-          <span className="chips"><${Pill} tone=${x.story_type === 'staff' ? 'purple' : x.story_type === 'student' ? 'teal' : 'neutral'}>${x.story_type === 'staff' ? 'Staff Impact' : x.story_type === 'student' ? 'Student Impact' : 'General'}<//>${x.is_minor ? html`<${Pill} tone="warn">Involves a minor<//>` : null}${i.formerStudent === 'yes' && x.story_type === 'staff' ? html`<span className="pill tone-path">Student → Staff</span>` : null}</span>
+          <span className="chips">${x.is_test ? html`<${TestPill} />` : null}<${Pill} tone=${x.story_type === 'staff' ? 'purple' : x.story_type === 'student' ? 'teal' : 'neutral'}>${x.story_type === 'staff' ? 'Staff Impact' : x.story_type === 'student' ? 'Student Impact' : 'General'}<//>${x.is_minor ? html`<${Pill} tone="warn">Involves a minor<//>` : null}${i.formerStudent === 'yes' && x.story_type === 'staff' ? html`<span className="pill tone-path">Student → Staff</span>` : null}</span>
           <strong>${subTitle(x)}</strong>
           <small className="muted">${labelOf(RELATIONSHIPS, x.relationship)}${i.firstName ? ' ' + i.firstName : ''} · ${x.perspective === 'self' ? 'own experience' : 'witnessed' + (nm ? ': about ' + nm : '')} · ${i.method === 'voice' ? 'voice' : 'written'} · submitted ${fmtDate(x.submitted_at)}</small>
         </span>
@@ -4273,7 +4288,7 @@ function SubmissionsView(){
 }
 const REJECT_REASONS = [{id: 'duplicate', label: 'Duplicate of a story already in the journal'}, {id: 'not_abg', label: "Not about ABG's programs"}, {id: 'unsupported', label: "Can't be used as evidence"}, {id: 'inappropriate', label: 'Inappropriate or unsafe content'}, {id: 'other', label: 'Other'}];
 function SubmissionView({id}){
-  const {caps, stories, subs, reloadSubs, nav, isAdmin, safeWrite, showToast, openSheet} = useApp();
+  const {caps, stories, subs, reloadSubs, nav, isAdmin, safeWrite, showToast, openSheet, storyById} = useApp();
   const [sub, setSub] = useState(() => subs.find(x => x.id === id) || null);
   const [events, setEvents] = useState([]);
   const [type, setType] = useState('');
@@ -4294,8 +4309,8 @@ function SubmissionView({id}){
   const i = sub.intake || {};
   const nm = subName(sub);
   const open = ['pending_review', 'needs_clarification'].includes(sub.status);
-  const story = sub.story_id ? stories.find(s => s.id === sub.story_id) : null;
-  const matches = nm ? stories.filter(s => norm(s.alias) === norm(nm) && s.id !== sub.story_id && !s.demo).slice(0, 6) : [];
+  const story = sub.story_id ? storyById(sub.story_id) : null;
+  const matches = nm && !sub.is_test ? stories.filter(s => norm(s.alias) === norm(nm) && s.id !== sub.story_id && !s.demo).slice(0, 6) : [];
   const ed = sub.contributor_edits || {};
   const update = async (patch, msg) => { setBusy('save'); setErr(''); try { await api.update(sub.id, patch); showToast(msg || 'Saved'); await load(); reloadSubs(); setMode(''); setText(''); } catch (e) { setErr(e.message); } setBusy(''); };
   const changeType = t => { setType(t); setDraft(draftFromSubmission(sub, me, t)); };
@@ -4320,10 +4335,12 @@ function SubmissionView({id}){
     if (pub === 'internal') Object.assign(privacy, {external: 'no', permission: 'no'});
     else if (pubOk && pub === 'anonymous') Object.assign(privacy, {external: 'yes', permission: 'no', redact: 'yes'});
     else if (pubOk && pub === 'public_name') Object.assign(privacy, {external: 'yes', permission: 'yes', redact: 'no'});
-    Object.assign(s, {source: 'community', submissionId: sub.id, status: 'internal', privacy, createdAt: sub.submitted_at || now, entryCount: 1,
+    /* a Preview Mode test becomes a test story: labeled Test, never counted, never shared */
+    if (sub.is_test) Object.assign(privacy, {external: 'no', permission: 'no'});
+    Object.assign(s, {source: 'community', submissionId: sub.id, status: 'internal', privacy, createdAt: sub.submitted_at || now, entryCount: 1, test: !!sub.is_test,
       contributor: {relationship: sub.relationship, perspective: sub.perspective, firstName: i.firstName || '', subject: i.subject || '', isMinor: !!sub.is_minor, method: i.method || 'written', guardianConsent: i.adult === false},
-      publication: {choice: pub, confirmed: pub !== 'internal' && pubOk},
-      review: {status: 'approved', by: email, at: now, note: asStr(text)}});
+      publication: {choice: sub.is_test ? 'internal' : pub, confirmed: !sub.is_test && pub !== 'internal' && pubOk},
+      review: Object.assign({status: 'approved', by: email, at: now, note: asStr(text)}, sub.is_test ? {test: true, testBy: sub.test_by || ''} : {})});
     const entry = {storyId: s.id, recordedAt: sub.submitted_at || now, eventDateText: i.yearsInvolved || '', eventApprox: true, prompt: (sub.turns[0] || {}).q || '',
       transcript: subTranscript(sub), turns: (sub.turns || []).map(t => ({q: t.q, kind: t.kind || 'followup', a: t.a || '', status: t.status || 'answered', at: t.at || now, audio: []})), audio: [],
       transcriptEdited: null, summary: 'Community submission from a ' + (labelOf(RELATIONSHIPS, sub.relationship) || 'community member').toLowerCase(), takeaways: [], source: 'community', analyzed: true, createdBy: null};
@@ -4335,7 +4352,7 @@ function SubmissionView({id}){
     if (!ok) { setBusy(''); return; }
     try { await api.update(sub.id, {status: 'approved', story_id: s.id, review: Object.assign({}, sub.review || {}, {note: asStr(text), by: email, at: now, publicationConfirmed: pubOk, type: type || sub.story_type})}); }
     catch (e) { setErr('The story was saved, but the submission status could not be updated: ' + e.message); setBusy(''); return; }
-    setBusy(''); reloadSubs(); showToast('Approved for internal reporting'); nav('story', {id: s.id});
+    setBusy(''); reloadSubs(); showToast(sub.is_test ? 'Test approved. The test story is never counted.' : 'Approved for internal reporting'); nav('story', {id: s.id});
   }
   const askQuestion = () => update({status: 'needs_clarification', clarifications: (sub.clarifications || []).concat([{from: 'abg', text: asStr(text), at: nowISO(), by: email}]), review: Object.assign({}, sub.review || {}, {note: 'Asked: ' + asStr(text)})}, 'Question sent to the contributor');
   const reject = () => update({status: 'rejected', review: Object.assign({}, sub.review || {}, {note: asStr(text), reason, by: email, at: nowISO()})}, 'Excluded from reporting');
@@ -4358,10 +4375,11 @@ function SubmissionView({id}){
   return html`<div className="view submission">
     <div className="crumbs"><button className="btn btn-quiet btn-sm" onClick=${() => nav('submissions')}><${Icon} name="back" size=${16} /> Community Submissions</button></div>
     <header className="story-head">
-      <div className="chips"><${SubStatusPill} status=${sub.status} /><${Pill} tone=${sub.story_type === 'staff' ? 'purple' : sub.story_type === 'student' ? 'teal' : 'neutral'}>${sub.story_type === 'staff' ? 'Staff Impact' : sub.story_type === 'student' ? 'Student Impact' : 'General'}<//>${sub.is_minor ? html`<${Pill} tone="warn">Involves a minor<//>` : null}</div>
+      <div className="chips">${sub.is_test ? html`<${TestPill} />` : null}<${SubStatusPill} status=${sub.status} /><${Pill} tone=${sub.story_type === 'staff' ? 'purple' : sub.story_type === 'student' ? 'teal' : 'neutral'}>${sub.story_type === 'staff' ? 'Staff Impact' : sub.story_type === 'student' ? 'Student Impact' : 'General'}<//>${sub.is_minor ? html`<${Pill} tone="warn">Involves a minor<//>` : null}</div>
       <p className="eyebrow">Community submission · ${labelOf(RELATIONSHIPS, sub.relationship)}</p>
       <h1>${subTitle(sub)}</h1>
     </header>
+    ${sub.is_test ? html`<div className="banner banner-test" id="sub-test-banner"><${Icon} name="eye" size=${22} /><div><strong>Test submission from Preview Mode.</strong><p className="small">${sub.test_by ? 'Sent by ' + sub.test_by + ' while testing the Share Your Story page. ' : ''}You can review it like a real one. If you approve it, the journal story is labeled Test and is never counted in Impact Insights, totals, Source Comparison or exports. Deleted automatically after 30 days.</p></div></div>` : null}
     ${sub.status === 'removal_requested' ? html`<div className="banner banner-bad"><${Icon} name="trash" size=${22} /><div><strong>The contributor asked ABG to remove this story.</strong><p className="small">${story ? 'Its journal story is already left out of all reporting. ' : ''}Please delete it.</p></div>${isAdmin ? html`<button className="btn btn-primary btn-sm" onClick=${removeAll}>Delete now</button>` : null}</div>` : null}
     ${story ? html`<p className="notice small">Approved ${fmtDate((sub.review || {}).at)}${(sub.review || {}).by ? ' by ' + sub.review.by : ''}. <button className="link-btn" onClick=${() => nav('story', {id: story.id})}>Open the journal story</button></p>` : null}
     ${err ? html`<p className="error" role="alert">${err}</p>` : null}
@@ -4397,9 +4415,10 @@ function SubmissionView({id}){
         <button className=${'btn ' + (mode === 'reject' ? 'btn-primary' : 'btn-ghost')} id="sub-reject-open" onClick=${() => { setMode('reject'); setText(''); setReason(''); }}>Reject / exclude</button>
       </div>
       ${mode === 'approve' ? html`<div className="approve-check">
-        <p className="small">Approval adds this story to the Impact Journal and its outcomes to Impact Insights, labeled as a community ${sub.perspective === 'self' ? 'self-report' : 'observation'}. It stays internal: public sharing is a separate decision.</p>
+        ${sub.is_test ? html`<p className="small"><strong>This is a test.</strong> Approval creates a journal story labeled Test so you can check the result. It is never counted anywhere and can't be shared.</p>`
+          : html`<p className="small">Approval adds this story to the Impact Journal and its outcomes to Impact Insights, labeled as a community ${sub.perspective === 'self' ? 'self-report' : 'observation'}. It stays internal: public sharing is a separate decision.</p>`}
         <p className="small"><strong>Contributor's sharing choice:</strong> ${PUBLICATION[sub.publication_consent]}${sub.is_minor ? '. Involves a minor: never share it publicly without documented parent or guardian permission.' : ''}</p>
-        ${sub.publication_consent !== 'internal' ? html`<label className="check"><input type="checkbox" id="sub-pub-ok" checked=${pubOk} onChange=${e => setPubOk(e.target.checked)} /> I've checked this sharing choice${sub.is_minor ? ' and the guardian permission' : ''}, so the story may later be approved for external use</label>` : null}
+        ${sub.publication_consent !== 'internal' && !sub.is_test ? html`<label className="check"><input type="checkbox" id="sub-pub-ok" checked=${pubOk} onChange=${e => setPubOk(e.target.checked)} /> I've checked this sharing choice${sub.is_minor ? ' and the guardian permission' : ''}, so the story may later be approved for external use</label>` : null}
         <${Field} label="Review note (optional, internal)"><input id="sub-note" className="input" value=${text} onChange=${e => setText(e.target.value)} /><//>
         <div className="row-btns"><button className="btn btn-primary" id="sub-approve" disabled=${busy === 'approve'} onClick=${approve}>${busy === 'approve' ? 'Approving…' : 'Approve and add to the journal'}</button><button className="btn btn-ghost" onClick=${() => setMode('')}>Cancel</button></div>
       </div>` : null}
@@ -4670,8 +4689,9 @@ function InviteView(){
   const revoke = async id => { try { await api.revokeInvite(id); showToast('Invitation link turned off'); loadInv(); } catch (e) { setErr(e.message); } };
   const invState = v => v.revoked_at ? ['Turned off', 'neutral'] : new Date(v.expires_at) < new Date() ? ['Expired', 'neutral'] : v.uses >= v.max_uses ? ['Used', 'good'] : ['Active', 'blue'];
   const since = Date.now() - 30 * 864e5;
-  const recent = subs.filter(x => Date.parse(x.submitted_at || 0) >= since);
-  const byRel = RELATIONSHIPS.map(r => [r.label, subs.filter(x => x.relationship === r.id).length]).filter(r => r[1]);
+  const realSubs = subs.filter(x => !x.is_test);
+  const recent = realSubs.filter(x => Date.parse(x.submitted_at || 0) >= since);
+  const byRel = RELATIONSHIPS.map(r => [r.label, realSubs.filter(x => x.relationship === r.id).length]).filter(r => r[1]);
   const mail = 'mailto:?subject=' + encodeURIComponent('Share your ABG story') + '&body=' + encodeURIComponent(msg);
   const sms = 'sms:?&body=' + encodeURIComponent(msg);
   return html`<div className="view invite">
@@ -4722,9 +4742,9 @@ function InviteView(){
       <h2>Submission activity</h2>
       ${subsState === 'missing' ? html`<p className="notice small">Community submissions aren't set up on the server yet.</p>` : html`
       <div className="stats stats-3">
-        <div className="stat"><b>${subs.length}</b><span>Stories submitted</span></div>
+        <div className="stat"><b>${realSubs.length}</b><span>Stories submitted</span></div>
         <div className="stat"><b>${recent.length}</b><span>In the last 30 days</span></div>
-        <div className="stat"><b>${subs.filter(x => x.status === 'pending_review').length}</b><span>Waiting for review</span></div>
+        <div className="stat"><b>${realSubs.filter(x => x.status === 'pending_review').length}</b><span>Waiting for review</span></div>
       </div>
       ${byRel.length ? html`<p className="small muted">By connection: ${byRel.map(r => r[0] + ' ' + r[1]).join(' · ')}</p>` : null}
       <div><button className="btn btn-ghost btn-sm" onClick=${() => nav('submissions')}><${Icon} name="inbox" size=${16} /> Open Community Submissions</button></div>`}
@@ -4863,7 +4883,8 @@ function LinkStudentSheet({story, close}){
   </div>`;
 }
 function MilestonesSection(){
-  const {stories, storiesLoaded} = useApp();
+  const {stories: shownAll, storiesLoaded} = useApp();
+  const stories = useMemo(() => shownAll.filter(reportable), [shownAll]);
   const st = useMemo(() => milestoneStats(stories), [stories]);
   return html`<section className="card">
     <h2>Student milestones</h2>
@@ -4875,7 +4896,8 @@ function MilestonesSection(){
   </section>`;
 }
 function ImpactByCategory(){
-  const {stories, storiesLoaded} = useApp();
+  const {stories: shownAll, storiesLoaded} = useApp();
+  const stories = useMemo(() => shownAll.filter(reportable), [shownAll]);
   const stats = useMemo(() => categoryStats(stories), [stories]);
   const N = studentProfiles(stories).length;
   const verifiedStories = stories.filter(s => (s.evidence || []).some(e => e.status === 'verified')).length;
@@ -4903,7 +4925,8 @@ function ImpactByCategory(){
   </section>`;
 }
 function OutcomesSection(){
-  const {stories, nav, storiesLoaded} = useApp();
+  const {stories: shownAll, nav, storiesLoaded} = useApp();
+  const stories = useMemo(() => shownAll.filter(reportable), [shownAll]);
   const profiles = useMemo(() => studentProfiles(stories), [stories]);
   const lines = useMemo(() => outcomeLines(profiles), [profiles]);
   const N = profiles.length;
@@ -5053,10 +5076,10 @@ function applyFilters(stories, f, q){
   const toks = norm(q).split(' ').filter(Boolean);
   return stories.filter(s => {
     if (f.type && storyTypeOf(s) !== f.type) return false;
-    if (f.source && (f.source === 'community') !== isCommunity(s)) return false;
+    if (f.source && f.source !== 'test' && (f.source === 'community') !== isCommunity(s)) return false;
     if (f.contributor && relationshipOf(s) !== f.contributor) return false;
     if (f.evclass && !(s.evidence || []).some(e => e.status !== 'future' && evidenceClass(e) === f.evclass)) return false;
-    if (f.review === 'withdrawn' && reportable(s)) return false;
+    if (f.review === 'withdrawn' && !isWithdrawn(s)) return false;
     if (f.former === 'yes' && !isFormerStudent(s)) return false;
     if (f.status && s.status !== f.status) return false;
     if (f.category && !(s.categories || []).includes(f.category)) return false;
@@ -5114,7 +5137,7 @@ function FilterSheet({initial, programs, communities, students, onApply, close})
   </div>`;
 }
 function LibraryView({embedded}){
-  const {caps, stories, students, storiesLoaded, settings, nav, openSheet, readOnly} = useApp();
+  const {caps, stories: realStories, testStories, students, storiesLoaded, settings, nav, openSheet, readOnly} = useApp();
   const [q, setQ] = useState('');
   const [f, setF] = useState(() => { try { return JSON.parse(lsGet('abg-lib-f') || '{}') || {}; } catch (e) { return {}; } });
   const [sort, setSort] = useState(() => lsGet('abg-lib-sort') || 'recorded');
@@ -5122,6 +5145,8 @@ function LibraryView({embedded}){
   const ctlRef = useRef(null);
   useEffect(() => { lsSet('abg-lib-f', JSON.stringify(f)); }, [f]);
   useEffect(() => { lsSet('abg-lib-sort', sort); }, [sort]);
+  /* Preview Mode test stories only appear under the Test source filter */
+  const stories = f.source === 'test' ? (testStories || []) : realStories;
   useEffect(() => () => { if (ctlRef.current) ctlRef.current.abort(); }, []);
   const programs = uniq((settings.programs || []).concat(stories.map(s => s.program)));
   const communities = uniq((settings.communities || []).concat(stories.map(s => s.community)));
@@ -5144,14 +5169,14 @@ function LibraryView({embedded}){
     ctlRef.current = null;
   }
   return html`<div className="view library">
-    ${embedded ? null : html`<header className="page-head"><h1>Story Library</h1><p className="muted">${stories.length} ${stories.length === 1 ? 'story' : 'stories'} from every period of ABG's work.</p></header>`}
+    ${embedded ? null : html`<header className="page-head"><h1>Story Library</h1><p className="muted">${realStories.length} ${realStories.length === 1 ? 'story' : 'stories'} from every period of ABG's work.</p></header>`}
     <form className="search" role="search" onSubmit=${e => { e.preventDefault(); ask(); }}>
       <div className="search-box"><${Icon} name="search" size=${18} /><input id="lib-search" className="search-input" type="search" aria-label="Search stories" placeholder="Search, or ask: staff who were once ABG students" value=${q} onChange=${e => { setQ(e.target.value); if (ai) setAi(null); }} /></div>
       ${caps.sample ? html`<button type="submit" className="btn btn-ghost" disabled=${!asStr(q) || !stories.length}><${Icon} name="spark" size=${18} /> Ask Claude</button>` : null}
     </form>
     <div className="type-filter">
       <div className="seg" role="group" aria-label="Story type">${[['', 'All stories'], ['student', 'Student Impact'], ['staff', 'Staff Impact']].map(([v, l]) => html`<button type="button" key=${v || 'all'} id=${'lt-' + (v || 'all')} className="seg-btn" aria-pressed=${(f.type || '') === v} onClick=${() => setF(x => Object.assign({}, x, {type: v, former: v === 'staff' ? x.former : ''}))}>${l}<span className="seg-n tnum">${v ? stories.filter(s => storyTypeOf(s) === v).length : stories.length}</span></button>`)}</div>
-      <div className="seg" role="group" aria-label="Source">${[['', 'All sources'], ['internal', 'Internal interviews'], ['community', 'Community submissions']].map(([v, l]) => html`<button type="button" key=${v || 'all'} id=${'ls-' + (v || 'all')} className="seg-btn" aria-pressed=${(f.source || '') === v} onClick=${() => setF(x => Object.assign({}, x, {source: v}))}>${l}<span className="seg-n tnum">${v ? stories.filter(s => (v === 'community') === isCommunity(s)).length : stories.length}</span></button>`)}</div>
+      <div className="seg" role="group" aria-label="Source">${[['', 'All sources'], ['internal', 'Internal interviews'], ['community', 'Community submissions']].concat((testStories || []).length || f.source === 'test' ? [['test', 'Test (Preview Mode)']] : []).map(([v, l]) => html`<button type="button" key=${v || 'all'} id=${'ls-' + (v || 'all')} className="seg-btn" aria-pressed=${(f.source || '') === v} onClick=${() => setF(x => Object.assign({}, x, {source: v}))}>${l}<span className="seg-n tnum">${v ? stories.filter(s => (v === 'community') === isCommunity(s)).length : stories.length}</span></button>`)}</div>
       ${f.type === 'staff' ? html`<button type="button" id="lt-former" className="chip chip-path" aria-pressed=${f.former === 'yes'} onClick=${() => setF(x => Object.assign({}, x, {former: x.former === 'yes' ? '' : 'yes'}))}>Former ABG students (Student → Staff) <span className="tnum">${stories.filter(isFormerStudent).length}</span></button>` : null}
     </div>
     <div className="filter-row">
@@ -5218,7 +5243,8 @@ function MetricSheet({metric, close}){
   </div>`;
 }
 function InsightsView({embedded}){
-  const {stories, metrics, nav, openSheet, readOnly, storiesLoaded} = useApp();
+  const {stories: shownAll, metrics, nav, openSheet, readOnly, storiesLoaded} = useApp();
+  const stories = useMemo(() => shownAll.filter(reportable), [shownAll]);
   const total = stories.length;
   const past = stories.filter(s => s.period === 'past').length;
   const approved = stories.filter(s => s.status === 'approved').length;
@@ -5583,6 +5609,7 @@ function forReporting(all, students, settings){
   const mark = x => x.demo ? Object.assign({}, x, {title: '[DEMO, fictional] ' + (x.title || ''), summary: '[Fictional demo story] ' + (x.summary || '')}) : x;
   return {stories: stories.map(mark), students: students || [], demoN: stories.filter(x => x.demo).length, included: true};
 }
+function TestPill(){ return html`<span className="pill tone-test" title="Test story from Preview Mode: never counted">Test</span>`; }
 function DemoPill(){ return html`<span className="pill tone-demo" title="Fictional demo story">Demo</span>`; }
 
 /* ---------- roles ----------
@@ -5621,7 +5648,7 @@ function ManageUsers(){
     if (await act('invite', 'invite', {email: em, role: newRole}, 'Invitation sent to ' + em)) { setEmail(''); setNewRole('user'); }
   }
   const confirmThen = (title, body, label, fn) => openSheet(close => html`<${ConfirmSheet} close=${close} title=${title} body=${body} confirmLabel=${label} onConfirm=${fn} />`);
-  const users = data ? data.users.slice().sort((a, b) => (a.email === myEmail ? -1 : b.email === myEmail ? 1 : 0) || ((a.role === 'admin') === (b.role === 'admin') ? a.email.localeCompare(b.email) : a.role === 'admin' ? -1 : 1)) : [];
+  const users = data ? (Array.isArray(data.users) ? data.users : []).slice().sort((a, b) => (a.email === myEmail ? -1 : b.email === myEmail ? 1 : 0) || ((a.role === 'admin') === (b.role === 'admin') ? a.email.localeCompare(b.email) : a.role === 'admin' ? -1 : 1)) : [];
   const counts = {admins: users.filter(u => u.role === 'admin').length, active: users.filter(u => u.status === 'active').length, pending: users.filter(u => u.status === 'invited' || u.status === 'not_invited').length};
   return html`<div className="manage-users">
     <form className="invite-form" onSubmit=${invite}>
@@ -5663,6 +5690,7 @@ function confirmLogout(openSheet){
 /* ---------- Settings ---------- */
 const SETTINGS_SECTIONS = [
   {id: 'profile', label: 'Profile', icon: 'user'},
+  {id: 'portal', label: 'Portal Access', icon: 'swap', portal: true},
   {id: 'programs', label: 'Programs', icon: 'book'},
   {id: 'outcomes', label: 'Outcome Categories', icon: 'list'},
   {id: 'voice', label: 'Interview Voice', icon: 'volume'},
@@ -5740,6 +5768,12 @@ function SettingsView(){
   useEffect(() => { latest.current = settings; }, [settings]);
   const cur = () => latest.current || {};
   const save = patch => { const next = Object.assign({}, cur(), patch, {updatedAt: nowISO()}); latest.current = next; return safeWrite(() => caps.db.doc('config/settings').set(next)); };
+
+  /* Portal Access: shown only when the server says this account may preview the Share Your Story page */
+  const [portalOk, setPortalOk] = useState(false);
+  const [portalPick, setPortalPick] = useState('community');
+  useEffect(() => { const f = window.__platform && window.__platform.canPreviewPortal; if (f) f().then(ok => setPortalOk(!!ok), () => setPortalOk(false)); }, []);
+  const switchPortal = () => { const go = window.__platform && window.__platform.openCommunityPreview; if (portalPick === 'community' && go) go(); };
 
   /* section navigation: jump to a section, and highlight the one in view */
   const [active, setActive] = useState('profile');
@@ -5839,7 +5873,7 @@ function SettingsView(){
   return html`<div className="view settings2">
     <header className="ins-hello set-head"><p className="eyebrow">Settings</p><h1>Settings</h1><p className="lede">Manage your profile, program details, interview voice, and how your journal data is organized and used.</p></header>
     <div className="set-layout">
-      <nav className="set-nav" aria-label="Settings sections">${SETTINGS_SECTIONS.map(s => s.id === 'team' && !isAdmin ? Object.assign({}, s, {label: 'Your Account', icon: 'user'}) : s).map(s => html`<button key=${s.id} type="button" className="set-link" aria-current=${active === s.id ? 'true' : undefined} onClick=${() => jump(s.id)}><${Icon} name=${s.icon} /><span>${s.label}</span></button>`)}</nav>
+      <nav className="set-nav" aria-label="Settings sections">${SETTINGS_SECTIONS.filter(s => !s.portal || portalOk).map(s => s.id === 'team' && !isAdmin ? Object.assign({}, s, {label: 'Your Account', icon: 'user'}) : s).map(s => html`<button key=${s.id} type="button" className="set-link" aria-current=${active === s.id ? 'true' : undefined} onClick=${() => jump(s.id)}><${Icon} name=${s.icon} /><span>${s.label}</span></button>`)}</nav>
       <div className="set-main">
 
         <div className="set-sec" id="sec-profile" data-sec="profile"><section className="card set-card">
@@ -5862,6 +5896,20 @@ function SettingsView(){
           <p className="tiny muted">Your name and role appear in the sidebar, and the greeting uses your first name. Your photo and phone number are visible to the team.</p>
         </section>
 </div>
+
+        ${portalOk ? html`<div className="set-sec" id="sec-portal" data-sec="portal"><section className="card set-card">
+          ${head('Portal Access', 'Move between the staff dashboard and the public Share Your Story page without signing out.')}
+          <div className="portal-picks" role="radiogroup" aria-label="Portal">
+            <label className=${'portal-pick' + (portalPick === 'staff' ? ' on' : '')}><input type="radio" name="set-portal" id="portal-staff" checked=${portalPick === 'staff'} onChange=${() => setPortalPick('staff')} />
+              <span className="portal-ic tone-teal"><${Icon} name="home" size=${22} /></span>
+              <span className="portal-text"><strong>Staff Dashboard <span className="pill tone-teal">Current portal</span></strong><small>Manage stories, review community submissions, view impact insights, and access authorized administrative functions.</small></span></label>
+            <label className=${'portal-pick' + (portalPick === 'community' ? ' on' : '')}><input type="radio" name="set-portal" id="portal-community" checked=${portalPick === 'community'} onChange=${() => setPortalPick('community')} />
+              <span className="portal-ic tone-purple"><${Icon} name="share" size=${22} /></span>
+              <span className="portal-text"><strong>Community Story Portal <span className="pill tone-purple">Opens in Preview Mode</span></strong><small>Experience the public-facing story submission process as a community member would.</small></span></label>
+          </div>
+          <div className="row-btns"><button type="button" className="btn btn-purple" id="portal-switch" disabled=${portalPick !== 'community'} onClick=${switchPortal}><${Icon} name="swap" size=${18} /> ${portalPick === 'community' ? 'Switch Portal' : "You're in the Staff Dashboard"}</button></div>
+          <p className="tiny muted">You stay signed in, with the same permissions. In Preview Mode, stories you send are saved as tests: they're labeled Test, appear only under Community Submissions › Test submissions, and never count in Impact Insights, totals, Source Comparison or exports. Use the Preview menu at the top of the Share Your Story page to come back here, or to exit Preview Mode before sending a real story. Only accounts on the server's preview list see this section, and the server checks again before it accepts a test story.</p>
+        </section></div>` : null}
 
         <div className="set-sec" id="sec-programs" data-sec="programs">
           <section className="card set-card">
@@ -6073,10 +6121,14 @@ function App(){
   }, [caps.status, storiesLoaded, settingsLoaded, role, readOnly]);
   const demoHidden = !!(settings.demo || {}).hidden;
   const allStories = stories, allStudents = students;
-  const shownStories = useMemo(() => demoHidden ? stories.filter(x => !x.demo) : stories, [stories, demoHidden]);
+  const visibleStories = useMemo(() => demoHidden ? stories.filter(x => !x.demo) : stories, [stories, demoHidden]);
+  /* Preview Mode test stories are kept apart: every list, count and report uses shownStories, which never holds a test */
+  const shownStories = useMemo(() => visibleStories.filter(x => !isTest(x)), [visibleStories]);
+  const testStories = useMemo(() => visibleStories.filter(isTest), [visibleStories]);
+  const storyById = useCallback(id => visibleStories.find(x => x.id === id) || null, [visibleStories]);
   const shownStudents = useMemo(() => demoHidden ? students.filter(x => !x.demo) : students, [students, demoHidden]);
   const shownStaff = useMemo(() => demoHidden ? staffPeople.filter(x => !x.demo) : staffPeople, [staffPeople, demoHidden]);
-  const ctx = {caps, updateMe, stories: shownStories, students: shownStudents, staffPeople: shownStaff, allStaff: staffPeople, subs, subsState, reloadSubs, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite,
+  const ctx = {caps, updateMe, stories: shownStories, testStories, storyById, students: shownStudents, staffPeople: shownStaff, allStaff: staffPeople, subs, subsState, reloadSubs, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite,
     readOnly, role: role || 'user', isAdmin: role === 'admin'};
   const focus = caps.status === 'ready' && (route.name === 'record' || route.name === 'review' || route.name === 'interview');
   let content;
