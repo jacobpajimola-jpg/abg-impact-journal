@@ -1036,3 +1036,9 @@ button.ins-stat:hover{box-shadow:var(--shadow)}
 .draft-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .draft-main{display:grid;gap:2px;min-width:0}
 .draft-preview{white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* ===== sign-in code ===== */
+.code-input{letter-spacing:.45em;padding-left:.45em}
+.code-input::placeholder{color:var(--ink-3);letter-spacing:.45em}
+.login-addr{overflow-wrap:anywhere}
+.login-alt .btn{min-height:40px}

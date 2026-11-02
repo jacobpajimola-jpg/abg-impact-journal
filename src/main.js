@@ -27,64 +27,114 @@ const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return 
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 
 /* Only shown when this device has no valid sign-in (first visit on a new browser, after logging out,
-   or if access was revoked). Passwordless: we email a code and a link; either one signs you in. */
+   or if access was revoked). Passwordless and invitation-only, all through Supabase Auth:
+   - one email holds a 6-digit code AND a sign-in link; either signs into the same account
+   - the code is checked by Supabase (expires after 10 minutes, works once, rate limited); nothing is checked here
+   - shouldCreateUser: false, so an email that wasn't invited by an administrator can't get in
+   - installed app (home-screen PWA): the code comes first, because a link would open the browser instead */
+const CODE_LEN = 6;            // Supabase > Authentication > Email > "Email OTP length"
+const CODE_MINUTES = 10;       // Supabase > Authentication > Email > "Email OTP expiration" (600 seconds)
+const RESEND_SECONDS = 60;     // Supabase only sends a new email to the same address once a minute
+const inApp = () => { try { return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; } catch (e) { return false; } };
 function Login({sb, notice}){
+  const app = inApp();
   const [email, setEmail] = useState(() => lsGet('abg-last-email') || '');
-  const [stage, setStage] = useState('email');
+  const [stage, setStage] = useState('email');          // email | code | link
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(notice || '');
-  const [wait, setWait] = useState(0);
+  const [info, setInfo] = useState('');
+  /* resend cooldown counts down to a fixed time, so it stays right after the phone sleeps */
+  const [until, setUntil] = useState(0);
+  const [, setTick] = useState(0);
+  const wait = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+  const setWait = sec => setUntil(Date.now() + sec * 1000);
+  const sentAt = React.useRef(0);
+  const codeRef = React.useRef(null);
   const clean = () => email.trim().toLowerCase();
-  React.useEffect(() => { if (!wait) return; const t = setTimeout(() => setWait(w => Math.max(0, w - 1)), 1000); return () => clearTimeout(t); }, [wait]);
-  async function send(e){
+  React.useEffect(() => { if (!wait) return; const t = setTimeout(() => setTick(x => x + 1), 1000); return () => clearTimeout(t); });
+  React.useEffect(() => { if (stage === 'code') { try { codeRef.current && codeRef.current.focus(); } catch (e) {} } }, [stage]);
+  async function send(e, opts){
     if (e) e.preventDefault();
-    if (!clean()) return;
-    setBusy(true); setMsg('');
+    const o = opts || {};
+    if (!clean() || !/^\S+@\S+\.\S+$/.test(clean())) { setMsg('Enter the email address you were invited with.'); return; }
+    if (o.resend && wait > 0) return;
+    setBusy(true); setMsg(''); setInfo('');
     const {error} = await sb.auth.signInWithOtp({email: clean(), options: {shouldCreateUser: false, emailRedirectTo: window.location.origin + window.location.pathname}});
     setBusy(false);
     if (error) {
       const m = error.message || '';
-      if (/signup|not allowed|not found|invalid login/i.test(m)) setMsg("This email hasn't been invited yet. Ask the journal's administrator to invite you.");
-      else if (/rate|seconds|too many/i.test(m)) { setMsg('A code was sent very recently. Check your email, or wait a minute and try again.'); if (stage === 'email') setStage('code'); }
+      if (/signup|not allowed|not found|invalid login|user not found/i.test(m)) setMsg("This email hasn't been invited yet. Ask the journal's administrator to invite you.");
+      else if (/rate|seconds|too many|security purposes/i.test(m) || error.status === 429) { setMsg('A code was sent very recently. Check your email, or wait a minute and send a new one.'); if (stage === 'email') { setStage('code'); setWait(RESEND_SECONDS); } }
       else setMsg("The email couldn't be sent. Check the address and your connection, then try again.");
       return;
     }
     lsSet('abg-last-email', clean());
-    setCode(''); setStage('code'); setWait(60);
+    sentAt.current = Date.now();
+    setCode(''); setWait(RESEND_SECONDS);
+    if (o.resend) setInfo('A new code is on its way. Use the newest email: earlier codes no longer work.');
+    if (stage === 'email') setStage(o.link ? 'link' : 'code');
   }
-  async function verify(e){
-    e.preventDefault();
-    const token = code.replace(/\D/g, '');
-    if (token.length < 6) { setMsg('Enter the code from the email.'); return; }
-    setBusy(true); setMsg('');
+  async function verify(e, pasted){
+    if (e) e.preventDefault();
+    const token = String(pasted != null ? pasted : code).replace(/\D/g, '');
+    if (token.length < CODE_LEN) { setMsg('Enter the ' + CODE_LEN + '-digit code from the email.'); return; }
+    setBusy(true); setMsg(''); setInfo('');
+    // "email" covers sign-in codes; "invite" covers the code in an invitation email (first sign-in)
     let {error} = await sb.auth.verifyOtp({email: clean(), token, type: 'email'});
-    if (error) { const again = await sb.auth.verifyOtp({email: clean(), token, type: 'invite'}); if (!again.error) error = null; }
+    if (error && !(error.status === 429 || /rate|too many/i.test(error.message || ''))) {
+      const again = await sb.auth.verifyOtp({email: clean(), token, type: 'invite'});
+      if (!again.error) error = null;
+    }
     setBusy(false);
-    if (error) setMsg(/rate|too many/i.test(error.message || '') ? 'Too many tries. Wait a few minutes, then try again.' : "That code didn't work. Use the code from the newest email, or send a new one.");
-    // success: the app opens automatically
+    if (!error) return;     // signed in: the journal opens automatically and stays signed in on this device
+    const m = error.message || '';
+    if (error.status === 429 || /rate|too many/i.test(m)) setMsg('Too many tries. Wait a few minutes, then try again or send a new code.');
+    else if (sentAt.current && Date.now() - sentAt.current > CODE_MINUTES * 60e3) setMsg('This code has expired. Codes last ' + CODE_MINUTES + ' minutes. Send a new code and use it right away.');
+    else setMsg("That code didn't work. Check that it matches the newest email: each code works once, and sending a new code replaces the old one.");
+    setCode('');
+    try { codeRef.current && codeRef.current.focus(); } catch (er) {}
   }
+  const changeEmail = () => { setStage('email'); setMsg(''); setInfo(''); setCode(''); };
+  const resendBtn = (label) => html`<button type="button" className="btn btn-quiet btn-sm" id="login-resend" disabled=${busy || wait > 0} onClick=${() => send(null, {resend: true})}>${wait > 0 ? (label || 'Resend code') + ' in ' + wait + 's' : (label || 'Resend code')}</button>`;
   return html`<main className="login">
     <div className="login-card card">
       <${Brand} />
-      ${stage === 'email' ? html`<form className="view" style=${{gap: '12px'}} onSubmit=${send}>
+      ${stage === 'email' ? html`<form className="view" style=${{gap: '12px'}} onSubmit=${send} noValidate>
           <h1>Sign in</h1>
-          <p className="muted">Enter the email address you were invited with. We'll email you a sign-in code. After that, this device stays signed in.</p>
+          <p className="muted">Enter the email address you were invited with. We'll email you a ${CODE_LEN}-digit sign-in code${app ? '. You can sign in without leaving the app.' : ' and a sign-in link. After that, this device stays signed in.'}</p>
           <label className="field"><span>Email</span><input id="login-email" className="input" type="email" name="email" autoComplete="email" inputMode="email" value=${email} onChange=${e => setEmail(e.target.value)} required /></label>
           ${msg ? html`<p className="error" role="alert">${msg}</p>` : null}
           <button className="btn btn-primary" type="submit" disabled=${busy}>${busy ? 'Sending…' : 'Email me a sign-in code'}</button>
         </form>`
-      : html`<form className="view" style=${{gap: '12px'}} onSubmit=${verify}>
+      : stage === 'code' ? html`<form className="view" style=${{gap: '12px'}} onSubmit=${verify} noValidate>
           <h1>Check your email</h1>
-          <p>We sent a sign-in code to <strong>${clean()}</strong>. Type it here. If you're reading the email on this device, you can tap the link in it instead.</p>
-          <label className="field"><span>Sign-in code</span><input id="login-code" className="input code-input" type="text" name="one-time-code" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]*" maxLength="10" value=${code} onChange=${e => setCode(e.target.value.replace(/\D/g, ''))} autoFocus=${true} /></label>
+          <p>We sent a ${CODE_LEN}-digit code to <strong className="login-addr">${clean()}</strong>. Enter it below to sign in.${app ? '' : ' Or tap the link in the same email.'}</p>
+          <label className="field"><span>Sign-in code</span>
+            <input id="login-code" ref=${codeRef} className="input code-input" type="text" name="one-time-code" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]*"
+              maxLength="8" placeholder=${'•'.repeat(CODE_LEN)} aria-describedby="login-code-hint" value=${code}
+              onChange=${e => setCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+              onPaste=${e => { const t = ((e.clipboardData && e.clipboardData.getData('text')) || '').replace(/\D/g, ''); if (t.length >= CODE_LEN && t.length <= 8) { e.preventDefault(); setCode(t); verify(null, t); } }} /></label>
+          <p className="tiny muted" id="login-code-hint">The code expires after ${CODE_MINUTES} minutes and works once.</p>
+          ${info ? html`<p className="notice small" role="status">${info}</p>` : null}
           ${msg ? html`<p className="error" role="alert">${msg}</p>` : null}
-          <button className="btn btn-primary" type="submit" disabled=${busy}>${busy ? 'Signing in…' : 'Sign in'}</button>
+          <button className="btn btn-primary" type="submit" id="login-verify" disabled=${busy || !code}>${busy ? 'Signing in…' : 'Verify & Sign In'}</button>
           <div className="login-alt">
-            <button type="button" className="btn btn-quiet btn-sm" disabled=${busy || wait > 0} onClick=${() => send()}>${wait > 0 ? 'Send a new code in ' + wait + 's' : 'Send a new code'}</button>
-            <button type="button" className="btn btn-quiet btn-sm" onClick=${() => { setStage('email'); setMsg(''); }}>Use a different email</button>
+            ${resendBtn()}
+            <button type="button" className="btn btn-quiet btn-sm" id="login-use-link" onClick=${() => { setStage('link'); setMsg(''); setInfo(''); }}>Use Email Link Instead</button>
+            <button type="button" className="btn btn-quiet btn-sm" id="login-change" onClick=${changeEmail}>Change email</button>
           </div>
-        </form>`}
+        </form>`
+      : html`<div className="view" style=${{gap: '12px'}}>
+          <h1>Use the email link</h1>
+          <p>Open the email we sent to <strong className="login-addr">${clean()}</strong> and tap <strong>sign in</strong>. ${app ? '' : 'Open it on this device and in this browser: the journal opens signed in.'}</p>
+          ${app ? html`<p className="notice small" id="login-app-note">You're using the installed app. The link opens your web browser, so you'd be signed in there instead of here. To sign in to this app, use the code.</p>` : null}
+          <p className="tiny muted">The link expires after ${CODE_MINUTES} minutes and works once. The same email also has a ${CODE_LEN}-digit code.</p>
+          ${info ? html`<p className="notice small" role="status">${info}</p>` : null}
+          ${msg ? html`<p className="error" role="alert">${msg}</p>` : null}
+          <button type="button" className="btn btn-primary" id="login-use-code" onClick=${() => { setStage('code'); setMsg(''); setInfo(''); }}>Enter the code instead</button>
+          <div className="login-alt">${resendBtn('Resend email')}<button type="button" className="btn btn-quiet btn-sm" id="login-change" onClick=${changeEmail}>Change email</button></div>
+        </div>`}
     </div>
   </main>`;
 }

@@ -60,29 +60,41 @@ For each function: **Edge Functions** > **Deploy a new function** > **Via Editor
 - Supabase refreshes the session automatically. A copy of the long-term sign-in token is also kept in a secure, HttpOnly cookie on the journal's own domain (`functions/api/session.js`, a Cloudflare Pages Function). If the browser clears the site's saved data, which Safari does after about a week without a visit, the journal quietly restores the session from that cookie.
 - The cookie function reads the existing `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` Pages variables, so there is nothing extra to set.
 - **Log out** asks for confirmation and signs out only that device. Other devices stay signed in.
-- If a device has no valid sign-in (a new phone, the home-screen app on iPhone, after logging out, or after access was removed), the journal asks for an email address and emails a sign-in code. Typing the code, or tapping the link in the same email, signs that device in. No passwords.
+- If a device has no valid sign-in (a new phone, the home-screen app on iPhone, after logging out, or after access was removed), the journal asks for an email address and emails a 6-digit sign-in code and a link. Typing the code (in the app or the browser), or tapping the link in the same email, signs that device in. No passwords.
 - To remove someone's access, delete them under **Authentication** > **Users**. Their devices are signed out within the hour.
 
-### Email templates (sign-in code)
-In **Authentication** > **Emails** > **Templates**, the **Magic Link** template should include the code as well as the link:
+### Sign-in codes (email OTP) and links
+Sign-in is passwordless and invitation-only, handled entirely by Supabase Auth. One email carries a **6-digit code** and a **sign-in link**; either signs into the same account. The code is checked by Supabase, not by the journal: it expires after 10 minutes, works once, and verification is rate limited. Sending uses `shouldCreateUser: false`, so an email address that an administrator never invited can't get in. In the installed home-screen app the code comes first, because a link would open the web browser (and sign in there) instead of the app. The sign-in screen offers **Verify & Sign In**, **Resend code** (once a minute), **Use Email Link Instead** and **Change email**.
 
+**Supabase settings** (Authentication > Sign In / Providers > Email):
+- **Email OTP length:** 6
+- **Email OTP expiration:** 600 seconds (10 minutes; this also limits the link)
+
+Rate limits (Authentication > Rate Limits) stay at Supabase's defaults or stricter: emails per hour (through the custom SMTP sender) and OTP verifications per 5 minutes per IP.
+
+**Email templates** (Authentication > Emails > Templates). Each template that signs someone in shows both the code and the link:
+
+**Magic Link** (sign in):
 ```html
 <h2>Sign in to the ABG Impact Journal</h2>
-<p>Your sign-in code is:</p>
-<p style="font-size:28px;font-weight:bold;letter-spacing:6px">{{ .Token }}</p>
-<p>Type this code on the sign-in page. Or, if you're reading this on the device you use for the journal, <a href="{{ .ConfirmationURL }}">tap here to sign in</a>.</p>
-<p>The code works once and expires in an hour. If you didn't try to sign in, you can ignore this email.</p>
+<p>Your 6-digit sign-in code is:</p>
+<p style="font-size:30px;font-weight:bold;letter-spacing:8px">{{ .Token }}</p>
+<p>Enter this code on the sign-in screen, in the app or the website.</p>
+<p>Or <a href="{{ .ConfirmationURL }}">tap here to sign in</a> on the device and browser you use for the journal.</p>
+<p>The code and the link expire in 10 minutes and work once. If you didn't try to sign in, you can ignore this email.</p>
 ```
 
-The **Invite user** template:
-
+**Invite user** (first sign-in for someone an administrator invited):
 ```html
 <h2>You're invited to the ABG Impact Journal</h2>
 <p>Arts Bridging the Gap has invited you to the Impact Journal, where staff record student stories.</p>
 <p><a href="{{ .ConfirmationURL }}">Accept the invitation</a></p>
-<p>You'll only do this once. After that, the journal stays signed in on this device.</p>
-<p>Using a phone? If the link opens inside your email app, that's fine. To use the journal in Safari or Chrome instead, open {{ .SiteURL }} there and enter this email address; we'll email you a sign-in code.</p>
+<p>Using the installed app, or reading this on another device? Open the journal, enter this email address, and type this code:</p>
+<p style="font-size:30px;font-weight:bold;letter-spacing:8px">{{ .Token }}</p>
+<p>After that, the journal stays signed in on that device. If this code has expired, enter your email on the sign-in screen and we'll send a new one.</p>
 ```
+
+**Confirm signup** (Supabase uses this for an invited person who signs in before accepting): same as Magic Link, with the heading "Confirm your email for the ABG Impact Journal".
 
 Supabase's built-in email sender allows only a few emails per hour, so this project sends through Brevo (custom SMTP). If someone sees a "sent very recently" message, wait a minute.
 
