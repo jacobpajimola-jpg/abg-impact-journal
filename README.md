@@ -193,6 +193,128 @@ The app has four sections: **Home**, **Stories**, **Impact Dashboard** and **Set
 - **Settings** holds the program and school lists and the interview voice.
 - To open straight to a new story, bookmark the link with `#record` at the end. On iPhone, use Share > Add to Home Screen.
 
+## ABG Impact Hub and Impact Materials
+
+The staff workspace is the **ABG Impact Hub**. The Impact Journal (capturing stories) is part of it, together with **Impact Materials**: donor reports, proposals, packets, one-pagers and presentations made from ABG's approved stories and data, in designs made in Canva.
+
+**Capture impact once. Communicate it in many ways.** The design comes from Canva. The AI only fills the content areas the design marks as fillable, using approved content. Staff review everything before a document is made, and an administrator approves it before it goes out.
+
+### Navigation
+The sidebar is grouped: **Home**, **Impact Materials** (Materials Library, Create New Material, Manage Templates, Generated Documents), **Stories** (Capture a Story, Story Library, Interview Guide), **Impact Insights** (Impact Metrics, Program Analytics, Source Comparison), **Community** (Community Submissions, Invite Contributors, Submission Review) and **Settings** (User Management, Content Bank, Canva Integration, System Settings). Every earlier page is still there.
+
+On phones, the bottom bar has Home, Materials, Capture, Stories and Insights, and **Menu** (top right) opens the full navigation, including Settings.
+
+**Home** has two equal action cards (Impact Materials and Capture a Story) and these panels:
+- **Impact at a Glance:** live counts by program year, using the same rules as Impact Insights.
+- **Needs Your Attention:** only real items, such as community stories to review, stories awaiting approval, approved stories missing consent for external materials, materials awaiting review, and drafts.
+- **Recent Activity:** the latest stories, submissions, materials and template changes.
+
+### Setup (one time)
+1. **Database:** in Supabase, open **SQL Editor** > **New query**, paste all of [`supabase/materials.sql`](supabase/materials.sql) and **Run**. It is safe to run again. It creates:
+   - the Impact Materials tables
+   - the access rules
+   - two private storage buckets (`templates` and `materials`)
+   - the starting audiences and material types (Donor Materials › Individual Donors › Donor Impact Summary, and the rest), which administrators can rename, add to or archive in the app
+2. **Canva (optional; uploads of PDF and PowerPoint templates work without it):**
+   1. At [canva.com/developers](https://www.canva.com/developers/integrations/connect-api), create an integration for Canva's REST API.
+   2. Turn on these scopes: `design:content:read design:content:write design:meta:read asset:read asset:write`.
+   3. Add this redirect URL: `https://<project>.supabase.co/functions/v1/canva/callback`.
+   4. In Supabase, add these Edge Function secrets:
+      - `CANVA_CLIENT_ID` and `CANVA_CLIENT_SECRET`
+      - `CANVA_TOKEN_KEY` (any long random text; it encrypts the stored Canva tokens)
+      - `SITE_URL` (the journal's address)
+   5. Deploy [`supabase/functions/canva/index.ts`](supabase/functions/canva/index.ts) as a function named `canva`, with **Verify JWT turned off**. Canva's redirect arrives without a sign-in, and the function checks the sign-in itself on every other request.
+   6. An administrator then opens **Settings › Canva Integration** and presses **Connect Canva**.
+
+   **Canva requirements:**
+   - Autofill needs the connected Canva account to be on Canva Pro, Teams, Enterprise or Canva for Nonprofits, with two-step sign-in turned on.
+   - Only elements connected to **data fields** in Canva can change. In Canva, use Apps › Bulk Create or Data autofill to connect text and images to fields.
+   - Rebuild the bundle after editing: `node scripts/build-canva.mjs`.
+
+### Two ways to add a template (Impact Materials › Manage Templates)
+Both kinds of template appear in one library, organized as **Audience → Material Type → Template → Version**.
+
+| | Connect Canva Design | Upload PDF or PowerPoint |
+|---|---|---|
+| What to give it | A Canva design link | A file exported from Canva |
+| What can change | The design's Canva data fields (text and images) | PowerPoint: any text box or picture you click. PDF: its form fields, or areas you draw on the page |
+| Result | A **new copy** of the design in Canva (editable there) plus a PDF | PowerPoint: an editable .pptx. PDF: a finished PDF (not editable in Canva) |
+| The master | Never changed (Canva's "create from design") | Never changed (stored once, read only) |
+
+**Preparing designs in Canva**
+- **PowerPoint (recommended for uploads):** use Share › Download › PowerPoint. Text stays as editable text boxes. Click each box or picture to map it. Shapes named `abg: field` or containing `{{field}}` are suggested automatically. Everything not mapped stays exactly as designed: slide size, backgrounds, branding, images, fonts, colors and alignment.
+- **PDF:** Canva PDFs are flat, so text already printed in them can't be replaced. Leave the areas for new content **blank** in Canva before exporting, then draw those areas in the app.
+  - An area drawn over printed text is refused, with an explanation, so text never prints on top of other text.
+  - Text uses standard fonts, or your brand font (upload a .ttf or .otf with **+ Brand font**).
+  - PDFs with real form fields are filled field by field.
+- **Canva:** connect the elements that should change to data fields before connecting the design.
+
+**Template editor:** each field records:
+- its ID, page or slide, and exact location
+- field type and content source
+- formatting (font, size, smallest size, color, alignment)
+- maximum length and lines
+- whether it is required, and what to do if there's no content
+
+**Test Template** fills the design with clearly fake sample content and shows the result. Text that doesn't fit is reported, never squeezed into an unreadable size. A template can only be approved after a passing test.
+
+**Updating a design.** **Update Template**, in Manage Templates or on any generated document:
+1. Upload or connect the revised design. It becomes the next version.
+2. Fields that still match are carried over.
+3. Test it, then choose **Replace Default Template** or **Create Template Variation**.
+
+Approved versions never change, and every document keeps the exact version it was made with. To use a newer design on an older document, use **Regenerate**: it makes a new material and leaves the original untouched. **Edit content** changes only that document's text. **Update Template** changes the reusable design for future documents.
+
+### Making a material (Create New Material)
+1. Audience
+2. Material type
+3. Template (the default is preselected; variations can be chosen)
+4. Content: reporting period, programs, approved stories, statistics, approved images and extra instructions
+5. Generate Draft Content
+6. Review: edit any field, see each field's sources, regenerate a field
+7. Generate Document
+8. Final review: preview, download, duplicate, regenerate, send for review, and **Approve** (administrators only)
+
+Nothing is ever emailed, posted or published automatically.
+
+**Accuracy and consent (enforced in the app and, where it matters, in the database):**
+- **Exact content:**
+  - Statistics, quotations, Content Bank text, dates and the reporting period are placed **exactly** as recorded.
+  - The AI writes only prose fields (headline, introduction, story highlight, program overview, call to action).
+  - Any number the AI (or a person) writes that isn't in the selected sources, any quotation that isn't an approved quote, and any name that isn't allowed is flagged as an error. The document can't be generated until it's fixed. Missing data is a warning, never an invented figure.
+- **Statistics:**
+  - Each statistic keeps its source, period and verification level: self-reported, staff-observed or independently verified.
+  - Unverified or unapproved figures carry a warning.
+  - Counts from the journal are labeled as counts of documented stories, not program-wide totals.
+- **Stories:** a story can appear in an external material only when all of these are true:
+  - it is approved for external use
+  - it is not a test or demo story
+  - for a community story, the contributor's sharing choice allows it and an administrator has confirmed it
+  - for a minor, publication permission is documented
+  - its **permitted uses** (printed and PDF materials, presentations, online) include the material type's use
+
+  Permitted uses are recorded by administrators in Content Bank › Approved Stories or from the builder. Internal reporting approval is not external publication permission.
+- **Images:** an image of an identifiable person needs documented consent (from a guardian for a minor) and must be permitted for that use.
+- **What reaches the AI:** only approved story text, with names removed where permission isn't documented, plus approved quotes, statistics and approved messaging. Never transcripts or private details.
+
+### Content Bank (Settings › Content Bank)
+- **Core messaging:** mission, organization description, program descriptions, audience-specific messaging, calls to action.
+- **Verified statistics:** value, source, period, verification level and approval status.
+- **Approved stories:** the external-use status and permitted uses of each journal story. Stories are not copied; they stay in the Story Library.
+- **Approved media:** images, with whether people are identifiable, consent, and permitted uses.
+
+Only administrators change the Content Bank.
+
+### Who can do what (enforced by `supabase/materials.sql`)
+- **Staff:** browse templates, create and edit their own drafts, generate and download documents, and send them for review.
+- **Administrators:** manage categories, templates and versions, defaults, the Content Bank and the Canva connection, and approve or archive materials.
+- **Preserved records:**
+  - A template version can't be approved untested, and once approved it can't be changed.
+  - An approved material can't be changed or deleted, only archived.
+  - Master templates are never deleted.
+- **Canva tokens:** encrypted, and readable only by the `canva` function.
+- **Community contributors:** no access to any of it.
+
 ## End of the semester
 Export everything from **Impact Reports** (CSV and Markdown files) and give the files to ABG. You can then pause or delete the Supabase project and the Cloudflare site, and revoke the API keys.
 
@@ -208,4 +330,13 @@ npm run dev
 - `src/platform.js`: connects the app to Supabase, the Claude API function, and recording storage
 - `src/main.js`: sign-in screen and startup
 - `supabase/setup.sql`: database tables, security rules, recording bucket
-- `supabase/functions/`: the `ai`, `transcribe` and `speak` server functions
+- `supabase/functions/`: the `ai`, `transcribe`, `speak`, `admin`, `community` and `canva` server functions
+- `src/materials/`: Impact Materials
+  - `views.js`: the library, builder, material page, Content Bank and Canva settings
+  - `templates.js`: Manage Templates and the template editor
+  - `content.js`: consent rules, the AI request and accuracy checks
+  - `pptx.js` and `pdf.js`: the PowerPoint and PDF fill engines
+  - `engine.js`: generation and previews in the browser
+  - `model.js`: the template library tree
+- `supabase/materials.sql`: Impact Materials tables, access rules, triggers and storage buckets
+- `scripts/build-canva.mjs`: bundles the `canva` function into one file for the Supabase editor

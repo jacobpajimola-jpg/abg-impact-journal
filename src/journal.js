@@ -1,6 +1,8 @@
 import { DEMO_STORIES, DEMO_VERSION } from './demoData.js';
 import qrcode from 'qrcode-generator';
 import { PALETTE_ART, PALETTE_ART_VIEWBOX } from './ui/art.js';
+import { createMaterialsUI } from './materials/views.js';
+import { buildModel } from './materials/model.js';
 import { CATEGORIES, THEMES, AUDIENCES, DOMAIN_GROUPS, DOMAINS, STAFF_DOMAINS, OBSERVERS, LINK_TYPES, METRIC_FIELDS, METRIC_STATUS, STORY_TYPES, STAFF_STATUS, EMPLOYMENT_TYPES, FORMER_STUDENT, STAFF_FIELDS, STAFF_STAGES, JOURNEY_STAGES, ABG_CONTEXT, INTERVIEW_STAGES, LISTEN_FOR, STAFF_LISTEN_FOR, ANALYSIS_SHAPE, STAFF_ANALYSIS_SHAPE, RELATIONSHIPS, SUBJECTS, communityAnalysisPrompt, communityContextText } from './core/shared.js';
 (function(){
 'use strict';
@@ -1668,6 +1670,20 @@ const REDUCED = (() => { try { return window.matchMedia('(prefers-reduced-motion
 
 /* ================= icons ================= */
 const ICONS = {
+  layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>',
+  dots: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/>',
+  archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v11h14V9M10 13h4"/>',
+  play: '<path d="M7 5l12 7-12 7z"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
+  quote: '<path d="M7 7h4v4c0 3-1.5 5-4 6M15 7h4v4c0 3-1.5 5-4 6"/>',
+  megaphone: '<path d="M3 10v4h3l7 4V6L6 10z"/><path d="M17 9a4 4 0 0 1 0 6"/><path d="M6 14l1 5h2"/>',
+  type: '<path d="M5 6V4h14v2M12 4v16M9 20h6"/>',
+  save: '<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   swap: '<path d="M7 4L3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="M17 20l4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/>',
@@ -1803,32 +1819,78 @@ function useNames(ids){
 }
 
 /* ================= navigation chrome ================= */
-const NAV = [
-  {id: 'home', label: 'Overview', icon: 'home'},
-  {id: 'interview', label: 'Capture a Story', icon: 'edit'},
-  {id: 'library', label: 'Story Library', icon: 'doc'},
-  {id: 'insights', label: 'Impact Insights', icon: 'chart'},
-  {id: 'submissions', label: 'Community Submissions', icon: 'inbox'},
-  {id: 'compare', label: 'Source Comparison', icon: 'scale'},
-  {id: 'invite', label: 'Invite Contributors', icon: 'share'},
-  {id: 'guide', label: 'Interview Guide', icon: 'compass'},
+/* ABG Impact Hub navigation: grouped, with every existing page still reachable */
+const NAV_GROUPS = [
+  {id: 'home', label: 'Home', icon: 'home', to: ['home']},
+  {id: 'materials', label: 'Impact Materials', icon: 'layers', items: [
+    {id: 'mat-library', label: 'Materials Library', to: ['materials', {tab: 'library'}]},
+    {id: 'mat-create', label: 'Create New Material', to: ['materials', {tab: 'create'}]},
+    {id: 'mat-templates', label: 'Manage Templates', to: ['materials', {tab: 'templates'}]},
+    {id: 'mat-generated', label: 'Generated Documents', to: ['materials', {tab: 'generated'}]}]},
+  {id: 'stories', label: 'Stories', icon: 'openbook', items: [
+    {id: 'interview', label: 'Capture a Story', to: ['interview'], write: true},
+    {id: 'library', label: 'Story Library', to: ['library'], badge: 'due'},
+    {id: 'guide', label: 'Interview Guide', to: ['guide']}]},
+  {id: 'insights', label: 'Impact Insights', icon: 'chart', items: [
+    {id: 'insights', label: 'Impact Metrics', to: ['insights']},
+    {id: 'analytics', label: 'Program Analytics', to: ['analytics']},
+    {id: 'compare', label: 'Source Comparison', to: ['compare']}]},
+  {id: 'community', label: 'Community', icon: 'users', items: [
+    {id: 'submissions', label: 'Community Submissions', to: ['submissions'], badge: 'subs'},
+    {id: 'invite', label: 'Invite Contributors', to: ['invite']},
+    {id: 'review', label: 'Submission Review', to: ['submissions', {tab: 'pending_review'}]}]},
+  {id: 'settings', label: 'Settings', icon: 'gear', items: [
+    {id: 'team', label: 'User Management', to: ['settings', {section: 'team'}]},
+    {id: 'content-bank', label: 'Content Bank', to: ['content-bank']},
+    {id: 'canva', label: 'Canva Integration', to: ['canva']},
+    {id: 'settings', label: 'System Settings', to: ['settings']}]},
 ];
 const STORIES_ROUTES = ['library', 'story', 'backlog', 'followups'];
-function isCurrent(route, id){ if (id === 'library') return STORIES_ROUTES.includes(route.name); if (id === 'insights') return route.name === 'insights' || route.name === 'reports'; if (id === 'submissions') return route.name === 'submissions' || route.name === 'submission'; return route.name === id; }
+/* which nav item a route belongs to */
+function navItemOf(route){
+  const n = route.name, p = route.params || {};
+  if (n === 'home') return 'home';
+  if (n === 'materials') return 'mat-' + (p.tab || 'library');
+  if (n === 'material' || n === 'builder') return n === 'builder' ? 'mat-create' : 'mat-library';
+  if (n === 'template-edit') return 'mat-templates';
+  if (STORIES_ROUTES.includes(n)) return 'library';
+  if (n === 'interview' || n === 'record' || n === 'review') return 'interview';
+  if (n === 'insights' || n === 'reports') return 'insights';
+  if (n === 'submissions' || n === 'submission') return p.tab === 'pending_review' ? 'review' : 'submissions';
+  if (n === 'settings') return p.section === 'team' ? 'team' : 'settings';
+  return n;
+}
+function groupOf(itemId){ const g = NAV_GROUPS.find(x => x.id === itemId || (x.items || []).some(i => i.id === itemId)); return g ? g.id : ''; }
+function isCurrent(route, id){ return navItemOf(route) === id || (id === 'library' && STORIES_ROUTES.includes(route.name)); }
 function initialsOf(name){ const p = asStr(name).split(/[\s._-]+/).filter(Boolean); return ((p[0] || '?')[0] + (p[1] ? p[1][0] : '')).toUpperCase(); }
-function Sidebar(){
-  const {route, nav, readOnly, stories, caps, openSheet, subs} = useApp();
+function NavTree({onGo}){
+  const {route, nav, readOnly, stories, subs} = useApp();
   const due = countDue(stories);
   const pending = subs.filter(x => !x.is_test && (x.status === 'pending_review' || x.status === 'removal_requested')).length;
+  const curItem = navItemOf(route); const curGroup = groupOf(curItem);
+  const [open, setOpen] = useState(() => new Set(curGroup ? [curGroup] : []));
+  useEffect(() => { if (curGroup) setOpen(o => o.has(curGroup) ? o : new Set([...o, curGroup])); }, [curGroup]);
+  const go = to => { nav(to[0], to[1]); if (onGo) onGo(); };
+  const badge = b => { const n = b === 'due' ? due : b === 'subs' ? pending : 0; return n > 0 ? html`<span className="badge" title=${n + (b === 'due' ? ' follow-ups due' : ' waiting for review')}>${n}</span>` : null; };
+  return html`<nav className="side-nav" aria-label="Main">${NAV_GROUPS.map(g => {
+    if (!g.items) return html`<button key=${g.id} className="side-link" aria-current=${curItem === g.id ? 'page' : undefined} onClick=${() => go(g.to)}><${Icon} name=${g.icon} /><span>${g.label}</span></button>`;
+    const isOpen = open.has(g.id); const active = curGroup === g.id;
+    const total = g.items.reduce((n, i) => n + (i.badge === 'due' ? due : i.badge === 'subs' ? pending : 0), 0);
+    return html`<div key=${g.id} className=${'side-group' + (active ? ' active' : '')}>
+      <button className="side-link side-group-head" aria-expanded=${isOpen} onClick=${() => setOpen(o => { const n = new Set(o); if (n.has(g.id)) n.delete(g.id); else n.add(g.id); return n; })}><${Icon} name=${g.icon} /><span>${g.label}</span>${!isOpen && total ? html`<span className="badge">${total}</span>` : null}<span className="side-chev"><${Icon} name="chev" size=${16} /></span></button>
+      ${isOpen ? html`<div className="side-sub">${g.items.filter(i => !(readOnly && i.write)).map(i => html`<button key=${i.id} className="side-sublink" aria-current=${curItem === i.id ? 'page' : undefined} onClick=${() => go(i.to)}><span>${i.label}</span>${i.badge ? badge(i.badge) : null}</button>`)}</div>` : null}
+    </div>`;
+  })}</nav>`;
+}
+function Sidebar(){
+  const {nav, caps, openSheet} = useApp();
   const me = caps.me || {};
   const shown = asStr(me.name) || firstNameOf(window.__platform && window.__platform.email) || 'Signed in';
   return html`<aside className="sidebar">
-    <button className="side-logo" onClick=${() => nav('home')} aria-label="Overview"><${Brand} /></button>
-    <nav className="side-nav" aria-label="Main">
-      ${NAV.filter(n => !(readOnly && n.id === 'interview')).map(n => html`<button key=${n.id} className="side-link" aria-current=${isCurrent(route, n.id) ? 'page' : undefined} onClick=${() => nav(n.id)}><${Icon} name=${n.icon} /><span>${n.label}</span>${n.id === 'library' && due > 0 ? html`<span className="badge" title=${due + ' follow-ups due'}>${due}</span>` : null}${n.id === 'submissions' && pending > 0 ? html`<span className="badge" title=${pending + ' waiting for review'}>${pending}</span>` : null}</button>`)}
-    </nav>
+    <button className="side-logo" onClick=${() => nav('home')} aria-label="Home"><${Brand} /></button>
+    <p className="side-hub">ABG Impact Hub</p>
+    <${NavTree} />
     <div className="side-bottom">
-      <button className="side-link" aria-current=${route.name === 'settings' ? 'page' : undefined} onClick=${() => nav('settings')}><${Icon} name="gear" /><span>Settings</span></button>
       <div className="side-user"><${Avatar} name=${shown} photo=${me.photo} /><span className="side-user-text"><strong>${shown}</strong><small>${me.role || (window.__platform && window.__platform.email) || ''}</small></span></div>
       ${window.__platform ? html`<button className="side-link side-small" onClick=${() => confirmLogout(openSheet)}><${Icon} name="logout" size=${18} /><span>Log out</span></button>` : null}
     </div>
@@ -1839,22 +1901,24 @@ function Avatar({name, photo, big}){
   return photo ? html`<img className=${cls + ' avatar-img'} src=${photo} alt="" />` : html`<span className=${cls} aria-hidden="true">${initialsOf(name) || '?'}</span>`;
 }
 function TopBar(){
-  const {nav} = useApp();
+  const {nav, openSheet} = useApp();
+  const menu = () => openSheet(close => html`<div className="view nav-sheet"><${SheetHead} title="ABG Impact Hub" close=${close} /><${NavTree} onGo=${close} /></div>`);
   return html`<header className="topbar">
-    <button className="icon-btn topbar-logo" onClick=${() => nav('home')} aria-label="Overview"><${Brand} small=${true} /></button>
-    <button className="btn btn-quiet btn-sm topbar-guide" onClick=${() => nav('guide')}><${Icon} name="compass" size=${18} /> Guide</button>
+    <button className="icon-btn topbar-logo" onClick=${() => nav('home')} aria-label="Home"><${Brand} small=${true} /></button>
+    <button className="btn btn-quiet btn-sm topbar-guide" id="topbar-menu" onClick=${menu} aria-label="Menu"><${Icon} name="menu" size=${20} /> Menu</button>
   </header>`;
 }
 function TabBar(){
   const {route, nav, stories, readOnly} = useApp();
   const due = countDue(stories);
-  const tab = (id, label, icon) => html`<button key=${id} className="tab" aria-current=${isCurrent(route, id) ? 'page' : undefined} onClick=${() => nav(id)}><${Icon} name=${icon} size=${22} /><span>${label}</span>${id === 'library' && due > 0 ? html`<span className="badge">${due}</span>` : null}</button>`;
+  const cur = navItemOf(route); const grp = groupOf(cur);
+  const tab = (id, label, icon, to, on) => html`<button key=${id} className="tab" aria-current=${on ? 'page' : undefined} onClick=${() => nav(to[0], to[1])}><${Icon} name=${icon} size=${22} /><span>${label}</span>${id === 'library' && due > 0 ? html`<span className="badge">${due}</span>` : null}</button>`;
   return html`<nav className="tabbar" aria-label="Main">
-    ${tab('home', 'Overview', 'home')}
-    ${tab('library', 'Library', 'doc')}
+    ${tab('home', 'Home', 'home', ['home'], cur === 'home')}
+    ${tab('materials', 'Materials', 'layers', ['materials', {tab: 'library'}], grp === 'materials')}
     <button className="tab tab-rec" onClick=${() => nav('interview')} disabled=${readOnly} aria-label="Capture a Story"><span className="tab-blob"><${Icon} name="plus" size=${26} /></span><span>Capture</span></button>
-    ${tab('insights', 'Insights', 'chart')}
-    ${tab('settings', 'Settings', 'gear')}
+    ${tab('library', 'Stories', 'openbook', ['library'], grp === 'stories' && cur !== 'interview')}
+    ${tab('insights', 'Insights', 'chart', ['insights'], grp === 'insights')}
   </nav>`;
 }
 /* segmented tabs used to combine pages */
@@ -2347,55 +2411,69 @@ function RecentStoryRow({story, i}){
     <${Icon} name="chev" size=${18} />
   </div>`;
 }
+const ART_MATERIALS = '<ellipse cx="80" cy="96" rx="74" ry="42" fill="#C9EDE2"/><g transform="rotate(-6 70 70)"><rect x="30" y="22" width="78" height="96" rx="8" fill="#fff" stroke="#BFE3D8" stroke-width="2"/><rect x="40" y="34" width="34" height="26" rx="4" fill="#2ED3B4"/><path d="M42 58l10-12 8 8 6-6 8 10z" fill="#1E6E5E"/><path d="M80 38h20M80 46h20M80 54h14M42 70h56M42 78h46M42 86h30" stroke="#C8D3D1" stroke-width="3" stroke-linecap="round"/><path d="M78 108v-8M86 108v-14M94 108v-20M102 108v-11" stroke="#1E6E5E" stroke-width="5" stroke-linecap="round"/></g><path d="M118 18l6-10M128 26l10-6M104 14l1-11" stroke="#1E6E5E" stroke-width="3" stroke-linecap="round"/>';
+const ART_CAPTURE = '<ellipse cx="80" cy="92" rx="72" ry="48" fill="#EBD3F2"/><path d="M80 44c-14-10-34-12-52-6v62c18-6 38-4 52 6 14-10 34-12 52-6V38c-18-6-38-4-52 6z" fill="#fff" stroke="#8B3F98" stroke-width="4" stroke-linejoin="round"/><path d="M80 44v62" stroke="#8B3F98" stroke-width="4"/><path d="M38 56h28M38 66h28M38 76h24M38 86h28" stroke="#C9B6CF" stroke-width="3" stroke-linecap="round"/><path d="M106 84c-12-8-18-14-18-22a8 8 0 0 1 18-4 8 8 0 0 1 18 4c0 8-6 14-18 22z" fill="none" stroke="#8B3F98" stroke-width="4" stroke-linejoin="round"/><path d="M120 22l5-9M130 30l9-5M108 18l1-10" stroke="#8B3F98" stroke-width="3" stroke-linecap="round"/>';
+function programYearRange(offset){ const d = new Date(); const y = (d.getMonth() >= 6 ? d.getFullYear() : d.getFullYear() - 1) + (offset || 0); return {from: new Date(y, 6, 1).toISOString(), to: new Date(y + 1, 6, 1).toISOString(), label: 'Jul ' + y + ' – Jun ' + (y + 1)}; }
+const GLANCE_RANGES = [{id: 'py', label: 'This Program Year'}, {id: 'lpy', label: 'Last Program Year'}, {id: 'all', label: 'All time'}];
 function HomeView(){
-  const {caps, stories: allStoriesShown, storiesLoaded, nav, readOnly, subs, subsState, isAdmin} = useApp();
+  const app = useApp();
+  const {caps, stories: allStoriesShown, storiesLoaded, nav, readOnly, mat} = app;
   const stories = allStoriesShown.filter(reportable);
-  const pending = subs.filter(x => x.status === 'pending_review' && !x.is_test).length;
   const first = firstNameOf(caps.me && caps.me.name) || firstNameOf(window.__platform && window.__platform.email) || firstNameOf(caps.me && caps.me.email);
-  const recent = stories.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5);
-  const studentsN = studentProfiles(stories).length;
-  const staffN = staffProfiles(stories).length;
-  const outcomesN = stories.reduce((t, s) => t + outcomeCount(s), 0);
-  const stat = (icon, tone, label, value, sub, to) => html`<button className="stat-card" onClick=${() => nav(to)}><span className=${'stat-ic tone-' + tone}><${Icon} name=${icon} size=${26} /></span><span className="stat-text"><span className="stat-label">${label}</span><b className="tnum">${storiesLoaded ? value : '–'}</b><small className="muted">${sub}</small></span></button>`;
-  return html`<div className="view home">
+  const [range, setRange] = useState(() => lsGet('abg-glance') || 'py');
+  useEffect(() => { lsSet('abg-glance', range); }, [range]);
+  const win = range === 'py' ? programYearRange(0) : range === 'lpy' ? programYearRange(-1) : null;
+  const prev = range === 'py' ? programYearRange(-1) : range === 'lpy' ? programYearRange(-2) : null;
+  const inWin = (s, w) => !w || ((s.createdAt || '') >= w.from && (s.createdAt || '') < w.to);
+  const stat = list => ({stories: list.length, students: studentProfiles(list).length, outcomes: list.reduce((t, s) => t + outcomeCount(s), 0)});
+  const cur = stat(stories.filter(s => inWin(s, win)));
+  const before = prev ? stat(stories.filter(s => inWin(s, prev))) : null;
+  const delta = k => { if (!before || !before[k]) return null; const d = Math.round(100 * (cur[k] - before[k]) / before[k]); return html`<span className=${'glance-delta ' + (d >= 0 ? 'up' : 'down')}>${d >= 0 ? '↑' : '↓'} ${d >= 0 ? '+' : ''}${d}%</span><small className="muted">vs. prior year</small>`; };
+  const glance = (icon, tone, label, k, to) => html`<button className="stat-card glance" onClick=${() => nav(to)}><span className=${'stat-ic tone-' + tone}><${Icon} name=${icon} size=${28} /></span><span className="stat-text"><span className="stat-label">${label}</span><span className="glance-row"><b className="tnum">${storiesLoaded ? cur[k] : '–'}</b>${storiesLoaded ? delta(k) : null}</span></span></button>`;
+  const sig = M && mat ? M.homeSignals(app) : {items: [], recent: [], when: x => x};
+  const total = sig.items.reduce((n, i) => n + i.n, 0);
+  return html`<div className="view home hub-home">
     <header className="hello">
-      <p className="eyebrow">Impact Journal</p>
+      <p className="eyebrow hub-eyebrow">ABG Impact Hub</p>
       <h1>${first ? 'Welcome back, ' + first : 'Welcome back'} <span className="wave" aria-hidden="true">👋</span></h1>
-      <p className="lede">Every student has a story worth telling. Capture meaningful moments, reflect on student progress, and help show the impact of ABG's work.</p>
+      <p className="lede">Capture stories. Measure impact. Share results.</p>
     </header>
     ${readOnly ? html`<p className="notice small"><strong>View-only access.</strong> Ask for Editor access to add stories.</p>` : null}
-    <section className="hero-card" aria-label="Capture a story">
-      <div className="hero-copy">
-        <p className="hero-eyebrow">Rooted in story. Driven by love.</p>
-        <h2 className="hero-title">Let's capture a story.</h2>
-        <p className="hero-text">Share a student's or staff member's experience. We'll guide you through the details and outcomes that matter.</p>
-        <div className="hero-actions"><button className="btn btn-purple btn-lg" disabled=${readOnly} onClick=${() => nav('interview')}><${Icon} name="plus" size=${20} /> Capture a New Story</button>
-        <button className="btn btn-quiet" onClick=${() => nav('guide')}><${Icon} name="compass" size=${18} /> Interview Guide</button></div>
-      </div>
-      <${PaletteArt} />
-    </section>
-    ${stories.some(x => x.demo) ? html`<p className="notice small demo-note"><${DemoPill} /> <span>Stories marked Demo are fictional examples showing how a recorded story becomes impact evidence. <button className="link-btn" onClick=${() => nav('insights')}>See them in Impact Insights</button> or <button className="link-btn" onClick=${() => nav('settings')}>manage demo stories</button>.</span></p>` : null}
-    <div className="stat-row">
-      ${stat('openbook', 'purple', 'Stories captured', stories.length, 'Journal entries', 'library')}
-      ${stat('users', 'teal', 'Students featured', studentsN, 'Unique students', 'library')}
-      ${staffN ? stat('briefcase', 'blue', 'Staff featured', staffN, 'Unique staff members', 'insights') : null}
-      ${stat('bars', 'orange', 'Outcomes recorded', outcomesN, 'Reported outcomes', 'insights')}
+    <div className="hub-actions">
+      <section className="hub-card hub-teal" aria-label="Impact Materials">
+        <svg className="hub-art" viewBox="0 0 160 140" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{__html: ART_MATERIALS}}></svg>
+        <div className="hub-copy"><h2>Impact Materials</h2><p>Create reports, presentations, and stakeholder materials using ABG's stories and data.</p>
+          <button className="btn btn-teal btn-lg" id="home-materials" onClick=${() => nav('materials', {tab: 'library'})}>Explore Materials <span aria-hidden="true">→</span></button></div>
+      </section>
+      <section className="hub-card hub-purple" aria-label="Capture a Story">
+        <svg className="hub-art" viewBox="0 0 160 140" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{__html: ART_CAPTURE}}></svg>
+        <div className="hub-copy"><h2>Capture a Story</h2><p>Document meaningful experiences and outcomes from ABG's programs.</p>
+          <button className="btn btn-purple btn-lg" id="home-capture" disabled=${readOnly} onClick=${() => nav('interview')}>Capture a Story <span aria-hidden="true">→</span></button></div>
+      </section>
     </div>
-    ${subsState !== 'none' ? html`<section className="card home-community">
-      <div className="hc-text"><h2>Community stories</h2>
-        <p className="small muted">${subsState === 'missing' ? 'The Share Your Story page is not set up on the server yet.' : pending ? pending + ' submission' + (pending === 1 ? '' : 's') + ' waiting for review.' : 'Invite students, alumni, staff, parents and volunteers to share their own stories.'}</p></div>
-      <div className="row-btns">
-        <button className="btn btn-ghost btn-sm" id="home-subs" onClick=${() => nav('submissions')}><${Icon} name="inbox" size=${16} /> Community Submissions${pending ? html` <span className="badge">${pending}</span>` : null}</button>
-        <button className="btn btn-ghost btn-sm" onClick=${() => nav('invite')}><${Icon} name="share" size=${16} /> Invite Contributors</button>
-        <button className="btn btn-ghost btn-sm" onClick=${() => nav('compare')}><${Icon} name="scale" size=${16} /> Source Comparison</button>
+    ${stories.some(x => x.demo) ? html`<p className="notice small demo-note"><${DemoPill} /> <span>Stories marked Demo are fictional examples. They count here and in Impact Insights so you can explore, but never appear in reports, exports or Impact Materials. <button className="link-btn" onClick=${() => nav('settings')}>Manage demo stories</button></span></p>` : null}
+    <section className="glance-sec" aria-label="Impact at a Glance">
+      <div className="sec-head"><h2>Impact at a Glance</h2>
+        <label className="range-pick"><${Icon} name="calendar" size=${18} /><select id="glance-range" aria-label="Period" value=${range} onChange=${e => setRange(e.target.value)}>${GLANCE_RANGES.map(r => html`<option key=${r.id} value=${r.id}>${r.label}${r.id === 'py' ? ' (' + programYearRange(0).label + ')' : r.id === 'lpy' ? ' (' + programYearRange(-1).label + ')' : ''}</option>`)}</select></label></div>
+      <div className="stat-row">
+        ${glance('openbook', 'teal', 'Stories Captured', 'stories', 'library')}
+        ${glance('users', 'teal', 'Students Featured', 'students', 'library')}
+        ${glance('bars', 'orange', 'Outcomes Recorded', 'outcomes', 'insights')}
       </div>
-    </section>` : null}
-    <section className="recent">
-      <div className="sec-head"><h2>Recent Stories</h2>${stories.length ? html`<button className="btn btn-quiet btn-sm view-all" onClick=${() => nav('library')}>View all <span aria-hidden="true">→</span></button>` : null}</div>
-      ${!storiesLoaded ? html`<div className="skeleton"></div>`
-        : recent.length ? html`<div className="recent-list">${recent.map((s, i) => html`<${RecentStoryRow} key=${s.id} story=${s} i=${i} />`)}</div>`
-        : html`<div className="empty"><h3>No stories yet</h3><p className="muted">Your first story will show up here with its outcomes.</p></div>`}
+      <p className="small muted">Counts of stories documented in the journal ${win ? 'from ' + win.label : 'so far'}, using the same rules as Impact Insights: approved community stories count; tests never do.</p>
     </section>
+    <div className="hub-two">
+      <section className="card hub-panel" aria-label="Needs Your Attention">
+        <div className="sec-head"><h2>Needs Your Attention ${total ? html`<span className="hub-count">${total}</span>` : null}</h2></div>
+        ${sig.items.length ? html`<div className="attn-list">${sig.items.map(i => html`<button key=${i.id} className="attn-row" data-attn=${i.id} onClick=${() => nav(i.to[0], i.to[1])}><span className=${'attn-ic tone-' + i.tone}><${Icon} name=${i.icon} size=${20} /></span><span className="attn-text">${i.text}</span><span className="hub-count">${i.n}</span><${Icon} name="chev" size=${18} /></button>`)}</div>`
+          : html`<div className="empty hub-empty"><${Icon} name="check" size=${26} /><p className="muted">You're all caught up.</p></div>`}
+      </section>
+      <section className="card hub-panel" aria-label="Recent Activity">
+        <div className="sec-head"><h2>Recent Activity</h2>${sig.recent.length ? html`<button className="btn btn-quiet btn-sm view-all" onClick=${() => nav('materials', {tab: 'library'})}>View All <span aria-hidden="true">→</span></button>` : null}</div>
+        ${!storiesLoaded ? html`<div className="skeleton"></div>` : sig.recent.length ? html`<div className="act-list">${sig.recent.map((a, i) => html`<button key=${i} className="act-row" onClick=${() => nav(a.to[0], a.to[1])}><span className=${'attn-ic tone-' + (a.icon === 'openbook' ? 'purple' : 'teal')}><${Icon} name=${a.icon} size=${20} /></span><span className="act-main"><strong>${a.title}</strong><small className="muted">${a.sub}</small></span>${a.pill ? html`<span className=${'pill tone-' + a.pill[1]}>${a.pill[0]}</span>` : html`<span></span>`}<small className="muted act-when">${sig.when(a.at)}</small></button>`)}</div>`
+          : html`<div className="empty hub-empty"><p className="muted">New stories, submissions and materials will show up here.</p></div>`}
+      </section>
+    </div>
   </div>`;
 }
 
@@ -4359,9 +4437,9 @@ function MetricsCardView({story, readOnly, onEdit, embedded}){
    the same draft, review and evidence model as Kyle's interviews. The database only lets administrators change
    a submission, and every status change is recorded in its history. */
 function SubStatusPill({status}){ const s = byId(SUB_STATUS, status) || {label: status, tone: 'neutral'}; return html`<${Pill} tone=${s.tone} dot=${true}>${s.label}<//>`; }
-function SubmissionsView(){
+function SubmissionsView({tab: initialTab}){
   const {subs, subsState, reloadSubs, nav, isAdmin} = useApp();
-  const [tab, setTab] = useState('pending_review');
+  const [tab, setTab] = useState(initialTab || 'pending_review');
   useEffect(() => { reloadSubs(); }, []);
   const real = subs.filter(x => !x.is_test), tests = subs.filter(x => x.is_test);
   const count = id => real.filter(x => x.status === id).length;
@@ -5850,7 +5928,7 @@ function ItemRow({color, name, desc, onEdit, onDelete, readOnly, deleteLabel}){
     </span>`}
   </div>`;
 }
-function SettingsView(){
+function SettingsView({section}){
   const {caps, settings, stories, allStories, allStudents, allStaff, safeWrite, readOnly, updateMe, openSheet, showToast, role: myRole, isAdmin} = useApp();
   /* application settings (programs, schools, outcome categories, demo data) are for administrators */
   const lock = readOnly || !isAdmin;
@@ -5886,6 +5964,7 @@ function SettingsView(){
     return () => io.disconnect();
   }, []);
   /* while a jump scrolls past other sections, keep the chosen one highlighted */
+  useEffect(() => { if (section) setTimeout(() => jump(section), 60); }, []);
   const jump = id => {
     setActive(id); jumping.current = Date.now() + 2500;
     const done = () => { jumping.current = 0; setActive(id); };
@@ -6108,10 +6187,22 @@ function SheetHost({sheet, close}){
   useEffect(() => { const k = e => { if (e.key === 'Escape') close(); }; document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k); }, []);
   return html`<div className="sheet-backdrop" onMouseDown=${e => { if (e.target === e.currentTarget) close(); }}><div className="sheet" role="dialog" aria-modal="true">${sheet.render(close)}</div></div>`;
 }
+/* Impact Materials (src/materials): built with the journal's own components, and the journal's own consent rules */
+const MAT_HELPERS = {isTest, isCommunity, reportable, externalName, externalEvidence, needsSensitiveCare, scrubName, needsRedaction,
+  observerLabel: e => (e.observer ? labelOf(OBSERVERS, e.observer) : ''), whenText: s => fmtEventDate(s.eventDate), sourceLabel: s => sourceLabel(s),
+  journalCounts: list => { const r = (list || []).filter(reportable).filter(x => !x.demo); return {stories: r.length, students: studentProfiles(r).length, outcomes: r.reduce((t, x) => t + outcomeCount(x), 0)}; },
+  audienceEmphasis: tag => ((byId(AUDIENCES, tag) || {}).emphasis || ''), aiErrorMessage, interviewDrafts: () => ivDrafts().length};
+const M = createMaterialsUI({html, useState, useEffect, useMemo, useRef, useCallback, useApp, Icon, Pill, Field, SheetHead, ConfirmSheet, PageTabs, fmtDate, asStr, trunc, h: MAT_HELPERS});
+function AnalyticsView(){
+  const {nav} = useApp();
+  return html`<div className="view"><div className="ins-top"><div><p className="eyebrow">Impact Insights</p><h1>Program Analytics</h1><p className="muted">Milestones, the student metrics card, themes and evidence across every story.</p></div><button className="btn btn-ghost btn-sm" onClick=${() => nav('reports')}><${Icon} name="file" size=${16} /> Reports and exports</button></div><${InsightsView} embedded=${true} /></div>`;
+}
 function initialRoute(){
   let h = '';
   try { h = (location.hash || '').replace('#', ''); } catch (e) {}
-  const ok = ['record', 'library', 'insights', 'followups', 'reports', 'backlog', 'guide'];
+  const ok = ['record', 'library', 'insights', 'followups', 'reports', 'backlog', 'guide', 'materials', 'content-bank', 'canva', 'analytics'];
+  /* back from Canva's sign-in page: #canva=connected (or declined, expired, error) */
+  if (/^canva=/.test(h)) return {name: 'canva', params: {result: h.slice(6)}, key: 1};
   return {name: h === 'record' ? 'interview' : (ok.includes(h) ? h : 'home'), params: {}, key: 1};
 }
 function App(){
@@ -6199,6 +6290,28 @@ function App(){
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', v); };
   }, [caps.status]);
   const updateMe = useCallback(patch => setCaps(c => Object.assign({}, c, {me: Object.assign({}, c.me, patch)})), []);
+  /* Impact Materials: categories, templates, materials, activity and the Content Bank (row-level security decides access) */
+  const [matRaw, setMatRaw] = useState({state: 'loading'});
+  const [matRev, setMatRev] = useState(0);
+  const reloadMat = useCallback(async () => {
+    const api = window.__platform && window.__platform.materials;
+    if (!api) { setMatRaw({state: 'missing'}); return; }
+    try {
+      const [base, materials, activity, content] = await Promise.all([api.load(), api.materials(), api.activity(), api.content()]);
+      setMatRaw(Object.assign({state: 'ready'}, base, {materials, activity, content})); setMatRev(r => r + 1);
+    } catch (e) { setMatRaw(x => Object.assign({}, x, {state: e && e.missing ? 'missing' : x.state === 'ready' ? 'ready' : 'error'})); }
+  }, []);
+  useEffect(() => {
+    if (caps.status !== 'ready') return;
+    reloadMat();
+    const t = setInterval(reloadMat, 120000);
+    const v = () => { if (!document.hidden) reloadMat(); };
+    document.addEventListener('visibilitychange', v);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', v); };
+  }, [caps.status]);
+  const matModel = useMemo(() => buildModel(matRaw), [matRaw]);
+  const mat = useMemo(() => Object.assign({}, matRaw, {model: matModel, reload: reloadMat, api: window.__platform && window.__platform.materials, rev: matRev}), [matRaw, matModel, matRev]);
+  useEffect(() => { const r = (route.params || {}).result; if (route.name === 'canva' && r) { showToast(r === 'connected' ? 'Canva is connected.' : r === 'declined' ? 'Canva access was not granted.' : r === 'expired' ? 'The Canva sign-in took too long. Try again.' : "Canva couldn't be connected. Try again."); try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (e) {} } }, []);
   /* fictional demo stories: added once so a new journal has something to explore; hidden or removed from Settings */
   useEffect(() => {
     if (caps.status !== 'ready' || !storiesLoaded || !settingsLoaded || role !== 'admin' || readOnly || demoSeeded.current || window.__ABG_NO_DEMO_SEED) return;
@@ -6230,7 +6343,7 @@ function App(){
   const shownStudents = useMemo(() => demoHidden ? students.filter(x => !x.demo) : students, [students, demoHidden]);
   const shownStaff = useMemo(() => demoHidden ? staffPeople.filter(x => !x.demo) : staffPeople, [staffPeople, demoHidden]);
   const ctx = {caps, updateMe, stories: shownStories, testStories, storyById, students: shownStudents, staffPeople: shownStaff, allStaff: staffPeople, subs, subsState, reloadSubs, allStories, allStudents, backlog, backlogLoaded, storiesLoaded, metrics, settings, route, nav, openSheet, closeSheet, showToast, safeWrite,
-    readOnly, role: role || 'user', isAdmin: role === 'admin'};
+    readOnly, role: role || 'user', isAdmin: role === 'admin', mat};
   const focus = caps.status === 'ready' && (route.name === 'record' || route.name === 'review' || route.name === 'interview');
   let content;
   if (caps.status === 'loading') content = html`<div className="boot"><div className="boot-mark"></div><p>Opening ABG Impact Journal…</p></div>`;
@@ -6247,9 +6360,16 @@ function App(){
       case 'backlog': content = html`<${StoriesView} key=${route.key} tab="list" />`; break;
       case 'followups': content = html`<${StoriesView} key=${route.key} tab="followups" />`; break;
       case 'reports': content = html`<${DashboardView} key=${route.key} tab="reports" />`; break;
-      case 'settings': content = html`<${SettingsView} />`; break;
+      case 'settings': content = html`<${SettingsView} key=${route.key} section=${p.section} />`; break;
+      case 'materials': content = html`<${M.MaterialsView} key=${route.key} params=${p} />`; break;
+      case 'builder': content = html`<${M.MaterialsView} key=${route.key} params=${Object.assign({}, p, {tab: 'create'})} />`; break;
+      case 'material': content = html`<${M.MaterialView} key=${p.id} id=${p.id} />`; break;
+      case 'template-edit': content = html`<${M.TemplateEditor} key=${route.key} params=${p} />`; break;
+      case 'content-bank': content = html`<${M.ContentBankView} key=${route.key} params=${p} />`; break;
+      case 'canva': content = html`<${M.CanvaView} key=${route.key} />`; break;
+      case 'analytics': content = html`<${AnalyticsView} key=${route.key} />`; break;
       case 'guide': content = html`<${GuideView} key=${route.key} />`; break;
-      case 'submissions': content = html`<${SubmissionsView} key=${route.key} />`; break;
+      case 'submissions': content = html`<${SubmissionsView} key=${route.key} tab=${p.tab} />`; break;
       case 'submission': content = html`<${SubmissionView} key=${p.id} id=${p.id} />`; break;
       case 'compare': content = html`<${CompareView} key=${route.key} a=${p.a} b=${p.b} />`; break;
       case 'invite': content = html`<${InviteView} key=${route.key} />`; break;

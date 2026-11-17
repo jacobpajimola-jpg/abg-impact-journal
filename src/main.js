@@ -1,7 +1,7 @@
 import './globals.js';
 import './styles.css';
 import { createClient } from '@supabase/supabase-js';
-import { makeDb, makeUser, makeSample, makeAudio, makeSpeech, makeAdmin, makeRole, makeCommunityAdmin, makePortalAccess, downloads } from './platform.js';
+import { makeDb, makeUser, makeSample, makeAudio, makeSpeech, makeAdmin, makeRole, makeCommunityAdmin, makePortalAccess, makeMaterials, downloads } from './platform.js';
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -217,6 +217,7 @@ async function boot(){
       signOut: async () => { leaving = true; await keeper.forget(); try { await sb.auth.signOut({scope: 'local'}); } catch (e) {} window.location.replace(window.location.pathname); }};
     window.__platform.community = makeCommunityAdmin(sb, URL_, KEY);
     window.__platform.canPreviewPortal = makePortalAccess(sb);
+    window.__platform.materials = makeMaterials(sb, URL_, KEY);
     window.__platform.openCommunityPreview = () => { lsSet('abg-portal', 'community'); window.location.assign('/share#preview'); };
     lsSet('abg-portal', 'staff');
     window.claude = {use: async name => caps[name] || null};

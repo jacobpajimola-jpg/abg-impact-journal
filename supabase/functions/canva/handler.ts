@@ -1,0 +1,292 @@
+// Canva connection for ABG Impact Materials (bundled with entry.ts into index.ts by scripts/build-canva.mjs).
+//
+// One Canva account is connected for the organization, by an administrator, with Canva's OAuth (authorization code +
+// PKCE). Tokens are encrypted (AES-GCM, key from the CANVA_TOKEN_KEY secret) and stored in public.canva_connection,
+// which has no access rules, so only this function can read them. Staff never see a token.
+//
+// What it does, all through Canva's official REST API (https://api.canva.com/rest/v1):
+//   status        anyone on staff: is Canva set up and connected?
+//   connect       admin: returns Canva's sign-in page address; Canva sends the admin back to GET /canva/callback
+//   disconnect    admin
+//   designs       admin: the connected account's designs, to pick a template
+//   design        admin: one design (by id or Canva link) and its data fields (Get design dataset)
+//   autofill      staff: start a job that copies the master design and fills its data fields ("create_from_design"),
+//                 so the master is never changed. Images are uploaded to Canva as assets first.
+//   job           staff: check an autofill job; on success returns the new design's edit and view links
+//   export        staff: start a PDF export of a generated design
+//   export_job    staff: check an export; on success the PDF is saved to the private materials bucket
+// Autofill needs the connected Canva user to be on Canva Pro, Teams, Enterprise or Canva for Nonprofits, and the
+// master design must have data fields (connected in Canva's Bulk Create / data autofill panel).
+
+const API = 'https://api.canva.com/rest/v1';
+const AUTHORIZE = 'https://www.canva.com/api/oauth/authorize';
+export const SCOPES = 'design:content:read design:content:write design:meta:read asset:read asset:write';
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+};
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {status, headers: {...CORS, 'Content-Type': 'application/json'}});
+const fail = (error: string, code: string, status = 400) => json({error, code}, status);
+
+export type Env = {clientId: string; clientSecret: string; tokenKey: string; redirectUri: string; siteUrl: string};
+// deno-lint-ignore no-explicit-any
+export type Deps = {db: any; env: Env; fetch: typeof fetch; getUser: (jwt: string) => Promise<{email: string; banned: boolean} | null>; now?: () => number; sleep?: (ms: number) => Promise<void>};
+
+/* ---------- helpers ---------- */
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = (u: Uint8Array) => { let s = ''; u.forEach(c => { s += String.fromCharCode(c); }); return btoa(s); };
+const unb64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const b64url = (u: Uint8Array) => b64(u).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const random = (n: number) => { const u = new Uint8Array(n); crypto.getRandomValues(u); return b64url(u); };
+async function aesKey(secret: string){ return crypto.subtle.importKey('raw', await crypto.subtle.digest('SHA-256', enc.encode(secret)), 'AES-GCM', false, ['encrypt', 'decrypt']); }
+export async function seal(secret: string, text: string){
+  const iv = new Uint8Array(12); crypto.getRandomValues(iv);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({name: 'AES-GCM', iv}, await aesKey(secret), enc.encode(text)));
+  return 'v1.' + b64(iv) + '.' + b64(ct);
+}
+export async function open(secret: string, sealed: string){
+  const [v, iv, ct] = String(sealed).split('.');
+  if (v !== 'v1') throw new Error('bad token format');
+  return dec.decode(await crypto.subtle.decrypt({name: 'AES-GCM', iv: unb64(iv)}, await aesKey(secret), unb64(ct)));
+}
+export function designIdFrom(input: string){
+  const s = String(input || '').trim();
+  const m = s.match(/canva\.com\/design\/([A-Za-z0-9_-]{6,})/) || s.match(/^([A-Za-z0-9_-]{6,})$/);
+  return m ? m[1] : '';
+}
+const SAFE_PATH = /^generated\/[0-9a-f-]{36}\/[\w.-]+$|^media\/[\w./-]+$/;
+
+export async function handle(req: Request, deps: Deps): Promise<Response> {
+  const {db, env} = deps;
+  const now = deps.now || (() => Date.now());
+  const sleep = deps.sleep || ((ms: number) => new Promise(r => setTimeout(r, ms)));
+  if (req.method === 'OPTIONS') return new Response('ok', {headers: CORS});
+  const url = new URL(req.url);
+  const configured = !!(env.clientId && env.clientSecret && env.tokenKey);
+  const back = (q: string) => new Response(null, {status: 302, headers: {Location: env.siteUrl.replace(/\/+$/, '') + '/app#canva=' + q}});
+
+  /* Canva sends the administrator back here after they approve access */
+  if (req.method === 'GET' && /\/callback\/?$/.test(url.pathname)) {
+    const state = url.searchParams.get('state') || '';
+    if (url.searchParams.get('error')) return back('declined');
+    const code = url.searchParams.get('code') || '';
+    if (!configured || !state || !code) return back('error');
+    const {data: st} = await db.from('canva_oauth_states').select('state, verifier, email, created_at').eq('state', state).maybeSingle();
+    await db.from('canva_oauth_states').delete().eq('state', state);
+    if (!st || now() - new Date(st.created_at).getTime() > 15 * 60 * 1000) return back('expired');
+    const tok = await tokenRequest(deps, {grant_type: 'authorization_code', code, code_verifier: st.verifier, redirect_uri: env.redirectUri});
+    if (!tok) return back('error');
+    await saveTokens(deps, tok, st.email, true);
+    return back('connected');
+  }
+  if (req.method !== 'POST') return fail('Use POST', 'method', 405);
+
+  const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  const who = jwt ? await deps.getUser(jwt) : null;
+  if (!who || who.banned) return fail('Not signed in', 'session_expired', 401);
+  const me = who.email.toLowerCase();
+  const {data: roleRow} = await db.from('user_roles').select('role').eq('email', me).maybeSingle();
+  const isAdmin = !!roleRow && roleRow.role === 'admin';
+  // deno-lint-ignore no-explicit-any
+  let body: any = {};
+  try { body = await req.json(); } catch { return fail('Invalid request body', 'bad_request'); }
+  const action = String(body.action || '');
+  const adminOnly = ['connect', 'disconnect', 'designs', 'design'];
+  if (adminOnly.includes(action) && !isAdmin) return fail('Only administrators can manage the Canva connection and Canva templates.', 'forbidden', 403);
+
+  const {data: conn} = await db.from('canva_connection').select('id, expires_at, connected_by, connected_at, scopes, canva_user').eq('id', 1).maybeSingle();
+  if (action === 'status') return json({configured, connected: !!conn, connectedBy: conn ? conn.connected_by : null, connectedAt: conn ? conn.connected_at : null, redirectUri: env.redirectUri, scopes: SCOPES});
+  if (!configured) return fail('Canva is not set up yet: add CANVA_CLIENT_ID, CANVA_CLIENT_SECRET and CANVA_TOKEN_KEY to the Edge Function secrets.', 'not_configured', 503);
+
+  if (action === 'connect') {
+    const verifier = random(48);
+    const challenge = b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(verifier))));
+    const state = random(24);
+    await db.from('canva_oauth_states').delete().lt('created_at', new Date(now() - 60 * 60 * 1000).toISOString());
+    const {error} = await db.from('canva_oauth_states').insert({state, verifier, email: me});
+    if (error) return fail('Could not start the Canva sign-in.', 'server_error', 500);
+    const q = new URLSearchParams({code_challenge: challenge, code_challenge_method: 'S256', scope: SCOPES, response_type: 'code', client_id: env.clientId, state, redirect_uri: env.redirectUri});
+    return json({url: AUTHORIZE + '?' + q.toString()});
+  }
+  if (action === 'disconnect') {
+    await db.from('canva_connection').delete().eq('id', 1);
+    return json({ok: true});
+  }
+  if (!conn) return fail('Canva is not connected. An administrator can connect it in Settings > Canva integration.', 'not_connected', 409);
+
+  // deno-lint-ignore no-explicit-any
+  const canva = async (path: string, init: RequestInit = {}): Promise<{ok: boolean; status: number; data: any}> => {
+    const token = await accessToken(deps);
+    if (!token) return {ok: false, status: 401, data: null};
+    const res = await deps.fetch(API + path, {...init, headers: {Authorization: 'Bearer ' + token, ...(init.body && !(init.body instanceof Uint8Array) ? {'Content-Type': 'application/json'} : {}), ...(init.headers || {})}});
+    const data = await res.json().catch(() => null);
+    return {ok: res.ok, status: res.status, data};
+  };
+  // deno-lint-ignore no-explicit-any
+  const canvaError = (r: {status: number; data: any}, what: string) => {
+    const msg = String((r.data && (r.data.message || (r.data.error && r.data.error.message))) || '');
+    if (r.status === 401) return fail('The Canva connection has expired or was removed. An administrator needs to connect Canva again.', 'canva_reconnect', 409);
+    if (r.status === 403) return fail(what + ': Canva refused (' + (msg || 'permission denied') + '). Autofill needs the connected Canva account to be on Canva Pro, Teams, Enterprise or Canva for Nonprofits, and the design must be one it can open.', 'canva_forbidden', 403);
+    if (r.status === 404) return fail(what + ': not found in the connected Canva account.', 'canva_not_found', 404);
+    if (r.status === 429) return fail('Canva is busy (rate limit). Wait a minute and try again.', 'rate_limited', 429);
+    return fail(what + ': Canva error' + (msg ? ' (' + msg + ')' : '') + '.', 'canva_error', 502);
+  };
+
+  if (action === 'designs') {
+    const q = new URLSearchParams();
+    if (body.query) q.set('query', String(body.query).slice(0, 255));
+    if (body.continuation) q.set('continuation', String(body.continuation));
+    q.set('ownership', 'any'); q.set('sort_by', 'modified_descending');
+    const r = await canva('/designs?' + q.toString());
+    if (!r.ok) return canvaError(r, 'Listing designs');
+    // deno-lint-ignore no-explicit-any
+    return json({designs: (r.data.items || []).map((d: any) => ({id: d.id, title: d.title || 'Untitled design', thumbnail: d.thumbnail ? d.thumbnail.url : null, pages: d.page_count || null, updatedAt: d.updated_at || null, editUrl: d.urls ? d.urls.edit_url : null})), continuation: r.data.continuation || null});
+  }
+  if (action === 'design') {
+    const id = designIdFrom(body.design || body.designId);
+    if (!id) return fail('Paste a Canva design link (canva.com/design/...) or a design ID.', 'bad_request');
+    const d = await canva('/designs/' + encodeURIComponent(id));
+    if (!d.ok) return canvaError(d, 'Opening the design');
+    const ds = await canva('/designs/' + encodeURIComponent(id) + '/dataset');
+    if (!ds.ok && ds.status !== 404) return canvaError(ds, 'Reading the design\'s data fields');
+    const fields = ds.ok && ds.data && ds.data.dataset ? Object.entries(ds.data.dataset).map(([name, v]) => ({name, type: (v as {type: string}).type})) : [];
+    const x = d.data.design || {};
+    return json({design: {id: x.id || id, title: x.title || 'Untitled design', thumbnail: x.thumbnail ? x.thumbnail.url : null, pages: x.page_count || null, editUrl: x.urls ? x.urls.edit_url : null, viewUrl: x.urls ? x.urls.view_url : null}, fields,
+      note: fields.length ? '' : 'This design has no data fields yet. In Canva, open the design, connect data fields to the text and images that should change (Apps > Bulk Create or Data autofill), then load it again.'});
+  }
+
+  /* the template version and (for real documents) the material it is for: checked on the server */
+  // deno-lint-ignore no-explicit-any
+  const loadVersion = async (): Promise<any> => {
+    const {data: v} = await db.from('mat_template_versions').select('id, family_id, source_type, canva_design_id, inspection, fields, config_status, archived_at').eq('id', String(body.versionId || '')).maybeSingle();
+    return v;
+  };
+  // deno-lint-ignore no-explicit-any
+  const materialOk = async (materialId: string, v: any) => {
+    const {data: m} = await db.from('mat_materials').select('id, template_version_id, created_by, status').eq('id', materialId).maybeSingle();
+    if (!m || m.template_version_id !== v.id) return 'This material does not use that template version.';
+    if (m.status === 'approved' || m.status === 'archived') return 'This material is ' + m.status + ' and preserved as it is.';
+    if (!isAdmin && m.created_by !== me) return 'Only the person who created this material, or an administrator, can generate it.';
+    return '';
+  };
+
+  if (action === 'autofill') {
+    const v = await loadVersion();
+    if (!v || v.source_type !== 'canva') return fail('That Canva template was not found.', 'bad_request');
+    if (body.test) { if (!isAdmin) return fail('Only administrators can test templates.', 'forbidden', 403); }
+    else {
+      if (v.config_status !== 'approved' || v.archived_at) return fail('This template version is not approved for use.', 'bad_request');
+      const why = await materialOk(String(body.materialId || ''), v); if (why) return fail(why, 'forbidden', 403);
+    }
+    const known: Record<string, string> = {};
+    // deno-lint-ignore no-explicit-any
+    ((v.inspection && v.inspection.fields) || []).forEach((f: any) => { known[f.name] = f.type; });
+    // deno-lint-ignore no-explicit-any
+    const data: Record<string, any> = {};
+    // deno-lint-ignore no-explicit-any
+    for (const [name, val] of Object.entries(body.data || {}) as [string, any][]) {
+      if (!known[name]) return fail('The Canva design has no data field called ' + name + '. Load the design again in Manage Templates.', 'bad_request');
+      if (known[name] === 'text') {
+        const t = String((val && val.text) || '');
+        if (t.length > 10000) return fail('Text for ' + name + ' is too long.', 'bad_request');
+        data[name] = {type: 'text', text: t};
+      } else if (known[name] === 'image') {
+        const p = String((val && val.path) || '');
+        if (!SAFE_PATH.test(p) || p.includes('..')) return fail('Image for ' + name + ' must be an approved image from the Content Bank.', 'bad_request');
+        const {data: file, error} = await db.storage.from('materials').download(p);
+        if (error || !file) return fail('The image for ' + name + ' could not be read.', 'bad_request');
+        const up = await canva('/asset-uploads', {method: 'POST', headers: {'Content-Type': 'application/octet-stream', 'Asset-Upload-Metadata': JSON.stringify({name_base64: btoa(('ABG ' + name).slice(0, 50))})}, body: new Uint8Array(await file.arrayBuffer())});
+        if (!up.ok) return canvaError(up, 'Uploading the image for ' + name);
+        let job = up.data.job;
+        for (let i = 0; i < 20 && job && job.status === 'in_progress'; i++) {
+          await sleep(750);
+          const r = await canva('/asset-uploads/' + encodeURIComponent(job.id));
+          if (!r.ok) return canvaError(r, 'Uploading the image for ' + name);
+          job = r.data.job;
+        }
+        if (!job || job.status !== 'success' || !job.asset) return fail('Canva could not process the image for ' + name + '.', 'canva_error', 502);
+        data[name] = {type: 'image', asset_id: job.asset.id};
+      } else return fail('The Canva field ' + name + ' is a ' + known[name] + ' field, which is not supported yet.', 'bad_request');
+    }
+    const title = String(body.title || 'ABG material').slice(0, 255) || 'ABG material';
+    const r = await canva('/autofills', {method: 'POST', body: JSON.stringify({type: 'create_from_design', design_id: v.canva_design_id, title, data})});
+    if (!r.ok) return canvaError(r, 'Filling the design');
+    return json({jobId: r.data.job.id, status: r.data.job.status});
+  }
+  if (action === 'job') {
+    const r = await canva('/autofills/' + encodeURIComponent(String(body.jobId || '')));
+    if (!r.ok) return canvaError(r, 'Checking the autofill');
+    const j = r.data.job || {};
+    if (j.status === 'failed') return json({status: 'failed', error: (j.error && j.error.message) || 'Canva could not fill the design.', code: j.error && j.error.code});
+    if (j.status !== 'success') return json({status: 'in_progress'});
+    const d = (j.result && j.result.design) || {};
+    return json({status: 'success', design: {id: d.id, title: d.title || '', editUrl: d.urls ? d.urls.edit_url : d.url, viewUrl: d.urls ? d.urls.view_url : null, thumbnail: d.thumbnail ? d.thumbnail.url : null, pages: d.page_count || null}});
+  }
+  if (action === 'export') {
+    const id = designIdFrom(body.designId);
+    if (!id) return fail('Missing design.', 'bad_request');
+    const r = await canva('/exports', {method: 'POST', body: JSON.stringify({design_id: id, format: {type: 'pdf'}})});
+    if (!r.ok) return canvaError(r, 'Exporting the design');
+    return json({jobId: r.data.job.id, status: r.data.job.status});
+  }
+  if (action === 'export_job') {
+    const r = await canva('/exports/' + encodeURIComponent(String(body.jobId || '')));
+    if (!r.ok) return canvaError(r, 'Checking the export');
+    const j = r.data.job || {};
+    if (j.status === 'failed') return json({status: 'failed', error: (j.error && j.error.message) || 'Canva could not export the design.'});
+    if (j.status !== 'success') return json({status: 'in_progress'});
+    /* a real material's PDF, or (Test Template, administrators only) a test PDF kept with the template version */
+    const materialId = String(body.materialId || ''), versionId = String(body.versionId || '');
+    let folder = '';
+    if (body.test) {
+      if (!isAdmin) return fail('Only administrators can test templates.', 'forbidden', 403);
+      const {data: v} = await db.from('mat_template_versions').select('id').eq('id', versionId).maybeSingle();
+      if (!v || !/^[0-9a-f-]{36}$/.test(versionId)) return fail('Template version not found.', 'bad_request');
+      folder = versionId;
+    } else {
+      if (!/^[0-9a-f-]{36}$/.test(materialId)) return fail('Missing material.', 'bad_request');
+      const {data: m} = await db.from('mat_materials').select('id, created_by, status').eq('id', materialId).maybeSingle();
+      if (!m || (!isAdmin && m.created_by !== me)) return fail('Not allowed to save files for this material.', 'forbidden', 403);
+      folder = materialId;
+    }
+    const urls: string[] = j.urls || [];
+    if (!urls.length) return fail('Canva returned no file.', 'canva_error', 502);
+    const res = await deps.fetch(urls[0]);
+    if (!res.ok) return fail('The exported file could not be downloaded from Canva.', 'canva_error', 502);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const path = 'generated/' + folder + '/' + (body.test ? 'test-' : 'canva-') + now() + '.pdf';
+    const up = await db.storage.from('materials').upload(path, bytes, {contentType: 'application/pdf', upsert: false});
+    if (up.error) return fail('The PDF could not be saved.', 'server_error', 500);
+    return json({status: 'success', path, size: bytes.length, pages: urls.length});
+  }
+  return fail('Unknown action', 'bad_request');
+}
+
+// deno-lint-ignore no-explicit-any
+async function tokenRequest(deps: Deps, params: Record<string, string>): Promise<any> {
+  const res = await deps.fetch(API + '/oauth/token', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded', Authorization: 'Basic ' + btoa(deps.env.clientId + ':' + deps.env.clientSecret)}, body: new URLSearchParams(params).toString()});
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || !data.access_token) { console.error('Canva token error', res.status, data && data.error); return null; }
+  return data;
+}
+// deno-lint-ignore no-explicit-any
+async function saveTokens(deps: Deps, tok: any, email: string, fresh: boolean, oldRefresh?: string){
+  const now = (deps.now || Date.now)();
+  const row = {id: 1, access_token: await seal(deps.env.tokenKey, tok.access_token), refresh_token: await seal(deps.env.tokenKey, tok.refresh_token), expires_at: new Date(now + (Number(tok.expires_in) || 3600) * 1000).toISOString(), scopes: tok.scope || null};
+  if (fresh) return deps.db.from('canva_connection').upsert(Object.assign(row, {connected_by: email, connected_at: new Date(now).toISOString()}));
+  /* refresh tokens work once: only replace the row if nobody else refreshed it first */
+  return deps.db.from('canva_connection').update(row).eq('id', 1).eq('refresh_token', oldRefresh);
+}
+async function accessToken(deps: Deps): Promise<string | null> {
+  const now = (deps.now || Date.now)();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const {data: c} = await deps.db.from('canva_connection').select('access_token, refresh_token, expires_at, connected_by').eq('id', 1).maybeSingle();
+    if (!c) return null;
+    if (new Date(c.expires_at).getTime() - 60000 > now) return open(deps.env.tokenKey, c.access_token);
+    const tok = await tokenRequest(deps, {grant_type: 'refresh_token', refresh_token: await open(deps.env.tokenKey, c.refresh_token)});
+    if (tok) { await saveTokens(deps, tok, c.connected_by, false, c.refresh_token); return tok.access_token; }
+    /* another request may have refreshed at the same moment: read again once */
+  }
+  return null;
+}

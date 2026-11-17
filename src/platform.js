@@ -328,3 +328,45 @@ export function makeCommunityAdmin(sb){
     async revokeInvite(id){ const {error} = await sb.from('community_invites').update({revoked_at: new Date().toISOString()}).eq('id', id); if (error) err(error); },
   };
 }
+
+/* Impact Materials: templates, generated materials, Content Bank and the Canva connection. Row-level security and the
+   triggers in supabase/materials.sql decide what each person may do; this is only the client side of it. */
+export function makeMaterials(sb, url, anonKey){
+  const err = e => { const m = (e && e.message) || ''; throw {message: /permission|row-level|policy/i.test(m) ? "You don't have permission to do that." : /relation .* does not exist|schema cache|Bucket not found/i.test(m) ? 'Impact Materials is not set up on the server yet.' : m && !/fetch|network/i.test(m) ? m : "That didn't work. Check your connection and try again.", code: e && e.code, missing: /relation .* does not exist|schema cache/i.test(m)}; };
+  const all = async (table, order, desc, limit) => { let q = sb.from(table).select('*'); if (order) q = q.order(order, {ascending: !desc}); if (limit) q = q.limit(limit); const {data, error} = await q; if (error) err(error); return data || []; };
+  const put = async (table, row) => { const {error} = await sb.from(table).upsert(row); if (error) err(error); return row; };
+  const patch = async (table, id, p) => { const {error} = await sb.from(table).update(p).eq('id', id); if (error) err(error); };
+  const del = async (table, id) => { const {error} = await sb.from(table).delete().eq('id', id); if (error) err(error); };
+  const upload = async (bucket, path, data, type) => { const {error} = await sb.storage.from(bucket).upload(path, data, {contentType: type, upsert: false}); if (error) err(error); return path; };
+  const download = async (bucket, path) => { const {data, error} = await sb.storage.from(bucket).download(path); if (error) err(error); return new Uint8Array(await data.arrayBuffer()); };
+  const signed = async (bucket, path, name) => { const {data, error} = await sb.storage.from(bucket).createSignedUrl(path, 600, name ? {download: name} : undefined); if (error) err(error); return data.signedUrl; };
+  return Object.freeze({
+    async load(){
+      const [audiences, types, families, versions] = await Promise.all([all('mat_audiences', 'sort'), all('mat_types', 'sort'), all('mat_template_families', 'created_at'), all('mat_template_versions', 'version_no')]);
+      return {audiences, types, families, versions};
+    },
+    materials: () => all('mat_materials', 'created_at', true, 1000),
+    activity: () => all('mat_activity', 'at', true, 60),
+    activityFor: async id => { const {data, error} = await sb.from('mat_activity').select('*').eq('material_id', id).order('at', {ascending: false}); if (error) err(error); return data || []; },
+    content: () => all('mat_content', 'created_at'),
+    save: put, update: patch, remove: del,
+    log: async (action, materialId, details) => { const {error} = await sb.from('mat_activity').insert({action, material_id: materialId || null, details: details || {}}); if (error) err(error); },
+    uploadTemplate: (path, data, type) => upload('templates', path, data, type),
+    templateFile: path => download('templates', path),
+    uploadMaterialFile: (path, data, type) => upload('materials', path, data, type),
+    materialFile: path => download('materials', path),
+    fileUrl: (bucket, path, name) => signed(bucket, path, name),
+    /* the canva Edge Function: every call is checked there against the caller's sign-in and role */
+    async canva(action, body){
+      const {data: s} = await sb.auth.getSession();
+      const token = s && s.session ? s.session.access_token : null;
+      if (!token) throw {message: 'Your sign-in expired. Sign in again.', code: 'session_expired'};
+      let res;
+      try { res = await fetch(url + '/functions/v1/canva', {method: 'POST', headers: {Authorization: 'Bearer ' + token, apikey: anonKey, 'Content-Type': 'application/json'}, body: JSON.stringify(Object.assign({action}, body || {}))}); }
+      catch (e) { throw {message: "Couldn't reach the server. Check your connection and try again."}; }
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw {message: (data && data.error) || (res.status === 404 ? 'The Canva connection is not set up on the server yet (the canva Edge Function is not deployed).' : "That didn't work. Try again."), code: (data && data.code) || (res.status === 404 ? 'not_deployed' : ''), status: res.status};
+      return data;
+    },
+  });
+}
